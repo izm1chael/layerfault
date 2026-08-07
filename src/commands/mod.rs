@@ -6,3 +6,4 @@ pub(crate) mod stores;
 pub(crate) mod trust;
 
 pub(crate) mod security;
+pub(crate) mod vnext;

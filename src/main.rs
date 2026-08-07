@@ -83,6 +83,14 @@ enum Command {
     Explain(ExplainArgs),
     /// Compare two local artifacts or two Ollama model identities.
     Diff(DiffArgs),
+    /// Compare two local model artifacts for vNext lineage and derivation evidence.
+    Compare(CompareArgs),
+    /// Run bounded local behavioral probes against a model.
+    Behaviour(BehaviourArgs),
+    /// Compare bounded behavioral probe outcomes for a base and derived model.
+    CompareBehaviour(CompareBehaviourArgs),
+    /// Produce a versioned multi-domain model security review.
+    Review(ReviewArgs),
     /// Run lightweight built-in parser/policy self-tests.
     Selftest(OutputArgs),
     /// Run the built-in adversarial certification suite.
@@ -631,6 +639,88 @@ struct DiffArgs {
 }
 
 #[derive(clap::Args, Debug)]
+struct CompareArgs {
+    base: PathBuf,
+    derived: PathBuf,
+    #[arg(long)]
+    claim: Option<String>,
+    #[arg(long)]
+    transformation_manifest: Option<PathBuf>,
+    #[arg(long, default_value_t = false)]
+    json: bool,
+}
+
+#[derive(clap::Args, Debug)]
+struct BehaviourArgs {
+    model: PathBuf,
+    #[arg(long, default_value = "llama-cpp")]
+    runtime: String,
+    #[arg(long, default_value = "standard")]
+    profile: String,
+    #[arg(long)]
+    probe_suite: Option<PathBuf>,
+    #[arg(long, default_value_t = 0)]
+    seed: u64,
+    #[arg(long)]
+    max_prompts: Option<usize>,
+    #[arg(long)]
+    max_turns: Option<usize>,
+    #[arg(long)]
+    max_tokens: Option<usize>,
+    #[arg(long)]
+    timeout_seconds: Option<u64>,
+    #[arg(long, default_value_t = false)]
+    json: bool,
+}
+
+#[derive(clap::Args, Debug)]
+struct CompareBehaviourArgs {
+    base: PathBuf,
+    derived: PathBuf,
+    #[arg(long, default_value = "llama-cpp")]
+    runtime: String,
+    #[arg(long, default_value = "standard")]
+    profile: String,
+    #[arg(long)]
+    probe_suite: Option<PathBuf>,
+    #[arg(long, default_value_t = 0)]
+    seed: u64,
+    #[arg(long)]
+    max_prompts: Option<usize>,
+    #[arg(long)]
+    max_turns: Option<usize>,
+    #[arg(long)]
+    max_tokens: Option<usize>,
+    #[arg(long)]
+    timeout_seconds: Option<u64>,
+    #[arg(long, default_value_t = false)]
+    json: bool,
+}
+
+#[derive(clap::Args, Debug)]
+struct ReviewArgs {
+    model: PathBuf,
+    #[arg(long)]
+    base: Option<PathBuf>,
+    #[arg(long)]
+    claim: Option<String>,
+    #[arg(long)]
+    transformation_manifest: Option<PathBuf>,
+    #[arg(long, default_value = "standard")]
+    profile: String,
+    #[arg(long, default_value = "llama-cpp")]
+    runtime: String,
+    #[arg(long)]
+    probe_suite: Option<PathBuf>,
+    #[arg(long)]
+    evidence_out: Option<PathBuf>,
+    #[arg(long)]
+    evidence_key: Option<PathBuf>,
+    #[arg(long, default_value_t = false)]
+    json: bool,
+}
+
+#[derive(clap::Args, Debug)]
 struct CertifyArgs {
     #[arg(long, default_value_t = false)]
     sparse: bool,
@@ -715,6 +805,10 @@ fn main() -> Result<()> {
         Some(Command::Sources(args)) => commands::operator::run_sources(args),
         Some(Command::Explain(args)) => commands::operator::run_explain(args),
         Some(Command::Diff(args)) => commands::operator::run_diff(args),
+        Some(Command::Compare(args)) => commands::vnext::run_compare(args),
+        Some(Command::Behaviour(args)) => commands::vnext::run_behaviour(args),
+        Some(Command::CompareBehaviour(args)) => commands::vnext::run_compare_behaviour(args),
+        Some(Command::Review(args)) => commands::vnext::run_review(args),
         Some(Command::Selftest(args)) => commands::operator::run_selftest(args),
         Some(Command::Certify(args)) => commands::operator::run_certify(args),
         Some(Command::Advisories(args)) => commands::security::run_advisories(args),
