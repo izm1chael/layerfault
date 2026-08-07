@@ -267,11 +267,22 @@ fn parse_reader<R: Read + Seek>(mut raw: R, file_len: u64) -> Result<GgufInvento
         if offset % alignment != 0 { bail!("tensor '{name}' offset {offset} is not aligned to {alignment}"); }
         let elements = dimensions.iter().try_fold(1_u64, |acc, v| acc.checked_mul(*v))
             .ok_or_else(|| anyhow!("tensor '{name}' dimension product overflows u64"))?;
-        let byte_len = tensor_layout(tensor_type).and_then(|(block_elements, block_bytes)| {
-            if dimensions.first().is_some_and(|v| *v % block_elements == 0) && elements % block_elements == 0 {
-                (elements / block_elements).checked_mul(block_bytes)
-            } else { None }
-        });
+        let byte_len = match tensor_layout(tensor_type) {
+            Some((block_elements, block_bytes)) => {
+                let first_dimension = dimensions[0];
+                if first_dimension % block_elements != 0 {
+                    bail!("tensor '{name}' first dimension {first_dimension} is not divisible by block size {block_elements} for type {tensor_type}");
+                }
+                if elements % block_elements != 0 {
+                    bail!("tensor '{name}' element count {elements} is not divisible by block size {block_elements} for type {tensor_type}");
+                }
+                let blocks = elements / block_elements;
+                let bytes = blocks.checked_mul(block_bytes)
+                    .ok_or_else(|| anyhow!("tensor '{name}' byte-size calculation overflows u64"))?;
+                Some(bytes)
+            }
+            None => None,
+        };
         tensors.push(GgufTensor { name, dimensions, tensor_type, offset, byte_len });
     }
 
@@ -444,5 +455,66 @@ mod tests {
     fn current_layouts_are_known() {
         assert_eq!(tensor_layout(39), Some((32, 17)));
         assert_eq!(tensor_layout(42), Some((64, 18)));
+    }
+
+    /// Builds a minimal single-tensor GGUF byte stream. The parser bails out while
+    /// reading the tensor descriptor for a known-but-invalid layout, so no tensor
+    /// data body is required for these fixtures.
+    fn single_tensor_gguf(name: &str, dimensions: &[u64], tensor_type: u32) -> Vec<u8> {
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(b"GGUF");
+        bytes.extend_from_slice(&3_u32.to_le_bytes());
+        bytes.extend_from_slice(&1_u64.to_le_bytes()); // tensor count
+        bytes.extend_from_slice(&0_u64.to_le_bytes()); // metadata count
+        bytes.extend_from_slice(&(name.len() as u64).to_le_bytes());
+        bytes.extend_from_slice(name.as_bytes());
+        bytes.extend_from_slice(&(dimensions.len() as u32).to_le_bytes());
+        for dimension in dimensions {
+            bytes.extend_from_slice(&dimension.to_le_bytes());
+        }
+        bytes.extend_from_slice(&tensor_type.to_le_bytes());
+        bytes.extend_from_slice(&0_u64.to_le_bytes()); // offset
+        bytes
+    }
+
+    /// Regression for corpus case 08-gguf-integer-overflow: a known tensor layout
+    /// (type 6, block size 32) whose first dimension is not divisible by the block
+    /// size must be a hard structural failure, not a silently downgraded warning.
+    #[test]
+    fn known_layout_indivisible_first_dimension_is_a_structural_failure() {
+        assert_eq!(tensor_layout(6), Some((32, 22)));
+        let bytes = single_tensor_gguf("overflow_tensor", &[4_611_686_018_427_387_905], 6);
+        let err = validate_gguf_bytes(&bytes).expect_err("indivisible first dimension must fail");
+        let message = err.to_string();
+        assert!(message.contains("overflow_tensor"), "{message}");
+        assert!(message.contains("first dimension 4611686018427387905"), "{message}");
+        assert!(message.contains("is not divisible by block size 32 for type 6"), "{message}");
+    }
+
+    /// Regression for corpus case 10-gguf-stride-overflow: a known tensor layout
+    /// whose element/byte-size arithmetic overflows u64 must be a hard structural
+    /// failure, not a silently downgraded warning.
+    #[test]
+    fn known_layout_byte_size_overflow_is_a_structural_failure() {
+        assert_eq!(tensor_layout(0), Some((1, 4)));
+        let bytes = single_tensor_gguf("exploit", &[4_611_686_018_427_387_904], 0);
+        let err = validate_gguf_bytes(&bytes).expect_err("byte-size overflow must fail");
+        let message = err.to_string();
+        assert!(message.contains("exploit"), "{message}");
+        assert!(message.contains("byte-size calculation overflows u64"), "{message}");
+    }
+
+    /// A genuinely unsupported tensor layout, with an offset/range that is still
+    /// safely bounded within the tensor-data section, must parse successfully (as a
+    /// bounded compatibility warning upstream) rather than hard-fail.
+    #[test]
+    fn unknown_layout_with_bounded_offset_is_not_a_structural_failure() {
+        assert_eq!(tensor_layout(1_000), None);
+        let mut bytes = single_tensor_gguf("unknown_layout", &[1], 1_000);
+        while !bytes.len().is_multiple_of(DEFAULT_ALIGNMENT as usize) {
+            bytes.push(0);
+        }
+        bytes.extend_from_slice(&[0_u8; 8]); // bounded, arbitrary tensor-data body
+        assert!(validate_gguf_bytes(&bytes).is_ok());
     }
 }
