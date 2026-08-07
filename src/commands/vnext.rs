@@ -1,7 +1,11 @@
-use crate::{BehaviourArgs, CompareArgs, CompareBehaviourArgs, ReviewArgs};
-use anyhow::{bail, Result};
+use crate::{
+    BehaviourArgs, CompareArgs, CompareBehaviourArgs, DriftArgs, LineageArgs, LineageCommand,
+    ModelsArgs, ModelsCommand, ReviewArgs,
+};
+use anyhow::{bail, Context, Result};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
+use std::fs;
 use std::io::Read;
 use std::path::Path;
 
@@ -35,6 +39,161 @@ fn not_run(reason: &str) -> Value {
             "The vNext behavioral and lineage implementation is not available in this build."
         ]
     })
+}
+
+fn observation_dir() -> Result<std::path::PathBuf> {
+    let path = crate::paths::config_dir()?.join("models");
+    crate::paths::ensure_private_dir(&path)?;
+    crate::paths::ensure_private_dir(&path.join("observations"))?;
+    Ok(path)
+}
+
+fn observation_id(identity: &Value) -> String {
+    format!(
+        "lfobs:{}",
+        identity["identity"].as_str().unwrap_or("sha256:unknown")
+    )
+}
+
+fn read_index(path: &Path) -> Result<Vec<Value>> {
+    if !path.exists() {
+        return Ok(Vec::new());
+    }
+    let bytes = fs::read(path).with_context(|| format!("unable to read {}", path.display()))?;
+    let value: Value = serde_json::from_slice(&bytes).context("invalid model observation index")?;
+    Ok(value
+        .get("observations")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default())
+}
+
+pub(crate) fn run_models(args: ModelsArgs) -> Result<()> {
+    let root = observation_dir()?;
+    let index_path = root.join("index.json");
+    let mut observations = read_index(&index_path)?;
+    match args.command {
+        ModelsCommand::Remember {
+            model,
+            name,
+            publisher,
+            revision,
+            trust_label,
+            json: emit_json,
+        } => {
+            let identity = file_identity(&model)?;
+            let id = observation_id(&identity);
+            let observation = json!({
+                "id": id,
+                "identity": identity,
+                "name": name,
+                "publisher": publisher,
+                "revision": revision,
+                "trust_label": trust_label,
+                "observed_at": crate::paths::now_unix(),
+                "build": env!("CARGO_PKG_VERSION")
+            });
+            observations.retain(|item| item["id"] != observation["id"]);
+            let observation_path = root.join("observations").join(format!(
+                "{}.json",
+                hex::encode(Sha256::digest(observation.to_string().as_bytes()))
+            ));
+            crate::paths::write_private(
+                &observation_path,
+                &serde_json::to_vec_pretty(&observation)?,
+            )?;
+            crate::paths::write_private(
+                &index_path,
+                &serde_json::to_vec_pretty(
+                    &json!({"version": 1, "observations": observations.iter().chain(std::iter::once(&observation)).collect::<Vec<_>>() }),
+                )?,
+            )?;
+            if emit_json {
+                println!("{}", serde_json::to_string_pretty(&observation)?);
+            } else {
+                println!(
+                    "Remembered {}",
+                    observation["id"].as_str().unwrap_or("unknown")
+                );
+            }
+        }
+        ModelsCommand::List { json: emit_json } => {
+            let value = json!({"version": 1, "observations": observations});
+            if emit_json {
+                println!("{}", serde_json::to_string_pretty(&value)?);
+            } else {
+                for item in value["observations"].as_array().into_iter().flatten() {
+                    println!("{}", item["id"].as_str().unwrap_or("unknown"));
+                }
+            }
+        }
+        ModelsCommand::Show { id, json: _ } | ModelsCommand::History { id, json: _ } => {
+            let item = observations
+                .into_iter()
+                .find(|item| item["id"] == id)
+                .unwrap_or_else(|| json!({"id": id, "state": "UNKNOWN"}));
+            println!("{}", serde_json::to_string_pretty(&item)?);
+        }
+        ModelsCommand::Forget {
+            id,
+            json: emit_json,
+        } => {
+            let kept: Vec<Value> = observations
+                .into_iter()
+                .filter(|item| item["id"] != id)
+                .collect();
+            crate::paths::write_private(
+                &index_path,
+                &serde_json::to_vec_pretty(&json!({"version": 1, "observations": kept}))?,
+            )?;
+            if emit_json {
+                println!("{}", json!({"forgotten": id}));
+            } else {
+                println!("Forgot {}", id);
+            }
+        }
+    }
+    Ok(())
+}
+
+pub(crate) fn run_drift(args: DriftArgs) -> Result<()> {
+    let identity = file_identity(&args.model)?;
+    let result = json!({
+        "schema_version": "1.0",
+        "model": identity,
+        "against": args.against,
+        "previous": args.previous,
+        "state": "UNKNOWN",
+        "changes": [],
+        "limitations": ["No matching prior observation was selected."]
+    });
+    if args.json {
+        println!("{}", serde_json::to_string_pretty(&result)?);
+    } else {
+        println!("DRIFT\nUNKNOWN\n\nNo matching prior observation was selected.");
+    }
+    Ok(())
+}
+
+pub(crate) fn run_lineage(args: LineageArgs) -> Result<()> {
+    match args.command {
+        LineageCommand::VerifyChain {
+            chain,
+            json: emit_json,
+        } => {
+            let bytes =
+                fs::read(&chain).with_context(|| format!("unable to read {}", chain.display()))?;
+            let parsed: Value =
+                serde_json::from_slice(&bytes).context("invalid transformation chain JSON")?;
+            let result = json!({"schema_version": "1.0", "chain": parsed, "state": "UNVERIFIED", "reason": "Chain signatures require explicit trusted signer verification."});
+            if emit_json {
+                println!("{}", serde_json::to_string_pretty(&result)?);
+            } else {
+                println!("LINEAGE CHAIN\nUNVERIFIED");
+            }
+        }
+    }
+    Ok(())
 }
 
 pub(crate) fn run_compare(args: CompareArgs) -> Result<()> {
