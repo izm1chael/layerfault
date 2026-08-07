@@ -79,3 +79,22 @@ pub fn now_unix() -> u64 {
         .map(|value| value.as_secs())
         .unwrap_or(0)
 }
+
+/// Read a secret from `NAME` or, preferably for container deployments,
+/// `NAME_FILE`. Secret files are opened without following symlinks and are
+/// capped to avoid accidentally reading arbitrary large host files.
+pub fn secret_from_env(name: &str) -> Result<Option<String>> {
+    let file_name = format!("{name}_FILE");
+    if let Ok(path) = std::env::var(&file_name) {
+        if !path.trim().is_empty() {
+            let file = crate::safeio::open_readonly_nofollow(Path::new(path.trim()))
+                .with_context(|| format!("Unable to open secret file from {file_name}"))?;
+            let bytes = crate::safeio::read_all_from_file(&file, 1024 * 1024)?;
+            let value = String::from_utf8(bytes).context("secret file is not valid UTF-8")?;
+            let value = value.trim_end_matches(['\r', '\n']).to_owned();
+            if value.is_empty() { return Ok(None); }
+            return Ok(Some(value));
+        }
+    }
+    Ok(std::env::var(name).ok().filter(|value| !value.trim().is_empty()))
+}

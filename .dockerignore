@@ -1,0 +1,6 @@
+target
+.git
+.review_screenshot
+.layerfault-*
+secrets
+*.zip

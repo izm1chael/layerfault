@@ -7,3 +7,5 @@ pub(crate) mod trust;
 
 pub(crate) mod security;
 pub(crate) mod vnext;
+
+pub(crate) mod total;
