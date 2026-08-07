@@ -12,7 +12,7 @@ repository = "https://github.com/izm1chael/layerfault"
 clap       = { version = "4.5",  features = ["derive"] }
 serde      = { version = "1.0",  features = ["derive"] }
 serde_json = "1.0"
-sha2       = "0.10"
+sha2       = "0.11"
 hex        = "0.4"
 digest     = "0.10"
 regex      = "1.10"
@@ -38,7 +38,7 @@ csv = "1.3"
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
 
 [build-dependencies]
-sha2 = "0.10"
+sha2 = "0.11"
 
 # Vendored fork of candelabra 0.2.0 that disables its default native-tls/openssl-sys
 # pulls (via hf-hub's "default-tls" feature and reqwest's default-tls feature) in favor
