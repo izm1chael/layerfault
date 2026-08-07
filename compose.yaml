@@ -1,0 +1,66 @@
+services:
+  postgres:
+    image: postgres:17
+    environment:
+      POSTGRES_DB: layerfault
+      POSTGRES_USER: layerfault
+      POSTGRES_PASSWORD_FILE: /run/secrets/db_password
+    secrets: [db_password]
+    volumes: [layerfault_db:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U layerfault -d layerfault"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  web:
+    build: .
+    command: ["platform", "serve", "--database", "postgres://layerfault@postgres/layerfault", "--listen", "0.0.0.0:8787"]
+    environment:
+      LAYERFAULT_DB_PASSWORD_FILE: /run/secrets/db_password
+      LAYERFAULT_ADMIN_TOKEN_FILE: /run/secrets/admin_token
+      LAYERFAULT_HF_WEBHOOK_SECRET_FILE: /run/secrets/webhook_secret
+    depends_on:
+      postgres: { condition: service_healthy }
+    ports: ["8787:8787"]
+    read_only: true
+    tmpfs: [/tmp]
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: [ALL]
+    secrets: [db_password, admin_token, webhook_secret]
+
+  worker:
+    build: .
+    command: ["platform", "worker", "--database", "postgres://layerfault@postgres/layerfault"]
+    environment:
+      LAYERFAULT_DB_PASSWORD_FILE: /run/secrets/db_password
+      HF_TOKEN_FILE: /run/secrets/hf_token
+    depends_on:
+      postgres: { condition: service_healthy }
+    read_only: true
+    tmpfs: [/tmp]
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: [ALL]
+    secrets: [db_password, hf_token]
+
+  crawler:
+    build: .
+    command: ["platform", "crawl", "--database", "postgres://layerfault@postgres/layerfault", "--limit", "100"]
+    environment:
+      LAYERFAULT_DB_PASSWORD_FILE: /run/secrets/db_password
+      HF_TOKEN_FILE: /run/secrets/hf_token
+    depends_on:
+      postgres: { condition: service_healthy }
+    read_only: true
+    tmpfs: [/tmp]
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: [ALL]
+    secrets: [db_password, hf_token]
+
+secrets:
+  db_password: { file: ./secrets/db_password }
+  admin_token: { file: ./secrets/admin_token }
+  webhook_secret: { file: ./secrets/webhook_secret }
+  hf_token: { file: ./secrets/hf_token }
+volumes:
+  layerfault_db:

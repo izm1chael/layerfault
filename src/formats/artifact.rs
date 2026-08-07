@@ -1,4 +1,4 @@
-use super::{safetensors, ArtifactFormat};
+use super::{keras, onnx, safetensors, tensorflow, tflite, ArtifactFormat};
 use crate::safeio::open_readonly_nofollow;
 use crate::scanner::{
     BinaryScanner, Confidence, FindingClass, LayerScanResult, MetadataScanner, ScanStatus,
@@ -81,6 +81,12 @@ fn inspect_opened(
         ArtifactFormat::Gguf => "application/x-gguf",
         ArtifactFormat::Safetensors => "application/x-safetensors",
         ArtifactFormat::SafetensorsIndex => "application/x-safetensors-index+json",
+        ArtifactFormat::Onnx => "application/x-onnx",
+        ArtifactFormat::TensorFlowSavedModel => "application/x-tensorflow-savedmodel",
+        ArtifactFormat::TensorFlowCheckpoint => "application/x-tensorflow-checkpoint",
+        ArtifactFormat::TensorFlowLite => "application/x-tflite",
+        ArtifactFormat::KerasArchive => "application/x-keras",
+        ArtifactFormat::KerasHdf5 => "application/x-hdf5",
         ArtifactFormat::Unknown => "application/octet-stream",
     };
     let mut results = Vec::new();
@@ -100,10 +106,19 @@ fn inspect_opened(
             }
         }
         ArtifactFormat::SafetensorsIndex => {
-            results.push(safetensors::scan_index(
-                path, &file, size, &identity, media,
-            )?);
+            results.push(safetensors::scan_index(path, &file, size, &identity, media)?);
         }
+        ArtifactFormat::Onnx => results.push(onnx::scan(&file, size, &identity, media)?),
+        ArtifactFormat::TensorFlowSavedModel => results.push(tensorflow::scan_saved_model(&file, size, &identity, media)?),
+        ArtifactFormat::TensorFlowCheckpoint => results.push(tensorflow::scan_checkpoint(path, &file, size, &identity, media)?),
+        ArtifactFormat::TensorFlowLite => results.push(tflite::scan(&file, size, &identity, media)?),
+        ArtifactFormat::KerasArchive => results.push(keras::scan(&file, size, &identity, media)?),
+        ArtifactFormat::KerasHdf5 => results.push(LayerScanResult {
+            layer_digest: identity.clone(), media_type: media.to_owned(), check_type: crate::scanner::CheckType::KerasStructure,
+            status: ScanStatus::Warn, finding_class: FindingClass::Compatibility, confidence: Confidence::High,
+            detail: Some("Keras/TensorFlow HDF5 container recognized. This build hashes and package-scans the file but does not execute or fully decode arbitrary HDF5 object graphs.".to_owned()),
+            matches: vec!["[LF-KERAS-HDF5-LIMIT] HDF5 model recognized with explicit bounded capability limit".to_owned()], duration_ms: 0,
+        }),
         ArtifactFormat::Unknown => {
             results.push(LayerScanResult {
                 layer_digest: identity.clone(),
@@ -166,7 +181,7 @@ fn known_extension(path: &Path) -> bool {
     path.extension()
         .and_then(|value| value.to_str())
         .is_some_and(|ext| {
-            ext.eq_ignore_ascii_case("gguf") || ext.eq_ignore_ascii_case("safetensors")
+            matches!(ext.to_ascii_lowercase().as_str(), "gguf" | "safetensors" | "onnx" | "tflite" | "keras" | "h5" | "hdf5" | "index" | "pb")
         })
         || path
             .file_name()

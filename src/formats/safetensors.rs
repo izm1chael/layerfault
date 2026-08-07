@@ -10,9 +10,9 @@ use std::io::{Read, Seek, SeekFrom};
 use std::path::{Component, Path};
 use std::time::Instant;
 
-const MAX_HEADER_BYTES: u64 = 100 * 1024 * 1024;
-const MAX_TENSORS: usize = 1_000_000;
-const MAX_DIMENSIONS: usize = 32;
+pub const MAX_HEADER_BYTES: u64 = 100 * 1024 * 1024;
+pub const MAX_TENSORS: usize = 1_000_000;
+pub const MAX_DIMENSIONS: usize = 32;
 
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct SafetensorsSummary {
@@ -21,6 +21,23 @@ pub struct SafetensorsSummary {
     pub header_bytes: u64,
     pub metadata_entries: usize,
     pub unknown_dtypes: Vec<String>,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct SafetensorsTensor {
+    pub name: String,
+    pub dtype: String,
+    pub shape: Vec<u64>,
+    pub start: u64,
+    pub end: u64,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct SafetensorsInventory {
+    pub summary: SafetensorsSummary,
+    pub data_start: u64,
+    pub metadata: BTreeMap<String, String>,
+    pub tensors: Vec<SafetensorsTensor>,
 }
 
 #[derive(Debug, Clone)]
@@ -272,7 +289,17 @@ pub fn validate_index(path: &Path, file: &File, file_len: u64) -> Result<(usize,
     Ok((map.len(), shards.len()))
 }
 
+pub fn inventory_path(path: &Path) -> Result<SafetensorsInventory> {
+    let file = crate::safeio::open_readonly_nofollow(path)?;
+    let file_len = file.metadata()?.len();
+    inventory_file(&file, file_len)
+}
+
 pub fn validate_file(file: &File, file_len: u64) -> Result<SafetensorsSummary> {
+    Ok(inventory_file(file, file_len)?.summary)
+}
+
+pub fn inventory_file(file: &File, file_len: u64) -> Result<SafetensorsInventory> {
     if file_len < 10 {
         bail!("file is too small to contain a Safetensors header");
     }
@@ -306,20 +333,27 @@ pub fn validate_file(file: &File, file_len: u64) -> Result<SafetensorsSummary> {
         .context("trailing non-whitespace data in Safetensors header")?;
 
     let data_bytes = file_len - data_start;
-    let mut tensors = Vec::new();
-    let mut metadata_entries = 0_usize;
+    let mut tensors = Vec::<SafetensorsTensor>::new();
+    let mut metadata = BTreeMap::<String, String>::new();
     let mut unknown_dtypes = BTreeSet::new();
     for (name, value) in entries {
         if name == "__metadata__" {
             let object = value
                 .as_object()
                 .ok_or_else(|| anyhow!("__metadata__ must be an object"))?;
+            if object.len() > 100_000 {
+                bail!("__metadata__ contains too many entries");
+            }
             for (key, value) in object {
-                if key.len() > 4096 || !value.is_string() {
+                if key.is_empty() || key.len() > 4096 || !value.is_string() {
                     bail!("__metadata__ values must be bounded strings");
                 }
+                let value = value.as_str().unwrap_or_default();
+                if value.len() > 64 * 1024 {
+                    bail!("__metadata__ string value is too large");
+                }
+                metadata.insert(key.clone(), value.to_owned());
             }
-            metadata_entries = object.len();
             continue;
         }
         let spec = parse_tensor(&name, &value)?;
@@ -338,20 +372,26 @@ pub fn validate_file(file: &File, file_len: u64) -> Result<SafetensorsSummary> {
         } else {
             unknown_dtypes.insert(spec.dtype.clone());
         }
-        tensors.push((name, spec));
+        tensors.push(SafetensorsTensor {
+            name,
+            dtype: spec.dtype,
+            shape: spec.shape,
+            start: spec.start,
+            end: spec.end,
+        });
     }
     if tensors.len() > MAX_TENSORS {
         bail!("tensor count exceeds safety limit {MAX_TENSORS}");
     }
 
-    tensors.sort_by_key(|(_, spec)| (spec.start, spec.end));
+    tensors.sort_by_key(|spec| (spec.start, spec.end, spec.name.clone()));
     let mut cursor = 0_u64;
-    for (name, spec) in &tensors {
+    for spec in &tensors {
         if spec.start == spec.end {
             continue;
         }
         if spec.start < cursor {
-            bail!("tensor '{name}' overlaps a prior tensor range");
+            bail!("tensor '{}' overlaps a prior tensor range", spec.name);
         }
         if spec.start != cursor {
             bail!(
@@ -367,13 +407,33 @@ pub fn validate_file(file: &File, file_len: u64) -> Result<SafetensorsSummary> {
         );
     }
 
-    Ok(SafetensorsSummary {
+    tensors.sort_by(|a, b| a.name.cmp(&b.name));
+    let summary = SafetensorsSummary {
         tensor_count: tensors.len(),
         data_bytes,
         header_bytes: header_len,
-        metadata_entries,
+        metadata_entries: metadata.len(),
         unknown_dtypes: unknown_dtypes.into_iter().collect(),
+    };
+    Ok(SafetensorsInventory {
+        summary,
+        data_start,
+        metadata,
+        tensors,
     })
+}
+
+pub fn read_tensor_bytes(file: &File, inventory: &SafetensorsInventory, tensor: &SafetensorsTensor, max_bytes: u64) -> Result<Vec<u8>> {
+    let len = tensor.end.checked_sub(tensor.start).ok_or_else(|| anyhow!("invalid tensor range"))?;
+    if len > max_bytes {
+        bail!("tensor '{}' is {len} bytes, above read cap {max_bytes}", tensor.name);
+    }
+    let absolute = inventory.data_start.checked_add(tensor.start).ok_or_else(|| anyhow!("tensor offset overflow"))?;
+    let mut reader = file.try_clone()?;
+    reader.seek(SeekFrom::Start(absolute))?;
+    let mut bytes = vec![0_u8; usize::try_from(len).context("tensor byte length does not fit usize")?];
+    reader.read_exact(&mut bytes)?;
+    Ok(bytes)
 }
 
 fn parse_tensor(name: &str, value: &Value) -> Result<TensorSpec> {

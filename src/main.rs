@@ -14,7 +14,7 @@ use layerfault::sources::SourceKind;
 use layerfault::trust::TrustStore;
 use layerfault::{
     advisory, audit, baseline, binding, certify, doctor, evidence, explain, gc, inventory,
-    manifest, modeldiff, package, paths, policy, provenance, quarantine, report, safeio, sigstore,
+    manifest, modeldiff, package, policy, provenance, quarantine, report, safeio, sigstore,
     sources, ThresholdConfig,
 };
 use std::collections::BTreeMap;
@@ -97,6 +97,14 @@ enum Command {
     Drift(DriftArgs),
     /// Verify a signed local transformation chain.
     Lineage(LineageArgs),
+    /// Inspect, fingerprint, compare and review local training datasets.
+    Dataset(DatasetArgs),
+    /// Run bounded backdoor/trigger/campaign research workflows.
+    Research(ResearchArgs),
+    /// Explicitly access Hugging Face Hub metadata/download/crawl workflows.
+    Hub(HubArgs),
+    /// Run the hosted/public Layerfault platform roles.
+    Platform(PlatformArgs),
     /// Run lightweight built-in parser/policy self-tests.
     Selftest(OutputArgs),
     /// Run the built-in adversarial certification suite.
@@ -611,6 +619,95 @@ enum PolicyCommand {
     },
 }
 
+
+#[derive(clap::Args, Debug)]
+struct DatasetArgs {
+    #[command(subcommand)]
+    command: DatasetCommand,
+}
+
+#[derive(Subcommand, Debug)]
+enum DatasetCommand {
+    Inspect { dataset: PathBuf, #[arg(long, default_value_t=false)] json: bool },
+    Fingerprint { dataset: PathBuf, #[arg(long, default_value_t=false)] json: bool },
+    Compare { left: PathBuf, right: PathBuf, #[arg(long, default_value_t=false)] json: bool },
+    PoisoningReview { dataset: PathBuf, #[arg(long, default_value_t=false)] json: bool },
+}
+
+#[derive(clap::Args, Debug)]
+struct ResearchArgs {
+    #[command(subcommand)]
+    command: ResearchCommand,
+}
+
+#[derive(Subcommand, Debug)]
+enum ResearchCommand {
+    TriggerSearch {
+        model: PathBuf,
+        #[arg(long)] base: Option<PathBuf>,
+        #[arg(long, default_value="llama-cpp")] runtime: String,
+        #[arg(long)] runtime_path: Option<PathBuf>,
+        #[arg(long)] tokenizer: Option<PathBuf>,
+        #[arg(long="alphabet", required=true)] alphabet: Vec<String>,
+        #[arg(long, default_value_t=1)] min_length: usize,
+        #[arg(long, default_value_t=3)] max_length: usize,
+        #[arg(long, default_value_t=10_000)] max_candidates: u64,
+        #[arg(long, default_value="")] prefix: String,
+        #[arg(long, default_value="")] suffix: String,
+        #[arg(long, default_value_t=0)] seed: u64,
+        #[arg(long, default_value_t=120)] timeout_seconds: u64,
+        #[arg(long, default_value_t=false)] json: bool,
+    },
+    Backdoor {
+        model: PathBuf,
+        #[arg(long)] base: Option<PathBuf>,
+        #[arg(long, default_value="llama-cpp")] runtime: String,
+        #[arg(long)] runtime_path: Option<PathBuf>,
+        #[arg(long)] tokenizer: Option<PathBuf>,
+        #[arg(long, default_value_t=0)] seed: u64,
+        #[arg(long, default_value_t=false)] json: bool,
+    },
+    ActivationDiff {
+        base: PathBuf,
+        derived: PathBuf,
+        #[arg(long)] tokenizer: PathBuf,
+        #[arg(long, default_value_t=false)] json: bool,
+    },
+    Campaign { #[arg(long, default_value_t=false)] json: bool },
+}
+
+#[derive(clap::Args, Debug)]
+struct HubArgs { #[command(subcommand)] command: HubCommand }
+
+#[derive(Subcommand, Debug)]
+enum HubCommand {
+    Model { repo: String, #[arg(long)] revision: Option<String>, #[arg(long, default_value_t=false)] json: bool },
+    Files { repo: String, #[arg(long)] revision: Option<String>, #[arg(long, default_value_t=false)] json: bool },
+    Download { repo: String, #[arg(long)] revision: String, #[arg(long)] file: String, #[arg(long)] staging: PathBuf, #[arg(long)] max_bytes: Option<u64>, #[arg(long, default_value_t=false)] json: bool },
+    Review { repo: String, #[arg(long)] revision: String, #[arg(long)] staging: Option<PathBuf>, #[arg(long, default_value_t=false)] json: bool },
+    Crawl { #[arg(long, default_value_t=100)] limit: usize, #[arg(long)] cursor: Option<String>, #[arg(long, default_value_t=false)] json: bool },
+}
+
+#[derive(clap::Args, Debug)]
+struct PlatformArgs { #[command(subcommand)] command: PlatformCommand }
+
+#[derive(Subcommand, Debug)]
+enum PlatformCommand {
+    Migrate { #[arg(long)] database: String },
+    Doctor { #[arg(long)] database: String, #[arg(long, default_value_t=false)] json: bool },
+    Serve { #[arg(long)] database: String, #[arg(long, default_value="127.0.0.1:8787")] listen: String },
+    Worker { #[arg(long)] database: String, #[arg(long, default_value_t=false)] once: bool },
+    Crawl { #[arg(long)] database: String, #[arg(long, default_value_t=100)] limit: usize, #[arg(long)] cursor: Option<String>, #[arg(long, default_value_t=false)] continuous: bool, #[arg(long, default_value_t=300)] interval_seconds: u64, #[arg(long, default_value_t=false)] json: bool },
+    PublishWeekly { #[arg(long)] database: String, #[arg(long, default_value_t=false)] json: bool },
+    Newsletter { #[command(subcommand)] command: NewsletterCommand },
+}
+
+#[derive(Subcommand, Debug)]
+enum NewsletterCommand {
+    Generate { #[arg(long)] database: String, #[arg(long)] public_base: Option<String>, #[arg(long, default_value="markdown")] format: String, #[arg(long)] output: Option<PathBuf> },
+    Send { #[arg(long)] database: String, #[arg(long)] public_base: Option<String>, #[arg(long)] to: String, #[arg(long)] from: String, #[arg(long)] smtp_host: String, #[arg(long, default_value="LAYERFAULT_SMTP_USERNAME")] username_env: String, #[arg(long, default_value="LAYERFAULT_SMTP_PASSWORD")] password_env: String, #[arg(long, default_value_t=false)] dry_run: bool },
+}
+
 #[derive(clap::Args, Debug)]
 struct GcArgs {
     #[arg(long)]
@@ -652,6 +749,9 @@ struct CompareArgs {
     claim: Option<String>,
     #[arg(long)]
     transformation_manifest: Option<PathBuf>,
+    /// LoRA adapter directory used to verify a claimed base + adapter -> merged model relationship.
+    #[arg(long)]
+    adapter: Option<PathBuf>,
     #[arg(long, default_value_t = false)]
     json: bool,
     #[arg(long, default_value_t = false)]
@@ -667,6 +767,12 @@ struct BehaviourArgs {
     model: PathBuf,
     #[arg(long, default_value = "llama-cpp")]
     runtime: String,
+    /// Absolute/local external runtime path when using llama-cpp.
+    #[arg(long)]
+    runtime_path: Option<PathBuf>,
+    /// Local tokenizer.json required by the embedded backend.
+    #[arg(long)]
+    tokenizer: Option<PathBuf>,
     #[arg(long, default_value = "standard")]
     profile: String,
     #[arg(long)]
@@ -701,6 +807,10 @@ struct CompareBehaviourArgs {
     derived: PathBuf,
     #[arg(long, default_value = "llama-cpp")]
     runtime: String,
+    #[arg(long)]
+    runtime_path: Option<PathBuf>,
+    #[arg(long)]
+    tokenizer: Option<PathBuf>,
     #[arg(long, default_value = "standard")]
     profile: String,
     #[arg(long)]
@@ -728,10 +838,17 @@ struct ReviewArgs {
     claim: Option<String>,
     #[arg(long)]
     transformation_manifest: Option<PathBuf>,
+    /// LoRA adapter directory used for numerical merge verification when --claim lora-merge.
+    #[arg(long)]
+    adapter: Option<PathBuf>,
     #[arg(long, default_value = "standard")]
     profile: String,
     #[arg(long, default_value = "llama-cpp")]
     runtime: String,
+    #[arg(long)]
+    runtime_path: Option<PathBuf>,
+    #[arg(long)]
+    tokenizer: Option<PathBuf>,
     #[arg(long)]
     probe_suite: Option<PathBuf>,
     #[arg(long)]
@@ -748,6 +865,18 @@ struct ReviewArgs {
     quantizer: Option<PathBuf>,
     #[arg(long)]
     quantization: Option<String>,
+    /// Optional advisory judge: disabled, local, openai-compatible.
+    #[arg(long, default_value = "disabled")]
+    judge: String,
+    /// Required explicit opt-in before any cloud judge request.
+    #[arg(long, default_value_t = false)]
+    allow_cloud_judge: bool,
+    #[arg(long)]
+    judge_endpoint: Option<String>,
+    #[arg(long)]
+    judge_model: Option<String>,
+    #[arg(long, default_value = "LAYERFAULT_JUDGE_API_KEY")]
+    judge_api_key_env: String,
     #[arg(long, default_value_t = false)]
     json: bool,
 }
@@ -912,6 +1041,10 @@ fn main() -> Result<()> {
         Some(Command::Models(args)) => commands::vnext::run_models(args),
         Some(Command::Drift(args)) => commands::vnext::run_drift(args),
         Some(Command::Lineage(args)) => commands::vnext::run_lineage(args),
+        Some(Command::Dataset(args)) => commands::total::run_dataset(args),
+        Some(Command::Research(args)) => commands::total::run_research(args),
+        Some(Command::Hub(args)) => commands::total::run_hub(args),
+        Some(Command::Platform(args)) => commands::total::run_platform(args),
         Some(Command::Selftest(args)) => commands::operator::run_selftest(args),
         Some(Command::Certify(args)) => commands::operator::run_certify(args),
         Some(Command::Advisories(args)) => commands::security::run_advisories(args),
