@@ -164,17 +164,45 @@ layerfault evidence verify evidence.json
 
 Evidence records bind the artifact/package identity, Layerfault build ID, detector contract, policy hash, trust-store hash, runtime advisory result, execution-binding guarantee, findings and final decision.
 
-## Quick start
+## Install Layerfault
+
+### Release binaries
+
+For normal use, prefer the official binaries attached to the [GitHub Release](https://github.com/izm1chael/layerfault/releases). Each release provides:
+
+- Linux x86_64: `layerfault-linux-x86_64`
+- Linux x86_64 static/musl: `layerfault-linux-x86_64-musl`
+- Linux aarch64: `layerfault-linux-aarch64`
+- Windows x86_64: `layerfault-windows-x86_64.exe`
+- macOS universal: `layerfault-macos-universal`
+
+Release artifacts are accompanied by SHA-256 checksums, a CycloneDX SBOM, and GitHub build provenance attestations. After placing the binary on your `PATH`, verify the installation:
+
+```bash
+layerfault --version
+layerfault selftest
+```
 
 ### Build from source
 
-Layerfault is written in Rust.
+Source builds require [rustup](https://rustup.rs/). On Ubuntu or Debian, use the official rustup installation method rather than installing `cargo` or `rustc` from `apt`; the distribution toolchain may be too old for the committed lockfile.
 
 ```bash
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+# Start a new shell after rustup updates your PATH.
 git clone https://github.com/izm1chael/layerfault.git
 cd layerfault
+rustc --version
+cargo --version
 cargo build --release --locked
+./target/release/layerfault selftest
 ```
+
+The repository's `rust-toolchain.toml` automatically selects the Layerfault-tested Rust toolchain when using rustup. Normal operation should use an unprivileged account; `sudo` is normally only needed for a system-wide installation such as copying the binary into `/usr/local/bin`.
+
+If Cargo reports that `Cargo.lock` uses an unsupported lockfile version, your Rust/Cargo installation is too old. Upgrade/install the rustup-managed toolchain. Do not delete `Cargo.lock`.
+
+### Quick start
 
 Before publishing or cutting a release, run the consolidated local gate:
 

@@ -2,6 +2,7 @@
 name = "layerfault"
 version = "1.0.0-rc.1"
 edition = "2021"
+rust-version = "1.88"
 authors = ["izm1chael"]
 description = "Offline-first local AI model admission, provenance, package, and runtime security scanner"
 license = "MIT"
