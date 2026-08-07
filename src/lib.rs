@@ -18,6 +18,7 @@ pub mod gc;
 pub mod inventory;
 pub mod manifest;
 pub mod modeldiff;
+pub mod modelmeta;
 pub mod package;
 pub mod paths;
 pub mod policy;
@@ -28,6 +29,7 @@ pub mod safeio;
 pub mod scanner;
 pub mod sigstore;
 pub mod sources;
+pub mod transformation;
 pub mod trust;
 
 #[derive(Debug, Clone)]
