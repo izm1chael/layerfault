@@ -114,6 +114,8 @@ pub fn inspect(root: &Path) -> Result<PackageReport> {
         }
     }
 
+    correlate_custom_code(&root, &files, &mut findings)?;
+
     let fingerprint = package_fingerprint(&files);
     findings.sort_by(|a, b| {
         a.matches
@@ -299,6 +301,7 @@ fn scan_json(rel: &str, digest: &str, text: &str, out: &mut Vec<LayerScanResult>
 
 fn scan_text(rel: &str, digest: &str, text: &str, out: &mut Vec<LayerScanResult>) {
     let lower = text.to_ascii_lowercase();
+    let documentation = is_documentation_path(rel);
     let dangerous = [
         ("os.system(", "LF-CODE-OS-SYSTEM"),
         ("subprocess.popen", "LF-CODE-SUBPROCESS"),
@@ -312,7 +315,7 @@ fn scan_text(rel: &str, digest: &str, text: &str, out: &mut Vec<LayerScanResult>
         ("urllib.request", "LF-CODE-NETWORK"),
     ];
     for (needle, rule) in dangerous {
-        if lower.contains(needle) {
+        if !documentation && lower.contains(needle) {
             out.push(finding(digest, CheckType::PackageSecurity, ScanStatus::Warn, FindingClass::ContentIndicator, Confidence::High, rule, format!("Custom code/config '{}' contains security-relevant primitive '{}'; review is required before enabling custom code", rel, needle)));
         }
     }
@@ -329,6 +332,169 @@ fn scan_text(rel: &str, digest: &str, text: &str, out: &mut Vec<LayerScanResult>
     {
         out.push(finding(digest, CheckType::PackageSecurity, ScanStatus::Warn, FindingClass::ContentIndicator, Confidence::High, "LF-TEMPLATE-INTROSPECTION", format!("Template/config '{}' contains Python/Jinja introspection primitives; review template execution context before use", rel)));
     }
+}
+
+fn is_documentation_path(rel: &str) -> bool {
+    let lower = rel.to_ascii_lowercase();
+    lower.split('/').any(|part| part == "docs")
+        || lower.ends_with(".md")
+        || lower.ends_with(".rst")
+        || lower
+            .rsplit('/')
+            .next()
+            .is_some_and(|name| name.starts_with("readme"))
+}
+
+fn correlate_custom_code(
+    root: &Path,
+    files: &[PackageEntry],
+    findings: &mut Vec<LayerScanResult>,
+) -> Result<()> {
+    let mut auto_map = false;
+    let mut remote_trust = false;
+    let mut modules = BTreeSet::new();
+    for entry in files {
+        if !entry.relative_path.to_ascii_lowercase().ends_with(".json") {
+            continue;
+        }
+        let path = root.join(&entry.relative_path);
+        let bytes = read_all_from_file(&open_readonly_nofollow(&path)?, MAX_TEXT_SCAN_BYTES)?;
+        let Ok(value) = serde_json::from_slice::<serde_json::Value>(&bytes) else {
+            continue;
+        };
+        collect_custom_loader_metadata(&value, &mut auto_map, &mut remote_trust, &mut modules);
+    }
+    if !auto_map || !remote_trust {
+        return Ok(());
+    }
+
+    for module in modules {
+        let module_path = format!("{}.py", module.replace('.', "/"));
+        let Some(entry) = files
+            .iter()
+            .find(|entry| entry.relative_path.eq_ignore_ascii_case(&module_path))
+        else {
+            continue;
+        };
+        let path = root.join(&entry.relative_path);
+        let file = open_readonly_nofollow(&path)?;
+        let bytes = read_all_from_file(&file, MAX_TEXT_SCAN_BYTES)?;
+        let Ok(text) = std::str::from_utf8(&bytes) else {
+            continue;
+        };
+        let Some(operation) = module_scope_operation(text) else {
+            continue;
+        };
+        findings.push(finding(
+            entry.sha256.as_deref().unwrap_or("module"),
+            CheckType::PackageSecurity,
+            ScanStatus::Fail,
+            FindingClass::ContentIndicator,
+            Confidence::High,
+            "LF-CODE-IMPORT-SIDE-EFFECT",
+            format!(
+                "Hugging Face auto_map/trust_remote_code routes loading through '{}', which performs '{}' at module scope",
+                entry.relative_path, operation
+            ),
+        ));
+    }
+    Ok(())
+}
+
+fn collect_custom_loader_metadata(
+    value: &serde_json::Value,
+    auto_map: &mut bool,
+    remote_trust: &mut bool,
+    modules: &mut BTreeSet<String>,
+) {
+    match value {
+        serde_json::Value::Object(map) => {
+            for (key, value) in map {
+                if key.eq_ignore_ascii_case("auto_map") {
+                    *auto_map = true;
+                    collect_module_strings(value, modules);
+                }
+                if key.eq_ignore_ascii_case("trust_remote_code")
+                    && value == &serde_json::Value::Bool(true)
+                {
+                    *remote_trust = true;
+                }
+                collect_custom_loader_metadata(value, auto_map, remote_trust, modules);
+            }
+        }
+        serde_json::Value::Array(values) => {
+            for value in values {
+                collect_custom_loader_metadata(value, auto_map, remote_trust, modules);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn collect_module_strings(value: &serde_json::Value, modules: &mut BTreeSet<String>) {
+    match value {
+        serde_json::Value::String(value) => {
+            if let Some((module, _)) = value.rsplit_once('.') {
+                if module.len() <= 4096
+                    && module.split('.').all(|part| {
+                        !part.is_empty()
+                            && part.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+                    })
+                {
+                    modules.insert(module.to_owned());
+                }
+            }
+        }
+        serde_json::Value::Object(map) => {
+            for value in map.values() {
+                collect_module_strings(value, modules);
+            }
+        }
+        serde_json::Value::Array(values) => {
+            for value in values {
+                collect_module_strings(value, modules);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn module_scope_operation(text: &str) -> Option<&'static str> {
+    for line in text.lines().take(100_000) {
+        let trimmed = line.trim_start();
+        if trimmed.is_empty()
+            || trimmed.starts_with('#')
+            || line.starts_with(' ')
+            || line.starts_with('\t')
+        {
+            continue;
+        }
+        if trimmed.starts_with("def ") || trimmed.starts_with("class ") || trimmed.starts_with('@')
+        {
+            continue;
+        }
+        for (needle, operation) in [
+            ("os.system(", "os.system"),
+            ("subprocess.run(", "subprocess.run"),
+            ("subprocess.popen(", "subprocess.Popen"),
+            ("exec(", "exec"),
+            ("eval(", "eval"),
+            ("socket.socket(", "socket.socket"),
+            ("requests.", "requests network access"),
+            ("urllib.request", "urllib network access"),
+            ("ctypes.", "ctypes native loading"),
+            (".write_text(", "Path.write_text"),
+            (".write_bytes(", "Path.write_bytes"),
+            (".unlink(", "Path.unlink"),
+            (".remove(", "remove"),
+            (".rename(", "rename"),
+        ] {
+            if trimmed.contains(needle) {
+                return Some(operation);
+            }
+        }
+    }
+    None
 }
 
 fn collect_json_keys(value: &serde_json::Value, keys: &mut BTreeSet<String>) {
@@ -563,6 +729,90 @@ mod tests {
             .iter()
             .any(|m| m.contains("LF-SERIALIZATION-UNSAFE"))
             && f.status == ScanStatus::Fail));
+        let _ = fs::remove_dir_all(root);
+        Ok(())
+    }
+
+    #[test]
+    fn documentation_examples_do_not_emit_code_primitive_findings() -> Result<()> {
+        let root =
+            std::env::temp_dir().join(format!("layerfault-package-docs-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(&root)?;
+        fs::write(
+            root.join("README.md"),
+            b"The example calls os.system(...) and exec(...).",
+        )?;
+        let report = inspect(&root)?;
+        assert!(!report.findings.iter().any(|finding| {
+            finding
+                .matches
+                .iter()
+                .any(|value| value.contains("LF-CODE-OS-SYSTEM") || value.contains("LF-CODE-EXEC"))
+        }));
+        let _ = fs::remove_dir_all(root);
+        Ok(())
+    }
+
+    #[test]
+    fn custom_loader_module_scope_side_effect_blocks() -> Result<()> {
+        let root = std::env::temp_dir().join(format!(
+            "layerfault-package-custom-code-{}",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(&root)?;
+        fs::write(
+            root.join("config.json"),
+            br#"{"auto_map":{"AutoModel":"modeling_example.Example"},"trust_remote_code":true}"#,
+        )?;
+        fs::write(
+            root.join("modeling_example.py"),
+            b"os.system('echo imported')\n",
+        )?;
+        let report = inspect(&root)?;
+        assert!(report.findings.iter().any(|finding| {
+            finding.status == ScanStatus::Fail
+                && finding
+                    .matches
+                    .iter()
+                    .any(|value| value.contains("LF-CODE-IMPORT-SIDE-EFFECT"))
+        }));
+        let _ = fs::remove_dir_all(root);
+        Ok(())
+    }
+
+    #[test]
+    fn custom_loader_function_side_effect_remains_warning() -> Result<()> {
+        let root = std::env::temp_dir().join(format!(
+            "layerfault-package-custom-function-{}",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(&root)?;
+        fs::write(
+            root.join("config.json"),
+            br#"{"auto_map":{"AutoModel":"modeling_example.Example"},"trust_remote_code":true}"#,
+        )?;
+        fs::write(
+            root.join("modeling_example.py"),
+            b"def load():\n    os.system('echo called')\n",
+        )?;
+        let report = inspect(&root)?;
+        assert!(!report.findings.iter().any(|finding| {
+            finding.status == ScanStatus::Fail
+                && finding
+                    .matches
+                    .iter()
+                    .any(|value| value.contains("LF-CODE-IMPORT-SIDE-EFFECT"))
+        }));
+        assert!(report.findings.iter().any(|finding| {
+            finding.status == ScanStatus::Warn
+                && finding
+                    .matches
+                    .iter()
+                    .any(|value| value.contains("LF-CODE-OS-SYSTEM"))
+        }));
         let _ = fs::remove_dir_all(root);
         Ok(())
     }

@@ -204,6 +204,28 @@ If Cargo reports that `Cargo.lock` uses an unsupported lockfile version, your Ru
 
 ### Quick start
 
+For model acquisition and admission workflows, run the pre-execution pipeline before handing an artifact to a runtime:
+
+```bash
+layerfault pipeline ./downloaded-model
+layerfault pipeline ./downloaded-model --policy ci --summary
+layerfault pipeline ./downloaded-model --policy strict --json
+```
+
+The pipeline performs bounded package discovery, canonical identity, artifact structure checks, package-code and serialization checks, local policy evaluation, and a final `PASS`, `WARN`, or `BLOCK` decision. It never invokes an inference runtime or deserializes model content. Use `--sarif` for CI annotations and `--evidence-out ... --evidence-key ...` to reuse the existing signed evidence infrastructure.
+
+Pipeline exit codes preserve the admission contract: `0` means PASS, `1` means WARN, `2` means integrity failure, `3` means scanner/structural/content blocking failure, and `4` means policy-only block.
+
+Layerfault can assess artifact structure, package contents, integrity, provenance, trust, policy, and runtime compatibility/advisories. A PASS does not prove that learned weights are behaviorally benign, free from semantic backdoors, or trained on unpoisoned data.
+
+For manual RC certification against a local, already-acquired corpus, use the offline runner. It never downloads or executes samples and retains each command's security exit code:
+
+```bash
+scripts/adversarial-corpus-gate.sh /lab/samples /lab/results
+```
+
+The output directory contains `summary.tsv`, `summary.json`, `SHA256SUMS`, per-command output, and the Layerfault version used for the run.
+
 Before publishing or cutting a release, run the consolidated local gate:
 
 ```bash

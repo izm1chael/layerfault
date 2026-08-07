@@ -102,14 +102,18 @@ pub(crate) fn run_sources(args: OutputArgs) -> Result<()> {
 }
 
 pub(crate) fn run_explain(args: ExplainArgs) -> Result<()> {
-    let explanation = explain::lookup(&args.rule_id)
-        .ok_or_else(|| anyhow!("No built-in explanation exists for '{}'", args.rule_id))?;
+    let explanation = explain::risk_lookup(&args.rule_id);
     if args.json {
         println!("{}", serde_json::to_string_pretty(&explanation)?);
     } else {
         println!(
-            "{} - {}\n{}\n\nRemediation: {}",
-            explanation.rule_id, explanation.title, explanation.meaning, explanation.remediation
+            "{}\n\nCategory:\n{}\n\nMeaning:\n{}\n\nWhy this matters:\n{}\n\nPotential impact:\n- {}\n\nRecommended action:\n- {}",
+            explanation.rule_id,
+            explanation.categories.join(" / "),
+            explanation.summary,
+            explanation.risk,
+            explanation.potential_impact.join("\n- "),
+            explanation.recommended_actions.join("\n- ")
         );
     }
     Ok(())

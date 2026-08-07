@@ -40,6 +40,7 @@ jobs:
         run: |
           bash -n create_poisoned_model.sh
           bash -n scripts/security-gates.sh
+          bash -n scripts/adversarial-corpus-gate.sh
           python3 scripts/schema-gates.py
           python3 scripts/cargo-sbom.py /tmp/layerfault-sbom.cdx.json
           python3 -m json.tool /tmp/layerfault-sbom.cdx.json >/dev/null
