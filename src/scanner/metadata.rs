@@ -757,6 +757,37 @@ mod tests {
     }
 
     #[test]
+    fn empty_metadata_key_fails_byte_and_file_paths() -> Result<()> {
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(b"GGUF");
+        write_u32(&mut bytes, 3, Endian::Little);
+        write_u64(&mut bytes, 0, Endian::Little);
+        write_u64(&mut bytes, 1, Endian::Little);
+        write_string(&mut bytes, "", Endian::Little);
+        write_u32(&mut bytes, 8, Endian::Little);
+        write_string(&mut bytes, "value", Endian::Little);
+
+        assert!(validate_gguf_bytes(&bytes).is_err());
+        with_temp_file("empty_metadata_key", &bytes, |file| {
+            let results = MetadataScanner::scan_file_results(
+                file,
+                bytes.len() as u64,
+                "sha256:fixture",
+                "application/x-gguf",
+            )?;
+            assert_eq!(results.len(), 1);
+            let finding = &results[0];
+            assert_eq!(finding.status, ScanStatus::Fail);
+            assert_eq!(finding.finding_class, FindingClass::Structural);
+            assert!(finding
+                .matches
+                .iter()
+                .any(|value| value.contains("T15-STRUCT")));
+            Ok(())
+        })
+    }
+
+    #[test]
     fn pre_v3_big_endian_version_is_rejected() {
         let mut bytes = vec![0_u8; 24];
         bytes[..4].copy_from_slice(b"GGUF");

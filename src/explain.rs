@@ -35,3 +35,182 @@ pub fn lookup(rule: &str) -> Option<RuleExplanation> {
     };
     Some(item)
 }
+
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct RiskExplanation {
+    pub rule_id: String,
+    pub title: String,
+    pub categories: Vec<String>,
+    pub summary: String,
+    pub risk: String,
+    pub potential_impact: Vec<String>,
+    pub recommended_actions: Vec<String>,
+}
+
+pub fn risk_lookup(rule: &str) -> RiskExplanation {
+    let rule_id = rule.to_ascii_uppercase();
+    let (title, categories, summary, risk, impact, actions) = match rule_id.as_str() {
+        "LF-SERIALIZATION-UNSAFE" => (
+            "Code-capable model serialization detected",
+            vec!["Code Execution", "Supply Chain"],
+            "The package contains a serialization format that can execute code when loaded by common ML frameworks.",
+            "An unsafe loader may execute attacker-controlled code with the privileges of the model runtime.",
+            vec!["arbitrary command execution", "credential theft", "filesystem access", "network callbacks"],
+            vec!["Do not load or deserialize this artifact.", "Prefer Safetensors or GGUF, or a weights-only loading path.", "Verify the publisher and provenance; quarantine untrusted copies."],
+        ),
+        "T15-STRUCT" => (
+            "Malformed GGUF structure detected",
+            vec!["Parser Safety", "Memory Safety"],
+            "The artifact violates bounded GGUF structural invariants.",
+            "A vulnerable model runtime may crash, read or write out of bounds, allocate excessive resources, or otherwise behave unsafely while parsing it.",
+            vec!["runtime crash", "excessive allocation or denial of service", "downstream parser memory-safety exposure"],
+            vec!["Do not pass this artifact to an inference runtime.", "Reacquire it from a trusted source and preserve the malformed copy for investigation."],
+        ),
+        "LF-SAFE-STRUCT" => (
+            "Malformed Safetensors structure detected",
+            vec!["Parser Safety", "Memory Safety"],
+            "The Safetensors header, tensor ranges, shape sizes, or data-buffer coverage is malformed or unsafe.",
+            "A vulnerable loader may mis-handle malformed tensor metadata and crash, allocate incorrectly, or access data outside the intended buffer.",
+            vec!["runtime crash", "resource exhaustion", "downstream parser memory-safety exposure"],
+            vec!["Reject the file and reacquire it from a trusted source.", "Do not load it into an inference or conversion process."],
+        ),
+        "LF-CODE-AUTO-MAP" => (
+            "Custom Hugging Face model code mapping",
+            vec!["Supply Chain", "Code Execution"],
+            "Model metadata contains auto_map, which can route loading through custom Python implementations.",
+            "Loading may execute code from the model package when custom-code trust is enabled.",
+            vec!["arbitrary code execution during model loading", "filesystem or network access under runtime privileges"],
+            vec!["Review the referenced source files.", "Avoid trust_remote_code unless the exact package and publisher are trusted.", "Prefer a package that does not require custom loading code."],
+        ),
+        "LF-CODE-REMOTE-TRUST" => (
+            "Custom model-code trust enabled",
+            vec!["Supply Chain", "Code Execution"],
+            "The package explicitly enables a custom-code trust path.",
+            "A model loader may import Python supplied by the package or its remote repository.",
+            vec!["arbitrary code execution during model loading", "host and network access through imported code"],
+            vec!["Disable remote-code trust where possible.", "Inspect and attest the complete package before loading it."],
+        ),
+        "LF-CODE-IMPORT-SIDE-EFFECT" => (
+            "Import-time custom code side effect",
+            vec!["Code Execution", "Filesystem Access", "Network Exposure"],
+            "A configured custom model module contains a security-relevant operation at module scope.",
+            "Importing the module through the model loading path can perform the operation before the model is constructed.",
+            vec!["arbitrary command execution", "filesystem modification", "network callbacks or data exfiltration"],
+            vec!["Do not enable custom-code loading for this package.", "Quarantine it and review the referenced module from a trusted development environment."],
+        ),
+        "LF-PACKAGE-CODE" => (
+            "Custom or executable package code present",
+            vec!["Code Execution", "Supply Chain"],
+            "The package contains Python, scripts, native libraries, or another executable-content artifact.",
+            "The model loading or conversion path may execute package-supplied code.",
+            vec!["arbitrary code execution", "filesystem and network access", "persistence under runtime privileges"],
+            vec!["Review whether the file is required.", "Prefer a weights-only package and verify its provenance before loading."],
+        ),
+        "LF-CODE-NETWORK" => (
+            "Network-capable model code detected",
+            vec!["Network Exposure", "Code Execution"],
+            "Custom model content references a network or HTTP primitive.",
+            "If executed by a loader, the code may contact remote systems or transmit local data.",
+            vec!["data exfiltration", "remote callbacks", "access to internal network services"],
+            vec!["Do not execute the custom code.", "Review and remove network behavior, then rescan the complete package."],
+        ),
+        "LF-CODE-OS-SYSTEM" | "LF-CODE-SUBPROCESS" | "LF-CODE-EXEC" | "LF-CODE-EVAL" => (
+            "Command or dynamic-code primitive detected",
+            vec!["Code Execution"],
+            "Custom model content references a command-execution or dynamic-code primitive.",
+            "If reached during loading, attacker-controlled instructions may run with the model runtime's privileges.",
+            vec!["arbitrary command execution", "credential and filesystem access", "persistence or lateral movement"],
+            vec!["Do not load the package.", "Review the source statically and replace it with a trusted non-code-capable artifact."],
+        ),
+        "LF-CODE-CTYPES" => (
+            "Native library loading primitive detected",
+            vec!["Code Execution", "Memory Safety"],
+            "Custom model content references ctypes or native-library loading.",
+            "Loading native code can bypass ordinary Python-level restrictions and execute host instructions.",
+            vec!["arbitrary native code execution", "memory corruption", "host compromise"],
+            vec!["Do not load the package.", "Use a trusted artifact without native extension loading and verify provenance."],
+        ),
+        "LF-PACKAGE-SYMLINK" => (
+            "Model package symlink detected",
+            vec!["Supply Chain", "Integrity"],
+            "A direct model package contains a symlink outside the explicit package-file model.",
+            "Implicit link traversal can make package identity and inspected content differ from what an operator intended.",
+            vec!["content substitution", "out-of-bound package access", "unstable identity"],
+            vec!["Replace the symlink with an explicit regular file, or use the validated Hugging Face cache audit path."],
+        ),
+        "LF-PACKAGE-RACE" => (
+            "Package member changed during scan",
+            vec!["Integrity"],
+            "A package file produced a different digest when rehashed after scanning.",
+            "Concurrent mutation means the inspected bytes are not a stable basis for admission.",
+            vec!["time-of-check/time-of-use substitution", "inconsistent evidence"],
+            vec!["Block execution, preserve the artifact, and rescan from a stable read-only copy."],
+        ),
+        "LF-PROV-UNSIGNED" => (
+            "Unsigned artifact",
+            vec!["Provenance", "Trust"],
+            "No attestation was supplied for the exact artifact identity.",
+            "Layerfault cannot connect this artifact to an authorized publisher through its configured provenance mechanism.",
+            vec!["unverified supply-chain origin", "publisher substitution risk"],
+            vec!["Use a policy appropriate for unsigned artifacts, or obtain an attestation from an authorized key."],
+        ),
+        "LF-PROV-REVOKED" | "LF-PROV-NAMESPACE" | "LF-PROV-INACTIVE" | "LF-PROV-SIGSTORE-INVALID" => (
+            "Artifact provenance failed",
+            vec!["Provenance", "Trust"],
+            "The supplied provenance is invalid, unauthorized, revoked, or outside its active trust window.",
+            "The artifact cannot be reliably attributed to an authorized publisher under the configured trust policy.",
+            vec!["publisher substitution", "tampered or stale release evidence"],
+            vec!["Do not run the artifact.", "Investigate the provenance and obtain a valid attestation from an authorized publisher."],
+        ),
+        "LF-RUNTIME-VERSION-UNKNOWN" => (
+            "Runtime version could not be compared",
+            vec!["Compatibility", "Trust"],
+            "Layerfault could not derive a version suitable for its offline runtime advisory catalog.",
+            "Known-vulnerability checks may be incomplete for this runtime.",
+            vec!["unassessed runtime vulnerability exposure"],
+            vec!["Use an official runtime with machine-readable version output and verify it before admitting untrusted models."],
+        ),
+        "LF-FORMAT-UNKNOWN" => (
+            "Unknown artifact format",
+            vec!["Compatibility"],
+            "Layerfault can hash this file but has no structural parser for its format.",
+            "Format-specific corruption and loader risks cannot be assessed by the configured scanners.",
+            vec!["unassessed parser and loading behavior"],
+            vec!["Prefer GGUF or Safetensors, or make an explicit policy decision for this unknown format."],
+        ),
+        _ => (
+            "Unclassified Layerfault finding",
+            vec!["Compatibility"],
+            "Layerfault reported a finding without a dedicated operator explanation.",
+            "The available evidence is insufficient to make a more specific claim, so the configured decision should be respected conservatively.",
+            vec!["unassessed artifact, package, integrity, or policy risk"],
+            vec!["Review the finding detail and preserve the artifact.", "Do not suppress the finding unless the evidence and policy exception are explicitly reviewed."],
+        ),
+    };
+    RiskExplanation {
+        rule_id,
+        title: title.to_owned(),
+        categories: categories.into_iter().map(ToOwned::to_owned).collect(),
+        summary: summary.to_owned(),
+        risk: risk.to_owned(),
+        potential_impact: impact.into_iter().map(ToOwned::to_owned).collect(),
+        recommended_actions: actions.into_iter().map(ToOwned::to_owned).collect(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::risk_lookup;
+
+    #[test]
+    fn risk_mapping_covers_actionable_serialization_and_unknown_rules() {
+        let serialization = risk_lookup("LF-SERIALIZATION-UNSAFE");
+        assert_eq!(serialization.categories[0], "Code Execution");
+        assert!(!serialization.potential_impact.is_empty());
+        assert!(!serialization.recommended_actions.is_empty());
+
+        let unknown = risk_lookup("LF-UNRECOGNIZED");
+        assert_eq!(unknown.rule_id, "LF-UNRECOGNIZED");
+        assert!(!unknown.recommended_actions.is_empty());
+    }
+}

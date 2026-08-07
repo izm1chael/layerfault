@@ -88,7 +88,8 @@ pub fn emit_sarif(reports: &[ModelReport]) -> Result<()> {
                     "findingClass": finding_class_label(&finding.finding_class),
                     "confidence": confidence_label(&finding.confidence),
                     "matches": &finding.matches,
-                    "durationMs": finding.duration_ms
+                    "durationMs": finding.duration_ms,
+                    "risk": crate::explain::risk_lookup(&rule_id)
                 }
             }));
         }
@@ -203,20 +204,7 @@ pub fn emit_evaluated_json(reports: &[crate::app::EvaluatedReport]) -> Result<()
                 .report
                 .results
                 .iter()
-                .map(|finding| {
-                    serde_json::json!({
-                        "rule_id": crate::policy::rule_id(finding),
-                        "layer_digest": &finding.layer_digest,
-                        "media_type": &finding.media_type,
-                        "check_type": &finding.check_type,
-                        "status": &finding.status,
-                        "finding_class": &finding.finding_class,
-                        "confidence": &finding.confidence,
-                        "detail": &finding.detail,
-                        "matches": &finding.matches,
-                        "duration_ms": finding.duration_ms
-                    })
-                })
+                .map(enriched_finding)
                 .collect::<Vec<_>>();
             serde_json::json!({
                 "schema_version": "1.0",
@@ -233,6 +221,27 @@ pub fn emit_evaluated_json(reports: &[crate::app::EvaluatedReport]) -> Result<()
         .collect::<Vec<_>>();
     println!("{}", serde_json::to_string_pretty(&output)?);
     Ok(())
+}
+
+pub fn enriched_finding(finding: &LayerScanResult) -> serde_json::Value {
+    let rule_id = crate::policy::rule_id(finding);
+    serde_json::json!({
+        "rule_id": rule_id,
+        "layer_digest": &finding.layer_digest,
+        "media_type": &finding.media_type,
+        "check_type": &finding.check_type,
+        "status": &finding.status,
+        "finding_class": &finding.finding_class,
+        "confidence": &finding.confidence,
+        "detail": &finding.detail,
+        "matches": &finding.matches,
+        "duration_ms": finding.duration_ms,
+        "risk": crate::explain::risk_lookup(&rule_id)
+    })
+}
+
+pub fn enriched_findings(findings: &[LayerScanResult]) -> Vec<serde_json::Value> {
+    findings.iter().map(enriched_finding).collect()
 }
 
 pub fn emit_evaluated_table(reports: &[crate::app::EvaluatedReport]) {

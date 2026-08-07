@@ -17,6 +17,7 @@ use layerfault::{
     manifest, modeldiff, package, policy, provenance, quarantine, report, safeio, sigstore,
     sources, ThresholdConfig,
 };
+use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command as ProcessCommand;
@@ -50,6 +51,8 @@ enum Command {
     Fingerprint(FingerprintArgs),
     /// Scan a complete local model package and evaluate it against policy.
     VerifyPackage(VerifyPackageArgs),
+    /// Run a complete pre-execution admission check for an artifact or package.
+    Pipeline(PipelineArgs),
     /// Scan and evaluate an Ollama model as an explicit security/policy gate.
     Verify(VerifyArgs),
     /// Verify a model/artifact and invoke the selected runtime only when policy allows it.
@@ -223,6 +226,21 @@ struct VerifyPackageArgs {
     evidence: EvidenceWriteArgs,
     #[arg(long, default_value_t = false)]
     json: bool,
+}
+
+#[derive(clap::Args, Debug)]
+struct PipelineArgs {
+    path: PathBuf,
+    #[command(flatten)]
+    common: ScanCommon,
+    #[command(flatten)]
+    evidence: EvidenceWriteArgs,
+    #[arg(long, default_value_t = false, conflicts_with_all = ["sarif", "summary"])]
+    json: bool,
+    #[arg(long, default_value_t = false, conflicts_with_all = ["json", "summary"])]
+    sarif: bool,
+    #[arg(long, default_value_t = false, conflicts_with_all = ["json", "sarif"])]
+    summary: bool,
 }
 
 #[derive(clap::Args, Debug, Clone, Default)]
@@ -681,6 +699,7 @@ fn main() -> Result<()> {
         Some(Command::ScanDir(args)) => commands::artifacts::run_scan_dir(args),
         Some(Command::Fingerprint(args)) => commands::artifacts::run_fingerprint(args),
         Some(Command::VerifyPackage(args)) => commands::artifacts::run_verify_package(args),
+        Some(Command::Pipeline(args)) => commands::artifacts::run_pipeline(args),
         Some(Command::Verify(args)) => commands::ollama::run_verify(args),
         Some(Command::Run(args)) => commands::runtimes::run_guarded(args),
         Some(Command::Import(args)) => commands::runtimes::run_import(args),
@@ -783,7 +802,7 @@ fn sigstore_request<'a>(
 
 fn emit_admission(result: &ArtifactAdmission, json: bool) -> Result<()> {
     if json {
-        println!("{}", serde_json::to_string_pretty(result)?);
+        println!("{}", serde_json::to_string_pretty(&admission_json(result))?);
     } else {
         print_artifact_report(&result.report);
         println!(
@@ -806,14 +825,97 @@ fn print_artifact_report(result: &artifact::ArtifactReport) {
         result.size,
         result.sha256.as_deref().unwrap_or("not-computed")
     );
-    for finding in &result.results {
-        println!(
-            "  {:?} {:?} {:?} - {}",
-            finding.status,
-            finding.finding_class,
-            finding.check_type,
-            finding.detail.as_deref().unwrap_or("")
+    print_actionable_findings(&result.results);
+}
+
+fn artifact_json_report(result: &artifact::ArtifactReport) -> serde_json::Value {
+    let mut output = serde_json::to_value(result).expect("artifact report is serializable");
+    if let Some(object) = output.as_object_mut() {
+        object.insert(
+            "results".to_owned(),
+            serde_json::Value::Array(report::enriched_findings(&result.results)),
         );
+    }
+    output
+}
+
+fn package_json_report(result: &package::PackageReport) -> serde_json::Value {
+    let mut output = serde_json::to_value(result).expect("package report is serializable");
+    if let Some(object) = output.as_object_mut() {
+        object.insert(
+            "findings".to_owned(),
+            serde_json::Value::Array(report::enriched_findings(&result.findings)),
+        );
+    }
+    output
+}
+
+fn admission_json(result: &ArtifactAdmission) -> serde_json::Value {
+    let mut output = serde_json::to_value(result).expect("admission report is serializable");
+    if let Some(report) = output.get_mut("report") {
+        *report = artifact_json_report(&result.report);
+    }
+    output
+}
+
+fn print_actionable_findings(findings: &[layerfault::scanner::LayerScanResult]) {
+    let mut grouped = BTreeMap::<
+        String,
+        (
+            layerfault::scanner::ScanStatus,
+            usize,
+            String,
+            String,
+            Vec<String>,
+        ),
+    >::new();
+    for finding in findings {
+        if finding.status == layerfault::scanner::ScanStatus::Pass {
+            continue;
+        }
+        let rule = policy::rule_id(finding);
+        let risk = explain::risk_lookup(&rule);
+        let entry = grouped.entry(rule).or_insert_with(|| {
+            (
+                finding.status,
+                0,
+                risk.title.clone(),
+                risk.risk.clone(),
+                Vec::new(),
+            )
+        });
+        entry.1 += 1;
+        if let Some(detail) = &finding.detail {
+            if entry.4.len() < 4 && !entry.4.iter().any(|value| value == detail) {
+                entry.4.push(detail.clone());
+            }
+        }
+        if finding.status == layerfault::scanner::ScanStatus::Fail {
+            entry.0 = finding.status;
+        }
+    }
+    for (rule, (status, count, title, risk, details)) in grouped {
+        println!(
+            "  {} {}{}",
+            match status {
+                layerfault::scanner::ScanStatus::Fail => "BLOCK",
+                layerfault::scanner::ScanStatus::Warn => "WARN",
+                layerfault::scanner::ScanStatus::Pass => "PASS",
+            },
+            title,
+            if count > 1 {
+                format!(" ({} findings)", count)
+            } else {
+                String::new()
+            }
+        );
+        println!("    Finding: {rule}");
+        for detail in details {
+            println!("    - {detail}");
+        }
+        println!("    Risk: {risk}");
+        let explanation = explain::risk_lookup(&rule);
+        println!("    Action: {}", explanation.recommended_actions.join(" "));
     }
 }
 
