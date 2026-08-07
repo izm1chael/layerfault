@@ -204,7 +204,7 @@ pub fn list(base_dir: &Path) -> Result<Vec<QuarantineRecord>> {
             records.push(record);
         }
     }
-    records.sort_by(|left, right| right.created_unix.cmp(&left.created_unix));
+    records.sort_by_key(|record| std::cmp::Reverse(record.created_unix));
     Ok(records)
 }
 
