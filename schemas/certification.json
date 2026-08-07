@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://layerfault.local/schemas/certification.json",
+  "title": "Layerfault certification report",
+  "type": "object",
+  "required": ["tool_version", "passed", "checks"],
+  "properties": {
+    "tool_version": {"type":"string"},
+    "passed": {"type":"boolean"},
+    "checks": {"type":"array", "items":{"type":"object", "required":["name","passed","detail"]}}
+  },
+  "additionalProperties": false
+}

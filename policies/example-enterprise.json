@@ -1,0 +1,43 @@
+{
+  "version": 1,
+  "profile": "strict",
+  "require_trusted_attestation": true,
+  "block_unknown_layers": true,
+  "block_on_warnings": true,
+  "allowed_model_patterns": [
+    "registry.ollama.ai/library/*",
+    "registry.internal.example/approved/*"
+  ],
+  "denied_rule_ids": [
+    "T3-004"
+  ],
+  "suppressions": [
+    {
+      "rule_id": "T6-002",
+      "model": "registry.internal.example/approved/training-fixture:*",
+      "reason": "Approved red-team training fixture contains an intentional indicator",
+      "owner": "security-engineering",
+      "reference": "SEC-EXAMPLE-001"
+    }
+  ],
+  "minimum_trusted_signatures": 2,
+  "allowed_sources": [
+    "ollama",
+    "lmstudio",
+    "llama-cpp",
+    "hf-cache",
+    "file",
+    "directory"
+  ],
+  "allowed_formats": [
+    "gguf",
+    "safetensors",
+    "safetensors-index"
+  ],
+  "block_finding_classes": [
+    "Integrity",
+    "Structural",
+    "Attestation"
+  ],
+  "block_confidence_at_or_above": "High"
+}

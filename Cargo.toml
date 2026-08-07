@@ -1,0 +1,29 @@
+[package]
+name = "layerfault"
+version = "1.0.0-rc.1"
+edition = "2021"
+authors = ["izm1chael"]
+description = "Offline-first local AI model admission, provenance, package, and runtime security scanner"
+license = "MIT"
+repository = "https://github.com/izm1chael/layerfault"
+
+[dependencies]
+clap       = { version = "4.5",  features = ["derive"] }
+serde      = { version = "1.0",  features = ["derive"] }
+serde_json = "1.0"
+sha2       = "0.10"
+hex        = "0.4"
+digest     = "0.10"
+regex      = "1.10"
+rayon      = "1.10"
+comfy-table = "7.1"
+colored    = "2.1"
+indicatif  = "0.18.6"
+walkdir    = "2.5"
+anyhow     = "1.0"
+lazy_static = "1.4"
+libc = "0.2"
+ed25519-dalek = { version = "2", features = ["pkcs8", "pem"] }
+
+[build-dependencies]
+sha2 = "0.10"

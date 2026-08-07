@@ -1,0 +1,14 @@
+.TH LAYERFAULT 1
+.SH NAME
+layerfault \- offline-first local AI model admission and supply-chain security
+.SH SYNOPSIS
+.B layerfault
+<command> [options]
+.SH DESCRIPTION
+Layerfault validates local model artifact structure, model-store integrity, provenance, trust and operator policy before admission or execution. Supported local artifact formats include GGUF and Safetensors. Ollama is the deepest runtime integration; LM Studio, llama.cpp and the local Hugging Face cache are supported through narrow adapters.
+.SH COMMANDS
+scan, inspect, verify-file, scan-dir, verify, run, import, serve, trust, attest, audit, baseline, quarantine, policy, gc, doctor, sources, explain, diff, selftest, certify, version.
+.SH SECURITY
+Integrity, structural, scanner-error and invalid/revoked provenance failures are not operator-overridable. See THREATS.md and docs/.
+.SH COMPLETIONS
+Shell completion files are shipped under completions/. Regenerate them and this page after CLI changes with scripts/generate-cli-assets.sh.

@@ -1,0 +1,14 @@
+{
+  "$schema":"https://json-schema.org/draft/2020-12/schema",
+  "$id":"https://layerfault.local/schemas/mlbom.json",
+  "title":"Layerfault CycloneDX AI/ML inventory subset",
+  "type":"object",
+  "required":["bomFormat","specVersion","version","components"],
+  "properties":{
+    "bomFormat":{"const":"CycloneDX"},
+    "specVersion":{"const":"1.7"},
+    "version":{"type":"integer","minimum":1},
+    "components":{"type":"array","items":{"type":"object","required":["type","bom-ref","name"],"properties":{"type":{"const":"machine-learning-model"}}}}
+  },
+  "additionalProperties":true
+}

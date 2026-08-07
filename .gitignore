@@ -1,0 +1,12 @@
+/target
+/fuzz/target
+/fuzz/artifacts
+/fuzz/coverage
+
+/layerfault-validation-results-*
+/.layerfault-quarantine
+/dist
+/evidence-*
+/core
+/core.*
+/layerfault-*.sha256

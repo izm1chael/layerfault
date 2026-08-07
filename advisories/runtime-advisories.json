@@ -1,0 +1,50 @@
+{
+  "version": 1,
+  "generated_unix": 1786107106,
+  "advisories": [
+    {
+      "id": "CVE-2026-7482",
+      "runtime": "ollama",
+      "severity": "critical",
+      "title": "GGUF tensor offset/size out-of-bounds read during model creation",
+      "matcher": {
+        "scheme": "semver_lt",
+        "fixed": "0.17.1"
+      },
+      "reference": "https://nvd.nist.gov/vuln/detail/CVE-2026-7482"
+    },
+    {
+      "id": "CVE-2025-49847",
+      "runtime": "llama-cpp",
+      "severity": "high",
+      "title": "Malicious GGUF vocabulary buffer overflow",
+      "matcher": {
+        "scheme": "build_lt",
+        "fixed": "b5662"
+      },
+      "reference": "https://nvd.nist.gov/vuln/detail/CVE-2025-49847"
+    },
+    {
+      "id": "CVE-2025-52566",
+      "runtime": "llama-cpp",
+      "severity": "high",
+      "title": "Tokenizer signed/unsigned heap overflow",
+      "matcher": {
+        "scheme": "build_lt",
+        "fixed": "b5721"
+      },
+      "reference": "https://nvd.nist.gov/vuln/detail/CVE-2025-52566"
+    },
+    {
+      "id": "CVE-2026-27940",
+      "runtime": "llama-cpp",
+      "severity": "high",
+      "title": "GGUF mem_size integer overflow to heap buffer overflow",
+      "matcher": {
+        "scheme": "build_lt",
+        "fixed": "b8146"
+      },
+      "reference": "https://nvd.nist.gov/vuln/detail/CVE-2026-27940"
+    }
+  ]
+}

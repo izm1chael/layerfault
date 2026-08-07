@@ -1,0 +1,8 @@
+{
+  "$schema":"https://json-schema.org/draft/2020-12/schema",
+  "$id":"https://layerfault.dev/schemas/inventory.json",
+  "title":"Layerfault Local Model Inventory",
+  "type":"array","items":{"type":"object","required":["source","identity","path","format","size","blocking","findings"],"properties":{
+    "source":{"type":"string"},"identity":{"type":"string"},"path":{"type":"string"},"format":{"type":"string"},"size":{"type":"integer","minimum":0},"sha256":{"type":["string","null"]},"blocking":{"type":"boolean"},"findings":{"type":"integer","minimum":0},"architecture":{"type":["string","null"]},"quantization":{"type":["string","null"]}
+  }}
+}

@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://layerfault.dev/schemas/advisory-database.json",
+  "title": "Layerfault offline runtime advisory database",
+  "type": "object",
+  "required": ["version", "generated_unix", "advisories"],
+  "properties": {
+    "version":{"const":1},
+    "generated_unix":{"type":"integer","minimum":0},
+    "advisories":{"type":"array","items":{"type":"object","required":["id","runtime","severity","title","matcher","reference"],"properties":{"id":{"type":"string"},"runtime":{"enum":["ollama","lmstudio","llama-cpp"]},"severity":{"enum":["low","moderate","high","critical"]},"title":{"type":"string"},"matcher":{"type":"object","required":["scheme","fixed"],"properties":{"scheme":{"enum":["semver_lt","build_lt"]},"fixed":{"type":"string"}},"additionalProperties":false},"reference":{"type":"string"}},"additionalProperties":false}}
+  },
+  "additionalProperties":false
+}

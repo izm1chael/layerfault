@@ -1,0 +1,11 @@
+{
+  "$schema":"https://json-schema.org/draft/2020-12/schema",
+  "$id":"https://layerfault.dev/schemas/quarantine.json",
+  "title":"Layerfault Quarantine Record",
+  "type":"object","required":["version","id","model","manifest_digest","created_unix","original_manifest_relative","moved_blob_digests","shared_blob_digests","moved_aux_files"],
+  "properties":{
+    "version":{"const":1},"id":{"type":"string","pattern":"^[A-Za-z0-9_-]+$"},"model":{"type":"string"},"manifest_digest":{"type":"string"},"created_unix":{"type":"integer"},
+    "original_manifest_relative":{"type":"string"},"moved_blob_digests":{"type":"array","items":{"type":"string"}},"shared_blob_digests":{"type":"array","items":{"type":"string"}},"moved_aux_files":{"type":"array","items":{"type":"string"}},
+    "evidence":{"type":"object","properties":{"reason":{"type":["string","null"]},"scanner_exit_code":{"type":["integer","null"]},"trust_state":{"type":["string","null"]},"policy_action":{"type":["string","null"]},"finding_ids":{"type":"array","items":{"type":"string"}}}}
+  }
+}

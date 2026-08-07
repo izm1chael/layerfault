@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://layerfault.local/schemas/artifact-report.json",
+  "title": "Layerfault artifact admission report",
+  "type": "object",
+  "required": ["identity", "source", "report", "trust_state", "trusted_signatures", "signer_fingerprints", "policy"],
+  "properties": {
+    "identity": {"type":"string"},
+    "source": {"type":"string"},
+    "report": {"type":"object", "required":["path","format","size","results"]},
+    "trust_state": {"type":"string"},
+    "trusted_signatures": {"type":"integer", "minimum":0},
+    "signer_fingerprints": {"type":"array", "items":{"type":"string"}},
+    "policy": {"type":"object", "required":["profile","action","reasons","suppressed_rule_ids"]}
+  },
+  "additionalProperties": true
+}

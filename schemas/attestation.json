@@ -1,0 +1,13 @@
+{
+  "$schema":"https://json-schema.org/draft/2020-12/schema",
+  "$id":"https://layerfault.dev/schemas/attestation.json",
+  "title":"Layerfault Model Attestation",
+  "type":"object","additionalProperties":false,
+  "required":["version","model","manifest_digest","key_fingerprint","signature_hex","created_unix"],
+  "properties":{
+    "version":{"const":1},"model":{"type":"string","minLength":1},
+    "manifest_digest":{"type":"string","pattern":"^(sha256:[0-9a-fA-F]{64}|sha512:[0-9a-fA-F]{128})$"},
+    "key_fingerprint":{"type":"string","pattern":"^sha256:[0-9a-fA-F]{64}$"},
+    "signature_hex":{"type":"string","pattern":"^[0-9a-fA-F]{128}$"},"created_unix":{"type":"integer","minimum":0}
+  }
+}

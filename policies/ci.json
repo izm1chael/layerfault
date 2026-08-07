@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "profile": "ci",
+  "require_trusted_attestation": false,
+  "block_unknown_layers": true,
+  "block_on_warnings": false,
+  "allowed_model_patterns": [],
+  "denied_rule_ids": [],
+  "suppressions": []
+}

@@ -1,0 +1,8 @@
+{
+  "$schema":"https://json-schema.org/draft/2020-12/schema",
+  "$id":"https://layerfault.dev/schemas/report.json",
+  "title":"Layerfault Evaluated Ollama Report",
+  "type":"array","items":{"type":"object","required":["schema_version","tool_version","model","overall_status","trust_state","trusted_signatures","signer_fingerprints","policy","scan_results"],"properties":{
+    "schema_version":{"const":"1.0"},"tool_version":{"type":"string"},"model":{"type":"string"},"overall_status":{"enum":["Pass","Warn","Fail"]},"trust_state":{"type":"string"},"trusted_signatures":{"type":"integer","minimum":0},"signer_fingerprints":{"type":"array","items":{"type":"string"}},"policy":{"type":"object"},"scan_results":{"type":"array","items":{"type":"object","required":["rule_id","layer_digest","media_type","check_type","status","finding_class","confidence","matches","duration_ms"]}}
+  }}
+}

@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://layerfault.local/schemas/baseline-signature.json",
+  "title": "Layerfault signed baseline envelope",
+  "type": "object",
+  "required": ["version", "baseline_sha256", "key_fingerprint", "signature_hex", "created_unix"],
+  "properties": {
+    "version":{"const":1},
+    "baseline_sha256":{"type":"string","pattern":"^sha256:[0-9a-fA-F]{64}$"},
+    "key_fingerprint":{"type":"string","pattern":"^sha256:[0-9a-fA-F]{64}$"},
+    "signature_hex":{"type":"string"},
+    "created_unix":{"type":"integer","minimum":1}
+  },
+  "additionalProperties": false
+}

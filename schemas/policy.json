@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://layerfault.dev/schemas/policy.json",
+  "title": "Layerfault Policy",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "profile"],
+  "properties": {
+    "version": {"const": 1},
+    "profile": {"enum": ["permissive", "workstation", "ci", "strict"]},
+    "require_trusted_attestation": {"type": ["boolean", "null"]},
+    "block_unknown_layers": {"type": ["boolean", "null"]},
+    "block_on_warnings": {"type": ["boolean", "null"]},
+    "allowed_model_patterns": {"type":"array","items":{"type":"string","minLength":1}},
+    "denied_rule_ids": {"type":"array","items":{"type":"string","minLength":1}},
+    "allowed_sources": {"type":"array","items":{"type":"string","minLength":1}},
+    "allowed_formats": {"type":"array","items":{"type":"string","minLength":1}},
+    "allowed_architectures": {"type":"array","items":{"type":"string","minLength":1}},
+    "allowed_quantizations": {"type":"array","items":{"type":"string","minLength":1}},
+    "max_model_bytes": {"type":["integer","null"],"minimum":1},
+    "minimum_trusted_signatures": {"type":["integer","null"],"minimum":0,"maximum":32},
+    "required_signer_fingerprints": {"type":"array","items":{"type":"string","pattern":"^sha256:[0-9a-fA-F]{64}$"}},
+    "block_finding_classes": {"type":"array","items":{"enum":["Integrity","Structural","ContentIndicator","Policy","Attestation","Compatibility","Operational","Informational"]}},
+    "block_confidence_at_or_above": {"type":["string","null"],"enum":["Low","Medium","High",null]},
+    "suppressions": {
+      "type":"array",
+      "items":{
+        "type":"object","additionalProperties":false,
+        "required":["rule_id","reason"],
+        "properties":{
+          "rule_id":{"type":"string","minLength":1},
+          "model":{"type":"string","default":"*"},
+          "reason":{"type":"string","minLength":8},
+          "owner":{"type":["string","null"]},
+          "reference":{"type":["string","null"]},
+          "expires_unix":{"type":["integer","null"],"minimum":1}
+        }
+      }
+    }
+  }
+}
