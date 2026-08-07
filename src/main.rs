@@ -14,7 +14,7 @@ use layerfault::sources::SourceKind;
 use layerfault::trust::TrustStore;
 use layerfault::{
     advisory, audit, baseline, binding, certify, doctor, evidence, explain, gc, inventory,
-    manifest, modeldiff, package, policy, provenance, quarantine, report, safeio, sigstore,
+    manifest, modeldiff, package, paths, policy, provenance, quarantine, report, safeio, sigstore,
     sources, ThresholdConfig,
 };
 use std::collections::BTreeMap;
@@ -91,6 +91,12 @@ enum Command {
     CompareBehaviour(CompareBehaviourArgs),
     /// Produce a versioned multi-domain model security review.
     Review(ReviewArgs),
+    /// Manage local model observations and history.
+    Models(ModelsArgs),
+    /// Compare a model against a stored local observation.
+    Drift(DriftArgs),
+    /// Verify a signed local transformation chain.
+    Lineage(LineageArgs),
     /// Run lightweight built-in parser/policy self-tests.
     Selftest(OutputArgs),
     /// Run the built-in adversarial certification suite.
@@ -648,6 +654,12 @@ struct CompareArgs {
     transformation_manifest: Option<PathBuf>,
     #[arg(long, default_value_t = false)]
     json: bool,
+    #[arg(long, default_value_t = false)]
+    reproduce_quantization: bool,
+    #[arg(long)]
+    quantizer: Option<PathBuf>,
+    #[arg(long)]
+    quantization: Option<String>,
 }
 
 #[derive(clap::Args, Debug)]
@@ -669,6 +681,16 @@ struct BehaviourArgs {
     max_tokens: Option<usize>,
     #[arg(long)]
     timeout_seconds: Option<u64>,
+    #[arg(long)]
+    run_manifest_out: Option<PathBuf>,
+    #[arg(long)]
+    replay: Option<PathBuf>,
+    #[arg(long)]
+    max_mutations: Option<usize>,
+    #[arg(long)]
+    repeat_count: Option<usize>,
+    #[arg(long)]
+    watch_string: Vec<String>,
     #[arg(long, default_value_t = false)]
     json: bool,
 }
@@ -717,7 +739,85 @@ struct ReviewArgs {
     #[arg(long)]
     evidence_key: Option<PathBuf>,
     #[arg(long, default_value_t = false)]
+    record_observation: bool,
+    #[arg(long, default_value_t = false)]
+    compare_previous: bool,
+    #[arg(long, default_value_t = false)]
+    reproduce_quantization: bool,
+    #[arg(long)]
+    quantizer: Option<PathBuf>,
+    #[arg(long)]
+    quantization: Option<String>,
+    #[arg(long, default_value_t = false)]
     json: bool,
+}
+
+#[derive(clap::Args, Debug)]
+struct ModelsArgs {
+    #[command(subcommand)]
+    command: ModelsCommand,
+}
+
+#[derive(Subcommand, Debug)]
+enum ModelsCommand {
+    Remember {
+        model: PathBuf,
+        #[arg(long)]
+        name: Option<String>,
+        #[arg(long)]
+        publisher: Option<String>,
+        #[arg(long)]
+        revision: Option<String>,
+        #[arg(long)]
+        trust_label: Option<String>,
+        #[arg(long, default_value_t = false)]
+        json: bool,
+    },
+    List {
+        #[arg(long, default_value_t = false)]
+        json: bool,
+    },
+    Show {
+        id: String,
+        #[arg(long, default_value_t = false)]
+        json: bool,
+    },
+    History {
+        id: String,
+        #[arg(long, default_value_t = false)]
+        json: bool,
+    },
+    Forget {
+        id: String,
+        #[arg(long, default_value_t = false)]
+        json: bool,
+    },
+}
+
+#[derive(clap::Args, Debug)]
+struct DriftArgs {
+    model: PathBuf,
+    #[arg(long, conflicts_with = "previous")]
+    against: Option<String>,
+    #[arg(long, default_value_t = false)]
+    previous: bool,
+    #[arg(long, default_value_t = false)]
+    json: bool,
+}
+
+#[derive(clap::Args, Debug)]
+struct LineageArgs {
+    #[command(subcommand)]
+    command: LineageCommand,
+}
+
+#[derive(Subcommand, Debug)]
+enum LineageCommand {
+    VerifyChain {
+        chain: PathBuf,
+        #[arg(long, default_value_t = false)]
+        json: bool,
+    },
 }
 
 #[derive(clap::Args, Debug)]
@@ -809,6 +909,9 @@ fn main() -> Result<()> {
         Some(Command::Behaviour(args)) => commands::vnext::run_behaviour(args),
         Some(Command::CompareBehaviour(args)) => commands::vnext::run_compare_behaviour(args),
         Some(Command::Review(args)) => commands::vnext::run_review(args),
+        Some(Command::Models(args)) => commands::vnext::run_models(args),
+        Some(Command::Drift(args)) => commands::vnext::run_drift(args),
+        Some(Command::Lineage(args)) => commands::vnext::run_lineage(args),
         Some(Command::Selftest(args)) => commands::operator::run_selftest(args),
         Some(Command::Certify(args)) => commands::operator::run_certify(args),
         Some(Command::Advisories(args)) => commands::security::run_advisories(args),
