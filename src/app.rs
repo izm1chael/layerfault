@@ -451,7 +451,5 @@ pub fn policy_exit_code(reports: &[EvaluatedReport]) -> i32 {
 }
 
 pub fn default_jobs() -> usize {
-    std::thread::available_parallelism()
-        .map(|value| value.get().min(4))
-        .unwrap_or(1)
+    std::thread::available_parallelism().map(|value| value.get()).unwrap_or(1)
 }

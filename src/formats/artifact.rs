@@ -4,6 +4,7 @@ use crate::scanner::{
     BinaryScanner, Confidence, FindingClass, LayerScanResult, MetadataScanner, ScanStatus,
 };
 use anyhow::{anyhow, Context, Result};
+use rayon::prelude::*;
 use sha2::{Digest, Sha256};
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
@@ -174,7 +175,7 @@ pub fn inspect_dir(
         }
     }
     paths.sort();
-    paths.into_iter().map(|path| inspect(&path, mode)).collect()
+    paths.into_par_iter().map(|path| inspect(&path, mode)).collect()
 }
 
 fn known_extension(path: &Path) -> bool {
