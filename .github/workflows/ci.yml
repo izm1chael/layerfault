@@ -19,9 +19,7 @@ jobs:
       - name: Toolchain
         shell: bash
         run: |
-          rustup update stable --no-self-update
-          rustup default stable
-          rustup component add rustfmt
+          rustup show active-toolchain
       - name: Format
         run: cargo fmt --all -- --check
       - name: Check
@@ -35,9 +33,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Toolchain
         run: |
-          rustup update stable --no-self-update
-          rustup default stable
-          rustup component add clippy
+          rustup show active-toolchain
       - name: Clippy
         run: cargo clippy --locked --all-targets --all-features -- -D warnings
       - name: Shell/static contracts
@@ -56,9 +52,33 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Toolchain
         run: |
-          rustup update stable --no-self-update
-          rustup default stable
+          rustup show active-toolchain
       - name: Install pinned cargo-audit
         run: cargo install cargo-audit --version 0.22.2 --locked
       - name: RustSec audit
         run: cargo audit
+
+  msrv:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install declared MSRV
+        run: rustup toolchain install 1.88.0 --profile minimal --no-self-update
+      - name: Check on MSRV
+        run: cargo +1.88.0 check --locked --all-targets
+      - name: Test on MSRV
+        run: cargo +1.88.0 test --locked --all-targets
+
+  fresh-install-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Use repository toolchain
+        run: rustup show active-toolchain
+      - name: Build release binary
+        run: cargo build --release --locked
+      - name: Verify installation
+        run: |
+          ./target/release/layerfault --version
+          ./target/release/layerfault selftest
+          ./target/release/layerfault inspect fuzz/corpus/gguf/valid-v3-q4_0.gguf --json >/tmp/layerfault-inspection.json

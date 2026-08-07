@@ -18,9 +18,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Toolchain
         run: |
-          rustup update stable --no-self-update
-          rustup default stable
-          rustup component add rustfmt clippy
+          rustup show active-toolchain
       - name: Release security gate
         run: |
           cargo fmt --all -- --check
@@ -51,8 +49,7 @@ jobs:
       - name: Toolchain
         shell: bash
         run: |
-          rustup update stable --no-self-update
-          rustup default stable
+          rustup show active-toolchain
       - name: Build
         run: cargo build --release --locked
       - name: Stage artifact, checksum and SBOM
@@ -82,8 +79,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Toolchain and musl
         run: |
-          rustup update stable --no-self-update
-          rustup default stable
+          rustup show active-toolchain
           rustup target add x86_64-unknown-linux-musl
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends musl-tools
@@ -110,8 +106,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Toolchain
         run: |
-          rustup update stable --no-self-update
-          rustup default stable
+          rustup show active-toolchain
           rustup target add aarch64-apple-darwin x86_64-apple-darwin
       - name: Build both macOS architectures
         run: |
