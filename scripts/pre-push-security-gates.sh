@@ -72,6 +72,21 @@ if version('indicatif') < (0, 18, 6):
     raise SystemExit('Cargo.lock still contains indicatif < 0.18.6')
 if re.search(r'\[\[package\]\]\nname = "number_prefix"\n', text):
     raise SystemExit('Cargo.lock still contains unmaintained number_prefix')
+
+# Layerfault standardises native networking/TLS on Rustls so a normal Linux build does
+# not require libssl-dev/pkg-config/system OpenSSL. If openssl-sys or native-tls
+# re-enter the default dependency graph, fail loudly rather than silently regressing
+# portability; approve any genuinely unavoidable exception here explicitly.
+APPROVED_OPENSSL_EXCEPTIONS = set()
+for name in ('openssl-sys', 'native-tls'):
+    if name in APPROVED_OPENSSL_EXCEPTIONS:
+        continue
+    if re.search(r'\[\[package\]\]\nname = "' + re.escape(name) + r'"\n', text):
+        raise SystemExit(
+            f'Cargo.lock unexpectedly contains {name}; the normal Linux build must not '
+            'require system OpenSSL. Run `cargo tree -i ' + name + '` to find the offending '
+            'dependency and standardise it on rustls, or add a documented, reviewed exception.'
+        )
 PY
 
 if command -v osv-scanner >/dev/null 2>&1; then
