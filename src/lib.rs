@@ -1,0 +1,38 @@
+#![forbid(unsafe_code)]
+
+//! Reusable Layerfault scanning, trust, policy and model-store security primitives.
+
+pub mod admission;
+pub mod advisory;
+pub mod app;
+pub mod audit;
+pub mod baseline;
+pub mod binding;
+pub mod certify;
+pub mod discovery;
+pub mod doctor;
+pub mod evidence;
+pub mod explain;
+pub mod formats;
+pub mod gc;
+pub mod inventory;
+pub mod manifest;
+pub mod modeldiff;
+pub mod package;
+pub mod paths;
+pub mod policy;
+pub mod provenance;
+pub mod quarantine;
+pub mod report;
+pub mod safeio;
+pub mod scanner;
+pub mod sigstore;
+pub mod sources;
+pub mod trust;
+
+#[derive(Debug, Clone)]
+pub struct ThresholdConfig {
+    pub max_temperature: f64,
+    pub max_ctx: u64,
+    pub max_predict: i64,
+}

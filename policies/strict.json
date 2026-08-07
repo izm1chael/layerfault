@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "profile": "strict",
+  "require_trusted_attestation": true,
+  "block_unknown_layers": true,
+  "block_on_warnings": true,
+  "allowed_model_patterns": [],
+  "denied_rule_ids": [],
+  "suppressions": []
+}

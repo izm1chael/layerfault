@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://layerfault.dev/schemas/package-report.json",
+  "title": "Layerfault model package report",
+  "type": "object",
+  "required": ["root", "fingerprint", "files", "total_bytes", "findings"],
+  "properties": {
+    "root": {"type":"string"},
+    "fingerprint": {"type":"string","pattern":"^lfpkg:sha256:[0-9a-f]{64}$"},
+    "files": {"type":"array","items":{"type":"object","required":["relative_path","kind","size"],"properties":{"relative_path":{"type":"string"},"kind":{"type":"string"},"size":{"type":"integer","minimum":0},"sha256":{"type":["string","null"]}},"additionalProperties":true}},
+    "total_bytes": {"type":"integer","minimum":0},
+    "findings": {"type":"array","items":{"type":"object"}}
+  },
+  "additionalProperties": true
+}

@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://layerfault.dev/schemas/evidence.json",
+  "title": "Layerfault signed scan/admission evidence",
+  "type": "object",
+  "required": ["envelope_version", "payload", "key_fingerprint", "public_key_hex", "signature_hex"],
+  "properties": {
+    "envelope_version": {"const":1},
+    "payload": {
+      "type":"object",
+      "required":["version","created_unix","subject","source","layerfault_version","build_id","detector_contract","policy_sha256","trust_store_sha256","decision","details"],
+      "properties": {
+        "version":{"const":1},
+        "created_unix":{"type":"integer","minimum":0},
+        "subject":{"type":"string"},
+        "source":{"type":"string"},
+        "subject_fingerprint":{"type":["string","null"]},
+        "layerfault_version":{"type":"string"},
+        "build_id":{"type":"string","pattern":"^sha256:[0-9a-f]{64}$"},
+        "detector_contract":{"type":"string"},
+        "policy_sha256":{"type":"string","pattern":"^sha256:[0-9a-f]{64}$"},
+        "trust_store_sha256":{"type":"string","pattern":"^sha256:[0-9a-f]{64}$"},
+        "runtime":{"type":["object","null"]},
+        "execution_binding":{"type":["object","null"]},
+        "decision":{"type":"string"},
+        "details":{}
+      },
+      "additionalProperties":false
+    },
+    "key_fingerprint":{"type":"string","pattern":"^sha256:[0-9a-f]{64}$"},
+    "public_key_hex":{"type":"string","pattern":"^[0-9a-f]{64}$"},
+    "signature_hex":{"type":"string","pattern":"^[0-9a-f]{128}$"}
+  },
+  "additionalProperties":false
+}

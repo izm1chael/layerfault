@@ -1,0 +1,14 @@
+{
+  "$schema":"https://json-schema.org/draft/2020-12/schema",
+  "$id":"https://layerfault.dev/schemas/trust.json",
+  "title":"Layerfault Trust Store",
+  "type":"object","additionalProperties":false,"required":["version","keys"],
+  "properties":{
+    "version":{"const":1},
+    "keys":{"type":"array","items":{"type":"object","additionalProperties":false,"required":["name","fingerprint","public_key_pem"],"properties":{
+      "name":{"type":"string","minLength":1},"fingerprint":{"type":"string","pattern":"^sha256:[0-9a-fA-F]{64}$"},"public_key_pem":{"type":"string","minLength":1},
+      "namespaces":{"type":"array","items":{"type":"string"}},"revoked":{"type":"boolean"},"added_unix":{"type":"integer","minimum":0},
+      "active_from_unix":{"type":["integer","null"],"minimum":0},"expires_unix":{"type":["integer","null"],"minimum":0},"rotation_group":{"type":["string","null"]}
+    }}}
+  }
+}

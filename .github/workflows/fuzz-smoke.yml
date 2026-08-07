@@ -1,0 +1,30 @@
+name: Fuzz smoke
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "17 3 * * 1"
+
+permissions:
+  contents: read
+
+jobs:
+  fuzz:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Nightly toolchain
+        run: |
+          rustup update nightly --no-self-update
+          rustup default nightly
+      - name: Install pinned cargo-fuzz
+        run: cargo install cargo-fuzz --version 0.13.2 --locked
+      - name: Fuzz manifest parser
+        working-directory: fuzz
+        run: cargo fuzz run manifest corpus/manifest -- -max_total_time=60
+      - name: Fuzz GGUF parser
+        working-directory: fuzz
+        run: cargo fuzz run gguf corpus/gguf -- -max_total_time=60
+      - name: Fuzz heuristic engine
+        working-directory: fuzz
+        run: cargo fuzz run heuristics corpus/heuristics -- -max_total_time=60

@@ -1,0 +1,71 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://layerfault.dev/schemas/baseline.json",
+  "title": "Layerfault Known-Good Baseline",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "version",
+    "created_unix",
+    "models"
+  ],
+  "properties": {
+    "version": {
+      "const": 1
+    },
+    "created_unix": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "updated_unix": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "history": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "updated_unix",
+          "reason"
+        ],
+        "properties": {
+          "updated_unix": {
+            "type": "integer"
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 8
+          }
+        }
+      }
+    },
+    "models": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "required": [
+          "manifest_digest",
+          "descriptors"
+        ],
+        "properties": {
+          "manifest_digest": {
+            "type": "string"
+          },
+          "descriptors": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "attestation_fingerprints": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    }
+  }
+}
