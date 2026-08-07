@@ -39,3 +39,10 @@ chrono = { version = "0.4", default-features = false, features = ["clock"] }
 
 [build-dependencies]
 sha2 = "0.10"
+
+# Vendored fork of candelabra 0.2.0 that disables its default native-tls/openssl-sys
+# pulls (via hf-hub's "default-tls" feature and reqwest's default-tls feature) in favor
+# of rustls, so a normal Linux build does not require libssl-dev/pkg-config.
+# See vendor/candelabra/Cargo.toml for the exact feature diff against upstream.
+[patch.crates-io]
+candelabra = { path = "vendor/candelabra" }
