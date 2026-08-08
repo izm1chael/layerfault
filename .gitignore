@@ -10,3 +10,5 @@
 /core
 /core.*
 /layerfault-*.sha256
+/AGENT.md
+/CLAUDE.md
