@@ -216,7 +216,7 @@ pub fn element_bytes(dtype: &str) -> Option<usize> {
 
 pub fn decode_chunk(dtype: &str, bytes: &[u8]) -> Result<Vec<f64>> {
     let step = element_bytes(dtype).ok_or_else(|| anyhow!("unsupported numeric dtype '{dtype}'"))?;
-    if bytes.len() % step != 0 { bail!("numeric tensor byte length is not aligned to dtype size"); }
+    if !bytes.len().is_multiple_of(step) { bail!("numeric tensor byte length is not aligned to dtype size"); }
     let mut out = Vec::with_capacity(bytes.len() / step);
     for chunk in bytes.chunks_exact(step) {
         let value = match dtype.to_ascii_uppercase().as_str() {

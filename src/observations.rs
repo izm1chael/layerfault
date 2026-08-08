@@ -73,7 +73,8 @@ impl ObservationStore {
         };
         let index=match self.records.iter().position(|v|v.key==key){Some(index)=>index,None=>{if self.records.len()>=MAX_RECORDS{bail!("model record limit reached");}self.records.push(ModelRecord{key:key.clone(),name:name.clone(),publisher:publisher.clone(),observations:Vec::new()});self.records.len()-1}};
         let record=&mut self.records[index];
-        if record.name.is_none(){record.name=name;} if record.publisher.is_none(){record.publisher=publisher;}
+        if record.name.is_none(){record.name=name;}
+        if record.publisher.is_none(){record.publisher=publisher;}
         if record.observations.last().is_some_and(|v|v.id==observation.id){
             // Same content can be observed repeatedly. Retain the most recent timestamp/revision without duplicating history.
             if let Some(last)=record.observations.last_mut(){*last=observation;}else{return Err(anyhow!("observation replacement invariant failed"));}

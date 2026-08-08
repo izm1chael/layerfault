@@ -43,13 +43,15 @@ impl RuntimeAdapter {
         std::thread::spawn(move||{let _=tx.send((0,read_capped(stdout,cap)));});
         std::thread::spawn(move||{let _=tx2.send((1,read_capped(stderr,cap)));});
         let deadline=Duration::from_secs(self.limits.timeout_seconds.max(1)); let mut timed_out=false; let status;
-        loop { if let Some(s)=child.try_wait()?{status=s;break;} if start.elapsed()>=deadline{timed_out=true;let _=child.kill();status=child.wait()?;break;} std::thread::sleep(Duration::from_millis(25)); }
+        loop { if let Some(s)=child.try_wait()?{status=s;break;}
+            if start.elapsed()>=deadline{timed_out=true;let _=child.kill();status=child.wait()?;break;} std::thread::sleep(Duration::from_millis(25)); }
         let mut out=String::new();let mut err=String::new();
         for _ in 0..2 { if let Ok((which,result))=rx.recv_timeout(Duration::from_secs(2)){let bytes=result?;let text=String::from_utf8_lossy(&bytes).into_owned();if which==0{out=text}else{err=text}} }
         Ok(RuntimeResult{stdout:out,stderr:err,exit_code:status.code(),timed_out,duration_ms:u64::try_from(start.elapsed().as_millis()).unwrap_or(u64::MAX)})
     }
 }
-fn read_capped<R:Read>(mut r:R,cap:usize)->Result<Vec<u8>>{let mut out=Vec::new();let mut buf=[0u8;8192];loop{let n=r.read(&mut buf)?;if n==0{break;}if out.len().saturating_add(n)>cap{return Err(anyhow!("runtime output exceeded byte cap {cap}"));}out.extend_from_slice(&buf[..n]);}Ok(out)}
+fn read_capped<R:Read>(mut r:R,cap:usize)->Result<Vec<u8>>{let mut out=Vec::new();let mut buf=[0u8;8192];loop{let n=r.read(&mut buf)?;if n==0{break;}
+    if out.len().saturating_add(n)>cap{return Err(anyhow!("runtime output exceeded byte cap {cap}"));}out.extend_from_slice(&buf[..n]);}Ok(out)}
 fn hash_path(path:&Path)->Result<String>{let mut f=crate::safeio::open_readonly_nofollow(path)?;let mut h=Sha256::new();let mut b=[0u8;1024*1024];loop{let n=f.read(&mut b)?;if n==0{break;}h.update(&b[..n]);}Ok(hex::encode(h.finalize()))}
 fn version_string(path:&Path)->Option<String>{
     let mut child=std::process::Command::new(path).arg("--version").env_clear().stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::null()).spawn().ok()?;

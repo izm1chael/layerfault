@@ -528,7 +528,7 @@ fn json_contains_true_for_key(value: &serde_json::Value, key: &str) -> bool {
 }
 
 fn is_unsafe_serialization(lower: &str, ext: &str, file: &std::fs::File) -> Result<bool> {
-    if matches!(ext, "pkl" | "pickle" | "joblib" | "pt" | "pth" | "ckpt") {
+    if unsafe_serialization_name(lower) {
         return Ok(true);
     }
     if lower.ends_with("pytorch_model.bin") || ext == "bin" {
@@ -541,6 +541,38 @@ fn is_unsafe_serialization(lower: &str, ext: &str, file: &std::fs::File) -> Resu
         }
     }
     Ok(false)
+}
+
+fn unsafe_serialization_name(lower: &str) -> bool {
+    let filename = lower.rsplit('/').next().unwrap_or(lower);
+    let mut candidate = filename;
+    for _ in 0..8 {
+        if matches!(
+            Path::new(candidate)
+                .extension()
+                .and_then(|value| value.to_str())
+                .unwrap_or(""),
+            "pkl" | "pickle" | "joblib" | "pt" | "pth" | "ckpt"
+        ) {
+            return true;
+        }
+        let Some(stripped) = strip_compression_suffix(candidate) else {
+            break;
+        };
+        candidate = stripped;
+    }
+    false
+}
+
+fn strip_compression_suffix(value: &str) -> Option<&str> {
+    for suffix in [
+        ".gz", ".bz2", ".xz", ".lzma", ".z", ".zlib", ".deflate", ".zst",
+    ] {
+        if let Some(stripped) = value.strip_suffix(suffix) {
+            return Some(stripped);
+        }
+    }
+    None
 }
 
 fn is_native_or_script(ext: &str, lower: &str) -> bool {
@@ -586,11 +618,7 @@ fn classify(path: &Path) -> &'static str {
         "code"
     } else if matches!(ext.as_str(), "so" | "dll" | "dylib" | "exe") {
         "native"
-    } else if matches!(
-        ext.as_str(),
-        "pkl" | "pickle" | "joblib" | "pt" | "pth" | "ckpt"
-    ) || lower.ends_with("pytorch_model.bin")
-    {
+    } else if unsafe_serialization_name(&lower) || lower.ends_with("pytorch_model.bin") {
         "serialization"
     } else if matches!(ext.as_str(), "json" | "toml" | "yaml" | "yml") {
         "config"
@@ -729,6 +757,55 @@ mod tests {
             .iter()
             .any(|m| m.contains("LF-SERIALIZATION-UNSAFE"))
             && f.status == ScanStatus::Fail));
+        let _ = fs::remove_dir_all(root);
+        Ok(())
+    }
+
+    #[test]
+    fn nested_compressed_joblib_is_blocked_without_deserialization() -> Result<()> {
+        let root = std::env::temp_dir().join(format!(
+            "layerfault-package-double-compressed-joblib-{}",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(&root)?;
+        fs::write(
+            root.join("exploit_double_compression.joblib.gz.bz2"),
+            b"BZh91AY&SYbounded-fixture",
+        )?;
+        let report = inspect(&root)?;
+        assert!(report.findings.iter().any(|finding| {
+            finding.status == ScanStatus::Fail
+                && finding
+                    .matches
+                    .iter()
+                    .any(|value| value.contains("LF-SERIALIZATION-UNSAFE"))
+        }));
+        assert!(report
+            .files
+            .iter()
+            .any(|entry| entry.kind == "serialization"));
+        let _ = fs::remove_dir_all(root);
+        Ok(())
+    }
+
+    #[test]
+    fn compression_suffix_without_serialization_inner_name_does_not_block() -> Result<()> {
+        let root = std::env::temp_dir().join(format!(
+            "layerfault-package-compressed-data-{}",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(&root)?;
+        fs::write(root.join("weights.dat.gz.bz2"), b"BZh91AY&SYbounded-fixture")?;
+        let report = inspect(&root)?;
+        assert!(!report.findings.iter().any(|finding| {
+            finding.status == ScanStatus::Fail
+                && finding
+                    .matches
+                    .iter()
+                    .any(|value| value.contains("LF-SERIALIZATION-UNSAFE"))
+        }));
         let _ = fs::remove_dir_all(root);
         Ok(())
     }

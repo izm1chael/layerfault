@@ -10,6 +10,15 @@ fn claim(value: Option<&str>) -> Result<Option<layerfault::transformation::Trans
     value.map(layerfault::transformation::TransformationType::parse).transpose()
 }
 
+fn security_decision_exit_code(decision: &str) -> i32 {
+    match decision {
+        "PASS" => 0,
+        "WARN" => 1,
+        "BLOCK" => 3,
+        _ => 1,
+    }
+}
+
 pub(crate) fn run_models(args: ModelsArgs) -> Result<()> {
     let mut store = layerfault::observations::ObservationStore::load()?;
     match args.command {
@@ -37,7 +46,8 @@ pub(crate) fn run_models(args: ModelsArgs) -> Result<()> {
             else { for obs in &record.observations { println!("{}\t{}\t{}",obs.observed_unix,obs.id,obs.identity.canonical); } }
         }
         ModelsCommand::Forget { id, json: emit_json } => {
-            let removed=store.forget(&id);if removed{store.save()?;}if emit_json{println!("{}",json!({"forgotten":id,"removed":removed}));}else{println!("{} {}",if removed{"Forgot"}else{"Not found"},id);}
+            let removed=store.forget(&id);if removed{store.save()?;}
+            if emit_json{println!("{}",json!({"forgotten":id,"removed":removed}));}else{println!("{} {}",if removed{"Forgot"}else{"Not found"},id);}
         }
     }
     Ok(())
@@ -185,6 +195,8 @@ pub(crate) fn run_review(args: ReviewArgs) -> Result<()> {
         layerfault::evidence::write_signed(out,&envelope)?;
     } else if args.evidence_out.is_some() || args.evidence_key.is_some() { bail!("--evidence-out and --evidence-key must be supplied together"); }
     if args.json{println!("{}",serde_json::to_string_pretty(&result)?);}else{println!("LAYERFAULT MODEL SECURITY REVIEW\n\nSTATIC ADMISSION\n{}\n\nLINEAGE\n{}\n\nBEHAVIOUR\n{}\n\nFINAL\n{}",if static_block{"BLOCK"}else if static_warn{"WARN"}else{"PASS"},result["domains"]["lineage"].get("lineage").and_then(Value::as_str).unwrap_or("UNVERIFIED"),result["domains"]["behavioural_security"]["report"].get("state").and_then(Value::as_str).unwrap_or("NOT_RUN"),decision);}
+    let code=security_decision_exit_code(decision);
+    if code!=0{std::process::exit(code);}
     Ok(())
 }
 

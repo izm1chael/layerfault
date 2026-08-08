@@ -62,17 +62,19 @@ pub fn run(
         .with_context(|| format!("unable to load admitted GGUF '{}' into embedded backend", model_path.display()))?;
     let architecture = model.architecture().to_owned();
 
-    let mut config = candelabra::InferenceConfig::default();
-    config.prompt = prompt.to_owned();
-    config.max_tokens = max_tokens;
-    config.temperature = 0.0;
-    config.max_duration_secs = Some(timeout_seconds);
-    config.model_id = "local-admitted-model".to_owned();
-    config.filename = model_path
-        .file_name()
-        .and_then(|v| v.to_str())
-        .unwrap_or("model.gguf")
-        .to_owned();
+    let config = candelabra::InferenceConfig {
+        prompt: prompt.to_owned(),
+        max_tokens,
+        temperature: 0.0,
+        max_duration_secs: Some(timeout_seconds),
+        model_id: "local-admitted-model".to_owned(),
+        filename: model_path
+            .file_name()
+            .and_then(|v| v.to_str())
+            .unwrap_or("model.gguf")
+            .to_owned(),
+        ..Default::default()
+    };
 
     let cancel = Arc::new(AtomicBool::new(false));
     let cancel_for_callback = Arc::clone(&cancel);
@@ -162,7 +164,7 @@ fn hash_path(path: &Path) -> Result<String> {
 mod tests {
     #[test]
     fn hard_caps_are_bounded() {
-        assert!(super::MAX_TOKENS <= 4096);
-        assert!(super::MAX_OUTPUT_BYTES <= 1024 * 1024);
+        const _: () = assert!(super::MAX_TOKENS <= 4096);
+        const _: () = assert!(super::MAX_OUTPUT_BYTES <= 1024 * 1024);
     }
 }

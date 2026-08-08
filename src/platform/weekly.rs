@@ -41,7 +41,8 @@ pub fn render(review:&WeeklyReview,public_base:Option<&str>)->NewsletterBodies{
 }
 
 pub fn send_smtp(bodies:&NewsletterBodies,to:&str,from:&str,host:&str,username:Option<&str>,password:Option<&str>,dry_run:bool)->Result<()> {
-    if dry_run{return Ok(());}if host.trim().is_empty(){bail!("SMTP host is required");}
+    if dry_run{return Ok(());}
+    if host.trim().is_empty(){bail!("SMTP host is required");}
     let message=Message::builder().from(from.parse().context("invalid newsletter From address")?).to(to.parse().context("invalid newsletter To address")?).subject(&bodies.subject).header(lettre::message::header::ContentType::TEXT_HTML).body(bodies.html.clone())?;
     let mut builder=SmtpTransport::relay(host).context("unable to configure TLS SMTP relay")?;
     if let (Some(user),Some(pass))=(username,password){builder=builder.credentials(Credentials::new(user.to_owned(),pass.to_owned()));}

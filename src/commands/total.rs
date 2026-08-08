@@ -20,7 +20,10 @@ pub(crate) fn run_dataset(args: DatasetArgs) -> Result<()> {
         }
         DatasetCommand::PoisoningReview { dataset, json: emit_json } => {
             let report=layerfault::dataset::poisoning_review(&dataset)?;
-            if emit_json{println!("{}",serde_json::to_string_pretty(&report)?);}else{println!("DATASET POISONING EVIDENCE\n{}\n{} record(s) analysed\n{} indicator(s)\n\n{}",report.state,report.records_analyzed,report.indicators.len(),report.boundary);for indicator in report.indicators{println!("{} [{}] x{} — {}",indicator.rule_id,indicator.confidence,indicator.count,indicator.detail);}}
+            if emit_json{println!("{}",serde_json::to_string_pretty(&report)?);}else{println!("DATASET POISONING EVIDENCE\n{}\n{} record(s) analysed\n{} indicator(s)\n\n{}",report.state,report.records_analyzed,report.indicators.len(),report.boundary);for indicator in &report.indicators{println!("{} [{}] x{} — {}",indicator.rule_id,indicator.confidence,indicator.count,indicator.detail);}}
+            if report.state != "NO_SUSPICIOUS_INDICATORS_OBSERVED" {
+                std::process::exit(1);
+            }
         }
     }
     Ok(())
@@ -74,7 +77,9 @@ pub(crate) fn run_platform(args: PlatformArgs) -> Result<()> {
         PlatformCommand::Doctor { database,json:emit_json } => {let mut db=layerfault::platform::db::PlatformDb::connect(&database)?;db.migrate()?;let state=db.aggregate()?;if emit_json{println!("{}",serde_json::to_string_pretty(&state)?);}else{println!("PLATFORM OK\n{}",serde_json::to_string_pretty(&state)?);}}
         PlatformCommand::Serve { database,listen } => {let config=layerfault::platform::PlatformConfig::from_values(database,Some(listen))?;layerfault::platform::web::serve(config)?;}
         PlatformCommand::Worker { database,once } => {let config=layerfault::platform::PlatformConfig::from_values(database,None)?;layerfault::platform::worker::run_loop(&config,once)?;}
-        PlatformCommand::Crawl { database,limit,cursor,continuous,interval_seconds,json:emit_json } => {let mut db=layerfault::platform::db::PlatformDb::connect(&database)?;db.migrate()?;let mut next=cursor.or(db.crawl_cursor("huggingface:models")?);loop{let page=layerfault::platform::worker::crawl_once(&mut db,limit,next.as_deref())?;if let Some(value)=page.next.as_deref(){db.set_crawl_cursor("huggingface:models",value)?;}if emit_json{println!("{}",serde_json::to_string(&page)?);}else{println!("Queued up to {} immutable revision review job(s). Next cursor: {}",page.models.len(),page.next.as_deref().unwrap_or("none"));}next=page.next;if !continuous{break;}std::thread::sleep(std::time::Duration::from_secs(interval_seconds.clamp(60,86_400)));}}
+        PlatformCommand::Crawl { database,limit,cursor,continuous,interval_seconds,json:emit_json } => {let mut db=layerfault::platform::db::PlatformDb::connect(&database)?;db.migrate()?;let mut next=cursor.or(db.crawl_cursor("huggingface:models")?);loop{let page=layerfault::platform::worker::crawl_once(&mut db,limit,next.as_deref())?;if let Some(value)=page.next.as_deref(){db.set_crawl_cursor("huggingface:models",value)?;}
+            if emit_json{println!("{}",serde_json::to_string(&page)?);}else{println!("Queued up to {} immutable revision review job(s). Next cursor: {}",page.models.len(),page.next.as_deref().unwrap_or("none"));}next=page.next;
+            if !continuous{break;}std::thread::sleep(std::time::Duration::from_secs(interval_seconds.clamp(60,86_400)));}}
         PlatformCommand::PublishWeekly { database,json:emit_json } => {let mut db=layerfault::platform::db::PlatformDb::connect(&database)?;db.migrate()?;let review=layerfault::platform::weekly::generate(&mut db)?;if emit_json{println!("{}",serde_json::to_string_pretty(&review)?);}else{println!("Published local weekly review {}",review.period);}}
         PlatformCommand::Newsletter { command } => run_newsletter(command)?,
     }Ok(())

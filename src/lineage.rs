@@ -137,7 +137,7 @@ pub fn compare_snapshots(base: ModelSnapshot, derived: ModelSnapshot, claim: Opt
                 }
             }
             TransformationType::LoraAdapter => {
-                if derived.claims.get("adapter.base_model_name_or_path").is_none() {
+                if !derived.claims.contains_key("adapter.base_model_name_or_path") {
                     findings.push(finding(
                         "LF-ADAPTER-BASE-UNVERIFIED", "adapter", "WARN", "MEDIUM",
                         "LoRA base claim is absent", "No adapter base_model_name_or_path claim was found.",

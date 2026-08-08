@@ -244,6 +244,23 @@ pub fn poisoning_review(path: &Path) -> Result<PoisoningReview> {
         }
     }
 
+    let coverage_limited: Vec<String> = dataset
+        .files
+        .iter()
+        .filter(|file| {
+            file.format == DatasetFormat::ParquetOpaque
+                || (file.parsed_records == 0 && file.parse_warning.is_some())
+        })
+        .map(|file| file.path.clone())
+        .take(MAX_DUPLICATE_EXAMPLES)
+        .collect();
+    if !coverage_limited.is_empty() {
+        indicators.insert(
+            "LF-DATASET-COVERAGE-LIMIT".to_owned(),
+            (coverage_limited.len() as u64, coverage_limited),
+        );
+    }
+
     let indicators: Vec<PoisonIndicator> = indicators
         .into_iter()
         .map(|(rule_id, (count, examples))| PoisonIndicator {
@@ -254,7 +271,10 @@ pub fn poisoning_review(path: &Path) -> Result<PoisoningReview> {
             examples,
         })
         .collect();
-    let state = if indicators.iter().any(|value| value.rule_id == "LF-DATASET-RARE-TRIGGER-CORRELATION") {
+    let state = if indicators
+        .iter()
+        .any(|value| value.rule_id == "LF-DATASET-RARE-TRIGGER-CORRELATION")
+    {
         "ANOMALOUS"
     } else if indicators.is_empty() {
         "NO_SUSPICIOUS_INDICATORS_OBSERVED"
@@ -442,8 +462,8 @@ fn unsafe_code_like(value:&str)->bool{let lower=value.to_ascii_lowercase();["she
 fn add(map:&mut BTreeMap<String,(u64,Vec<String>)>,rule:&str,text:&str){let entry=map.entry(rule.to_owned()).or_insert((0,Vec::new()));entry.0=entry.0.saturating_add(1);if entry.1.len()<MAX_DUPLICATE_EXAMPLES{entry.1.push(bounded(text,240));}}
 fn bounded(value:&str,cap:usize)->String{if value.len()<=cap{return value.to_owned();}let end=nearest_boundary(value,cap);format!("{}…",&value[..end])}
 fn nearest_boundary(value:&str,mut end:usize)->usize{end=end.min(value.len());while end>0&&!value.is_char_boundary(end){end-=1;}end}
-fn confidence(rule:&str)->&'static str{match rule{"LF-DATASET-RARE-TRIGGER-CORRELATION"=>"MEDIUM","LF-DATASET-CREDENTIAL-LIKE"=>"MEDIUM",_=>"LOW"}}
-fn detail(rule:&str)->&'static str{match rule{"LF-DATASET-DUPLICATE-CONCENTRATION"=>"Repeated records may reflect contamination, oversampling or deliberate trigger amplification; investigate in context.","LF-DATASET-RARE-TRIGGER-CORRELATION"=>"A relatively rare token is strongly concentrated in one observed label/target in the bounded sample.","LF-DATASET-ZERO-WIDTH"=>"Zero-width Unicode was present in dataset content and can hide trigger text or formatting.","LF-DATASET-URL-CONCENTRATION"=>"URL-bearing content was observed; high/repeated concentration can be relevant to targeted-content poisoning.","LF-DATASET-CREDENTIAL-LIKE"=>"Credential-like material was observed and may indicate accidental secret contamination.","LF-DATASET-UNSAFE-CODE-PATTERN"=>"Security-sensitive insecure-code patterns were observed in training text.",_=>"Dataset anomaly requires investigation."}}
+fn confidence(rule:&str)->&'static str{match rule{"LF-DATASET-RARE-TRIGGER-CORRELATION"=>"MEDIUM","LF-DATASET-CREDENTIAL-LIKE"=>"MEDIUM","LF-DATASET-COVERAGE-LIMIT"=>"HIGH",_=>"LOW"}}
+fn detail(rule:&str)->&'static str{match rule{"LF-DATASET-DUPLICATE-CONCENTRATION"=>"Repeated records may reflect contamination, oversampling or deliberate trigger amplification; investigate in context.","LF-DATASET-RARE-TRIGGER-CORRELATION"=>"A relatively rare token is strongly concentrated in one observed label/target in the bounded sample.","LF-DATASET-ZERO-WIDTH"=>"Zero-width Unicode was present in dataset content and can hide trigger text or formatting.","LF-DATASET-URL-CONCENTRATION"=>"URL-bearing content was observed; high/repeated concentration can be relevant to targeted-content poisoning.","LF-DATASET-CREDENTIAL-LIKE"=>"Credential-like material was observed and may indicate accidental secret contamination.","LF-DATASET-UNSAFE-CODE-PATTERN"=>"Security-sensitive insecure-code patterns were observed in training text.","LF-DATASET-COVERAGE-LIMIT"=>"One or more dataset members could be fingerprinted but not record-parsed by this build. Layerfault will not report a clean poisoning review when material dataset content was opaque or beyond the parsing cap.",_=>"Dataset anomaly requires investigation."}}
 
 fn hash_file(path:&Path)->Result<String>{
     let mut file=crate::safeio::open_readonly_nofollow(path)?;
@@ -454,9 +474,33 @@ fn hash_file(path:&Path)->Result<String>{
 }
 
 #[cfg(test)]
-mod tests{
+mod tests {
     #[test]
-    fn detects_zero_width(){assert!(super::contains_zero_width("hello\u{200b}world"));}
+    fn detects_zero_width() {
+        assert!(super::contains_zero_width("hello\u{200b}world"));
+    }
+
     #[test]
-    fn normalizes_whitespace(){assert_eq!(super::normalize(" A  B\nC "),"a b c");}
+    fn normalizes_whitespace() {
+        assert_eq!(super::normalize(" A  B\nC "), "a b c");
+    }
+
+    #[test]
+    fn opaque_parquet_does_not_report_clean_poisoning_review() {
+        let root = std::env::temp_dir().join(format!(
+            "layerfault-dataset-parquet-limit-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).expect("create dataset fixture");
+        std::fs::write(root.join("train.parquet"), b"PAR1bounded-fixturePAR1")
+            .expect("write parquet fixture");
+        let report = super::poisoning_review(&root).expect("poisoning review");
+        assert_eq!(report.state, "REVIEW");
+        assert!(report
+            .indicators
+            .iter()
+            .any(|indicator| indicator.rule_id == "LF-DATASET-COVERAGE-LIMIT"));
+        let _ = std::fs::remove_dir_all(root);
+    }
 }
