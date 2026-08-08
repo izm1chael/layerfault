@@ -4,22 +4,58 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 fn main() {
-    let mut files = Vec::new();
+    let mut build_files = Vec::new();
     for root in ["src", "schemas", "advisories", "policies"] {
-        collect(Path::new(root), &mut files);
+        collect(Path::new(root), &mut build_files);
     }
     for file in ["Cargo.toml", "Cargo.lock", "THREATS.md"] {
         let path = PathBuf::from(file);
         if path.is_file() {
-            files.push(path);
+            build_files.push(path);
         }
     }
-    files.sort();
-
-    let mut hasher = Sha256::new();
-    hasher.update(b"layerfault-build-identity\0");
-    for path in &files {
+    build_files.sort();
+    build_files.dedup();
+    for path in &build_files {
         println!("cargo:rerun-if-changed={}", path.display());
+    }
+    println!(
+        "cargo:rustc-env=LAYERFAULT_BUILD_ID={}",
+        digest_files(b"layerfault-build-identity\0", &build_files)
+    );
+
+    // Persistent scan evidence is intentionally invalidated by detector/parser
+    // semantics, not by unrelated CLI, platform, documentation or policy edits.
+    // The full build identity is still embedded separately for evidence/audit.
+    let mut scanner_files = Vec::new();
+    for root in ["src/scanner", "src/formats"] {
+        collect(Path::new(root), &mut scanner_files);
+    }
+    for file in [
+        "src/package.rs",
+        "src/safeio.rs",
+        "src/hashcache.rs",
+        "Cargo.toml",
+        "Cargo.lock",
+        "build.rs",
+    ] {
+        let path = PathBuf::from(file);
+        if path.is_file() {
+            scanner_files.push(path);
+        }
+    }
+    scanner_files.sort();
+    scanner_files.dedup();
+    println!(
+        "cargo:rustc-env=LAYERFAULT_SCANNER_REVISION={}",
+        digest_files(b"layerfault-scanner-contract\0", &scanner_files)
+    );
+}
+
+fn digest_files(domain: &[u8], files: &[PathBuf]) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(domain);
+    for path in files {
         let rel = path.to_string_lossy().replace('\\', "/");
         hasher.update(rel.as_bytes());
         hasher.update([0]);
@@ -37,7 +73,7 @@ fn main() {
     for byte in digest {
         let _ = write!(&mut hex, "{byte:02x}");
     }
-    println!("cargo:rustc-env=LAYERFAULT_BUILD_ID=sha256:{hex}");
+    format!("sha256:{hex}")
 }
 
 fn collect(path: &Path, files: &mut Vec<PathBuf>) {

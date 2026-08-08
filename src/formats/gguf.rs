@@ -18,6 +18,7 @@ pub const MAX_TENSORS: u64 = 1_000_000;
 pub const MAX_ARRAY_ITEMS: u64 = 10_000_000;
 pub const MAX_STRING_BYTES: u64 = 16 * 1024 * 1024;
 pub const MAX_COLLECTED_TEXT_BYTES: usize = 8 * 1024 * 1024;
+pub const MAX_PRIORITY_TEXT_BYTES: usize = 32 * 1024 * 1024;
 pub const MAX_ARRAY_DEPTH: usize = 8;
 pub const DEFAULT_ALIGNMENT: u64 = 32;
 const MAX_CAPTURED_STRING_BYTES: usize = 1024 * 1024;
@@ -76,6 +77,8 @@ pub struct GgufInventory {
     pub metadata: BTreeMap<String, GgufMetadataEntry>,
     pub tensors: Vec<GgufTensor>,
     pub collected_text: String,
+    pub priority_text: String,
+    pub collected_text_truncated: bool,
     pub warnings: Vec<String>,
 }
 
@@ -215,6 +218,13 @@ struct CapturedValue {
     bool_value: Option<bool>,
 }
 
+#[derive(Default)]
+struct MetadataTextCollection {
+    general: String,
+    priority: String,
+    truncated: bool,
+}
+
 fn parse_reader<R: Read + Seek>(mut raw: R, file_len: u64) -> Result<GgufInventory> {
     if file_len < 8 {
         bail!("file is too small to contain GGUF magic and version");
@@ -256,7 +266,7 @@ fn parse_reader<R: Read + Seek>(mut raw: R, file_len: u64) -> Result<GgufInvento
     }
 
     let mut metadata = BTreeMap::new();
-    let mut collected_text = String::new();
+    let mut text_collection = MetadataTextCollection::default();
     let mut alignment = DEFAULT_ALIGNMENT;
 
     for _ in 0..metadata_count {
@@ -272,8 +282,8 @@ fn parse_reader<R: Read + Seek>(mut raw: R, file_len: u64) -> Result<GgufInvento
             &mut reader,
             value_type,
             0,
-            should_collect_metadata(&key),
-            &mut collected_text,
+            metadata_collection_priority(&key),
+            &mut text_collection,
             &mut hasher,
         )?;
         if key == "general.alignment" {
@@ -371,6 +381,13 @@ fn parse_reader<R: Read + Seek>(mut raw: R, file_len: u64) -> Result<GgufInvento
     }
     let mut warnings = Vec::new();
     validate_tensor_ranges(&tensors, tensor_data_len, &mut warnings)?;
+    if text_collection.truncated {
+        warnings.push(format!(
+            "[LF-GGUF-TEXT-LIMIT] security-relevant GGUF metadata exceeded bounded collection budgets ({} MiB priority, {} MiB general); high-priority prompt/template/system metadata is collected independently from descriptive metadata",
+            MAX_PRIORITY_TEXT_BYTES / (1024 * 1024),
+            MAX_COLLECTED_TEXT_BYTES / (1024 * 1024)
+        ));
+    }
 
     Ok(GgufInventory {
         version,
@@ -381,7 +398,9 @@ fn parse_reader<R: Read + Seek>(mut raw: R, file_len: u64) -> Result<GgufInvento
         tensor_data_start,
         metadata,
         tensors,
-        collected_text,
+        collected_text: text_collection.general,
+        priority_text: text_collection.priority,
+        collected_text_truncated: text_collection.truncated,
         warnings,
     })
 }
@@ -393,22 +412,24 @@ fn validate_metadata_key(key: &str) -> Result<()> {
     Ok(())
 }
 
-fn should_collect_metadata(key: &str) -> bool {
+fn metadata_collection_priority(key: &str) -> u8 {
     let key = key.to_ascii_lowercase();
-    key.contains("template")
-        || key.contains("prompt")
-        || key.contains("system")
-        || key.starts_with("general.")
-        || key.contains("license")
-        || key.contains("description")
+    if key.contains("template") || key.contains("prompt") || key.contains("system") {
+        2
+    } else if key.starts_with("general.") || key.contains("license") || key.contains("description")
+    {
+        1
+    } else {
+        0
+    }
 }
 
 fn read_metadata_value<R: Read + Seek>(
     reader: &mut GgufReader<R>,
     value_type: u32,
     depth: usize,
-    collect_strings: bool,
-    collected: &mut String,
+    collection_priority: u8,
+    text_collection: &mut MetadataTextCollection,
     hasher: &mut Sha256,
 ) -> Result<CapturedValue> {
     if depth > MAX_ARRAY_DEPTH {
@@ -464,8 +485,13 @@ fn read_metadata_value<R: Read + Seek>(
             hasher.update((bytes.len() as u64).to_le_bytes());
             hasher.update(&bytes);
             let value = String::from_utf8(bytes).context("GGUF string is not valid UTF-8")?;
-            if collect_strings {
-                append_collected_text(collected, &value);
+            if collection_priority > 0 {
+                let (target, limit) = if collection_priority >= 2 {
+                    (&mut text_collection.priority, MAX_PRIORITY_TEXT_BYTES)
+                } else {
+                    (&mut text_collection.general, MAX_COLLECTED_TEXT_BYTES)
+                };
+                text_collection.truncated |= append_collected_text(target, &value, limit);
             }
             if value.len() <= MAX_CAPTURED_STRING_BYTES {
                 out.string_value = Some(value);
@@ -489,8 +515,8 @@ fn read_metadata_value<R: Read + Seek>(
                     reader,
                     element_type,
                     depth + 1,
-                    collect_strings,
-                    collected,
+                    collection_priority,
+                    text_collection,
                     &mut child,
                 )?;
                 hasher.update(child.finalize());
@@ -516,24 +542,26 @@ fn read_metadata_value<R: Read + Seek>(
     Ok(out)
 }
 
-fn append_collected_text(output: &mut String, value: &str) {
-    if output.len() >= MAX_COLLECTED_TEXT_BYTES {
-        return;
+fn append_collected_text(output: &mut String, value: &str, limit: usize) -> bool {
+    if output.len() >= limit {
+        return !value.is_empty();
     }
-    let remaining = MAX_COLLECTED_TEXT_BYTES - output.len();
-    if !output.is_empty() && remaining > 0 {
+    let separator = if output.is_empty() { 0 } else { 1 };
+    let remaining = limit - output.len();
+    if separator > 0 && remaining > 0 {
         output.push('\n');
     }
-    let allowed = remaining.saturating_sub(1);
+    let allowed = remaining.saturating_sub(separator);
     if value.len() <= allowed {
         output.push_str(value);
-        return;
+        return false;
     }
     let mut end = allowed.min(value.len());
     while end > 0 && !value.is_char_boundary(end) {
         end -= 1;
     }
     output.push_str(&value[..end]);
+    true
 }
 
 fn align_up(value: u64, alignment: u64) -> Result<u64> {

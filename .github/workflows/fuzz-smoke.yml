@@ -28,3 +28,29 @@ jobs:
       - name: Fuzz heuristic engine
         working-directory: fuzz
         run: cargo fuzz run heuristics corpus/heuristics -- -max_total_time=60
+      - name: Fuzz Safetensors parser
+        working-directory: fuzz
+        run: cargo fuzz run safetensors -- -max_total_time=60
+
+      - name: Fuzz ONNX parser
+        working-directory: fuzz
+        run: cargo fuzz run onnx -- -max_total_time=60
+
+      - name: Fuzz TFLite parser
+        working-directory: fuzz
+        run: cargo fuzz run tflite -- -max_total_time=60
+
+      - name: Fuzz Keras archive parser
+        working-directory: fuzz
+        run: cargo fuzz run keras -- -max_total_time=60
+
+      - name: Fuzz package correlation
+        working-directory: fuzz
+        run: cargo fuzz run package -- -max_total_time=60
+      - name: Fuzz TensorFlow SavedModel scanner
+        working-directory: fuzz
+        run: cargo fuzz run tensorflow -- -max_total_time=60
+
+      - name: Fuzz binary object scanner
+        working-directory: fuzz
+        run: cargo fuzz run binary -- -max_total_time=60

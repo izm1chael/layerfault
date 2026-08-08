@@ -2,109 +2,146 @@ use crate::scanner::{
     duration_ms, CheckType, Confidence, FindingClass, LayerScanResult, ScanStatus,
 };
 use anyhow::Result;
+use std::collections::BTreeSet;
 use std::fs::File;
-use std::io::{Read, Seek, SeekFrom};
 use std::time::Instant;
 
 const CHUNK_BYTES: usize = 1024 * 1024;
 const OVERLAP_BYTES: usize = 512;
 const MAX_FINDINGS: usize = 8;
+const MAX_MACHO_COMMAND_BYTES: u64 = 64 * 1024 * 1024;
+const MAX_FAT_ARCHES: u64 = 64;
 
 pub struct BinaryScanner;
 
-impl BinaryScanner {
-    /// Search for complete, structurally plausible ELF/PE objects rather than
-    /// treating a four-byte coincidence as evidence of an embedded executable.
-    pub fn scan_file(
-        file: &File,
-        file_len: u64,
-        layer_digest: &str,
-        media_type: &str,
-    ) -> Result<LayerScanResult> {
-        let started = Instant::now();
-        let mut reader = file.try_clone()?;
-        reader.seek(SeekFrom::Start(0))?;
+/// Incremental executable-object detector used by both the standalone binary
+/// scan and the integrity hash pass. Structural validation always reads from
+/// the already-open descriptor; chunks are only used to discover candidates.
+pub(crate) struct BinaryStreamScanner {
+    carry: Vec<u8>,
+    absolute_read: u64,
+    findings: Vec<String>,
+    seen: BTreeSet<(u8, u64)>,
+    started: Instant,
+}
 
-        let mut read_buf = vec![0_u8; CHUNK_BYTES];
-        let mut carry = Vec::<u8>::new();
-        let mut absolute_read = 0_u64;
-        let mut findings = Vec::new();
+impl BinaryStreamScanner {
+    pub(crate) fn new() -> Self {
+        Self {
+            carry: Vec::new(),
+            absolute_read: 0,
+            findings: Vec::new(),
+            seen: BTreeSet::new(),
+            started: Instant::now(),
+        }
+    }
 
-        loop {
-            let count = reader.read(&mut read_buf)?;
-            if count == 0 {
+    pub(crate) fn observe(&mut self, file: &File, file_len: u64, bytes: &[u8]) -> Result<()> {
+        if bytes.is_empty() || self.findings.len() >= MAX_FINDINGS {
+            self.absolute_read = self.absolute_read.saturating_add(bytes.len() as u64);
+            return Ok(());
+        }
+
+        let chunk_start = self.absolute_read;
+        self.absolute_read = self.absolute_read.saturating_add(bytes.len() as u64);
+        let mut window = Vec::with_capacity(self.carry.len() + bytes.len());
+        window.extend_from_slice(&self.carry);
+        window.extend_from_slice(bytes);
+        let window_start = chunk_start.saturating_sub(self.carry.len() as u64);
+
+        // Scan four-byte object magics in one pass. The earlier ELF-only scanner
+        // already had to touch every byte; folding Mach-O and WASM into the same
+        // walk avoids eight extra full-buffer passes for the Mach-O variants.
+        for (offset, magic) in window.windows(4).enumerate() {
+            if self.findings.len() >= MAX_FINDINGS {
                 break;
             }
+            let absolute = window_start.saturating_add(offset as u64);
+            if magic == b"\x7fELF" {
+                if looks_like_elf_header(&window[offset..])
+                    && validate_elf(file, file_len, absolute)?
+                {
+                    self.push(
+                        1,
+                        absolute,
+                        format!(
+                            "[T12-001] Structurally valid embedded ELF object at file offset 0x{absolute:x}"
+                        ),
+                    );
+                }
+                continue;
+            }
+            if magic == b"\0asm" {
+                if validate_wasm(file, file_len, absolute)? {
+                    self.push(
+                        4,
+                        absolute,
+                        format!(
+                            "[T12-004] Structurally valid WebAssembly module header at file offset 0x{absolute:x}"
+                        ),
+                    );
+                }
+                continue;
+            }
+            let maybe_macho = matches!(magic[0], 0xfe | 0xce | 0xca | 0xbe | 0xbf | 0xcf)
+                && MACHO_MAGICS.iter().any(|candidate| magic == *candidate);
+            if maybe_macho && validate_macho(file, file_len, absolute)? {
+                self.push(
+                    3,
+                    absolute,
+                    format!(
+                        "[T12-003] Structurally valid embedded Mach-O object at file offset 0x{absolute:x}"
+                    ),
+                );
+            }
+        }
 
-            let chunk_start = absolute_read;
-            absolute_read = absolute_read.saturating_add(count as u64);
-
-            let mut window = Vec::with_capacity(carry.len() + count);
-            window.extend_from_slice(&carry);
-            window.extend_from_slice(&read_buf[..count]);
-            let window_start = chunk_start.saturating_sub(carry.len() as u64);
-
-            for offset in find_all(&window, b"\x7fELF") {
-                if !looks_like_elf_header(&window[offset..]) {
+        if self.findings.len() < MAX_FINDINGS {
+            for offset in find_all(&window, b"MZ") {
+                if self.findings.len() >= MAX_FINDINGS {
+                    break;
+                }
+                if !looks_like_dos_header(&window[offset..]) {
                     continue;
                 }
                 let absolute = window_start.saturating_add(offset as u64);
-                if validate_elf(file, file_len, absolute)?
-                    && !findings
-                        .iter()
-                        .any(|finding: &String| finding.contains(&format!("0x{absolute:x}")))
-                {
-                    findings.push(format!(
-                        "[T12-001] Structurally valid embedded ELF object at file offset 0x{absolute:x}"
-                    ));
-                }
-                if findings.len() >= MAX_FINDINGS {
-                    break;
-                }
-            }
-
-            if findings.len() < MAX_FINDINGS {
-                for offset in find_all(&window, b"MZ") {
-                    // Random model weights can contain many two-byte "MZ"
-                    // coincidences. Check the DOS header fields in-memory before
-                    // doing any random file I/O for the PE signature.
-                    if !looks_like_dos_header(&window[offset..]) {
-                        continue;
-                    }
-                    let absolute = window_start.saturating_add(offset as u64);
-                    if validate_pe(file, file_len, absolute)?
-                        && !findings
-                            .iter()
-                            .any(|finding| finding.contains(&format!("0x{absolute:x}")))
-                    {
-                        findings.push(format!(
+                if validate_pe(file, file_len, absolute)? {
+                    self.push(
+                        2,
+                        absolute,
+                        format!(
                             "[T12-002] Structurally valid embedded PE object at file offset 0x{absolute:x}"
-                        ));
-                    }
-                    if findings.len() >= MAX_FINDINGS {
-                        break;
-                    }
+                        ),
+                    );
                 }
             }
-
-            let keep = window.len().min(OVERLAP_BYTES);
-            carry.clear();
-            carry.extend_from_slice(&window[window.len() - keep..]);
         }
 
-        let (status, detail) = if findings.is_empty() {
+        let keep = window.len().min(OVERLAP_BYTES);
+        self.carry.clear();
+        self.carry.extend_from_slice(&window[window.len() - keep..]);
+        Ok(())
+    }
+
+    fn push(&mut self, kind: u8, offset: u64, finding: String) {
+        if self.seen.insert((kind, offset)) && self.findings.len() < MAX_FINDINGS {
+            self.findings.push(finding);
+        }
+    }
+
+    pub(crate) fn finish(self, layer_digest: &str, media_type: &str) -> LayerScanResult {
+        let (status, detail) = if self.findings.is_empty() {
             (ScanStatus::Pass, None)
         } else {
             (
                 ScanStatus::Fail,
                 Some(format!(
-                    "{} structurally plausible embedded executable object(s) detected",
-                    findings.len()
+                    "{} structurally plausible embedded executable/module object(s) detected",
+                    self.findings.len()
                 )),
             )
         };
-
-        Ok(LayerScanResult {
+        LayerScanResult {
             layer_digest: layer_digest.to_owned(),
             media_type: media_type.to_owned(),
             check_type: CheckType::BinarySteganography,
@@ -112,11 +149,57 @@ impl BinaryScanner {
             finding_class: FindingClass::ContentIndicator,
             confidence: Confidence::High,
             detail,
-            matches: findings,
-            duration_ms: duration_ms(started),
-        })
+            matches: self.findings,
+            duration_ms: duration_ms(self.started),
+        }
     }
 }
+
+impl BinaryScanner {
+    /// Search for complete, structurally plausible ELF/PE/Mach-O/WASM objects
+    /// rather than treating short magic-byte coincidences as executable evidence.
+    pub fn scan_file(
+        file: &File,
+        file_len: u64,
+        layer_digest: &str,
+        media_type: &str,
+    ) -> Result<LayerScanResult> {
+        let mut read_buf = vec![0_u8; CHUNK_BYTES];
+        let mut scanner = BinaryStreamScanner::new();
+        let mut offset = 0_u64;
+        while offset < file_len {
+            let count = read_into_at(file, offset, &mut read_buf)?;
+            if count == 0 {
+                break;
+            }
+            scanner.observe(file, file_len, &read_buf[..count])?;
+            offset = offset.saturating_add(count as u64);
+        }
+        Ok(scanner.finish(layer_digest, media_type))
+    }
+
+    /// Cheap package gate for renamed standalone executables. Full structural
+    /// validation still happens in `scan_file` before a finding is emitted.
+    pub fn looks_executable_prefix(prefix: &[u8]) -> bool {
+        prefix.starts_with(b"\x7fELF")
+            || prefix.starts_with(b"MZ")
+            || prefix.starts_with(b"\0asm\x01\0\0\0")
+            || MACHO_MAGICS
+                .iter()
+                .any(|magic| prefix.starts_with(&magic[..]))
+    }
+}
+
+const MACHO_MAGICS: &[&[u8; 4]] = &[
+    b"\xfe\xed\xfa\xce", // MH_MAGIC
+    b"\xce\xfa\xed\xfe", // MH_CIGAM
+    b"\xfe\xed\xfa\xcf", // MH_MAGIC_64
+    b"\xcf\xfa\xed\xfe", // MH_CIGAM_64
+    b"\xca\xfe\xba\xbe", // FAT_MAGIC
+    b"\xbe\xba\xfe\xca", // FAT_CIGAM
+    b"\xca\xfe\xba\xbf", // FAT_MAGIC_64
+    b"\xbf\xba\xfe\xca", // FAT_CIGAM_64
+];
 
 fn looks_like_elf_header(bytes: &[u8]) -> bool {
     if bytes.len() < 20 || bytes.get(0..4) != Some(b"\x7fELF") {
@@ -133,15 +216,11 @@ fn looks_like_dos_header(bytes: &[u8]) -> bool {
     (64..=1024 * 1024).contains(&pe_rel)
 }
 
-fn find_all(haystack: &[u8], needle: &[u8]) -> Vec<usize> {
-    if needle.is_empty() || haystack.len() < needle.len() {
-        return Vec::new();
-    }
+fn find_all<'a>(haystack: &'a [u8], needle: &'a [u8]) -> impl Iterator<Item = usize> + 'a {
     haystack
         .windows(needle.len())
         .enumerate()
-        .filter_map(|(index, window)| (window == needle).then_some(index))
-        .collect()
+        .filter_map(move |(index, window)| (window == needle).then_some(index))
 }
 
 fn validate_elf(file: &File, file_len: u64, offset: u64) -> Result<bool> {
@@ -245,7 +324,6 @@ fn validate_pe(file: &File, file_len: u64, offset: u64) -> Result<bool> {
     {
         return Ok(false);
     }
-
     if optional_size == 0 {
         return Ok(false);
     }
@@ -255,8 +333,8 @@ fn validate_pe(file: &File, file_len: u64, offset: u64) -> Result<bool> {
     };
     let magic = u16::from_le_bytes(optional[..2].try_into().expect("fixed slice"));
     let min_optional_size = match magic {
-        0x010b => 96_u64,  // PE32 fixed fields through NumberOfRvaAndSizes
-        0x020b => 112_u64, // PE32+ fixed fields through NumberOfRvaAndSizes
+        0x010b => 96_u64,
+        0x020b => 112_u64,
         _ => return Ok(false),
     };
     if optional_size < min_optional_size {
@@ -278,9 +356,6 @@ fn validate_pe(file: &File, file_len: u64, offset: u64) -> Result<bool> {
         Some(value) if value <= file_len => value,
         _ => return Ok(false),
     };
-
-    // At least one section must have a bounded raw-data range. This prevents a
-    // random DOS+PE header coincidence from being treated as an executable.
     let table = match read_at(
         file,
         section_table,
@@ -310,20 +385,191 @@ fn validate_pe(file: &File, file_len: u64, offset: u64) -> Result<bool> {
         }
         bounded_section = true;
     }
-
     Ok(bounded_section && section_table_end <= file_len)
 }
 
-fn read_at(file: &File, offset: u64, len: usize) -> Result<Option<Vec<u8>>> {
-    let mut cloned = file.try_clone()?;
-    cloned.seek(SeekFrom::Start(offset))?;
-    let mut bytes = vec![0_u8; len];
-    match cloned.read_exact(&mut bytes) {
-        Ok(()) => Ok(Some(bytes)),
-        Err(error) if error.kind() == std::io::ErrorKind::UnexpectedEof => Ok(None),
-        Err(error) => Err(error.into()),
+fn validate_macho(file: &File, file_len: u64, offset: u64) -> Result<bool> {
+    let magic = match read_at(file, offset, 4)? {
+        Some(bytes) => bytes,
+        None => return Ok(false),
+    };
+    match magic.as_slice() {
+        b"\xfe\xed\xfa\xce" => validate_macho_thin(file, file_len, offset, false, false),
+        b"\xce\xfa\xed\xfe" => validate_macho_thin(file, file_len, offset, true, false),
+        b"\xfe\xed\xfa\xcf" => validate_macho_thin(file, file_len, offset, false, true),
+        b"\xcf\xfa\xed\xfe" => validate_macho_thin(file, file_len, offset, true, true),
+        b"\xca\xfe\xba\xbe" => validate_macho_fat(file, file_len, offset, false, false),
+        b"\xbe\xba\xfe\xca" => validate_macho_fat(file, file_len, offset, true, false),
+        b"\xca\xfe\xba\xbf" => validate_macho_fat(file, file_len, offset, false, true),
+        b"\xbf\xba\xfe\xca" => validate_macho_fat(file, file_len, offset, true, true),
+        _ => Ok(false),
     }
 }
+
+fn validate_macho_thin(
+    file: &File,
+    file_len: u64,
+    offset: u64,
+    little: bool,
+    is_64: bool,
+) -> Result<bool> {
+    let header_size = if is_64 { 32 } else { 28 };
+    let header = match read_at(file, offset, header_size)? {
+        Some(bytes) => bytes,
+        None => return Ok(false),
+    };
+    let cpu_type = read_u32(&header[4..8], little);
+    let file_type = read_u32(&header[12..16], little);
+    let ncmds = read_u32(&header[16..20], little) as u64;
+    let sizeofcmds = read_u32(&header[20..24], little) as u64;
+    if cpu_type == 0
+        || !(1..=12).contains(&file_type)
+        || ncmds == 0
+        || ncmds > 65_535
+        || sizeofcmds < ncmds.saturating_mul(8)
+        || sizeofcmds > MAX_MACHO_COMMAND_BYTES
+    {
+        return Ok(false);
+    }
+    let commands_start = match offset.checked_add(header_size as u64) {
+        Some(value) => value,
+        None => return Ok(false),
+    };
+    let commands_end = match commands_start.checked_add(sizeofcmds) {
+        Some(value) if value <= file_len => value,
+        _ => return Ok(false),
+    };
+    let mut cursor = commands_start;
+    for _ in 0..ncmds {
+        let command = match read_at(file, cursor, 8)? {
+            Some(bytes) => bytes,
+            None => return Ok(false),
+        };
+        let cmd = read_u32(&command[0..4], little);
+        let cmdsize = read_u32(&command[4..8], little) as u64;
+        if cmd == 0 || cmdsize < 8 || !cmdsize.is_multiple_of(4) {
+            return Ok(false);
+        }
+        cursor = match cursor.checked_add(cmdsize) {
+            Some(value) if value <= commands_end => value,
+            _ => return Ok(false),
+        };
+    }
+    Ok(cursor == commands_end)
+}
+
+fn validate_macho_fat(
+    file: &File,
+    file_len: u64,
+    offset: u64,
+    little: bool,
+    is_64: bool,
+) -> Result<bool> {
+    let header = match read_at(file, offset, 8)? {
+        Some(bytes) => bytes,
+        None => return Ok(false),
+    };
+    let arches = read_u32(&header[4..8], little) as u64;
+    if arches == 0 || arches > MAX_FAT_ARCHES {
+        return Ok(false);
+    }
+    let entry_size = if is_64 { 32_u64 } else { 20_u64 };
+    let table_size = match arches.checked_mul(entry_size) {
+        Some(value) => value,
+        None => return Ok(false),
+    };
+    let table_start = match offset.checked_add(8) {
+        Some(value) => value,
+        None => return Ok(false),
+    };
+    let table_end = match table_start.checked_add(table_size) {
+        Some(value) if value <= file_len => value,
+        _ => return Ok(false),
+    };
+    let table = match read_at(file, table_start, table_size as usize)? {
+        Some(bytes) => bytes,
+        None => return Ok(false),
+    };
+    let mut valid_arch = false;
+    for entry in table.chunks_exact(entry_size as usize) {
+        let cpu_type = read_u32(&entry[0..4], little);
+        if cpu_type == 0 {
+            return Ok(false);
+        }
+        let (relative_offset, size) = if is_64 {
+            (
+                read_u64(&entry[8..16], little),
+                read_u64(&entry[16..24], little),
+            )
+        } else {
+            (
+                read_u32(&entry[8..12], little) as u64,
+                read_u32(&entry[12..16], little) as u64,
+            )
+        };
+        if size == 0 {
+            return Ok(false);
+        }
+        let arch_start = match offset.checked_add(relative_offset) {
+            Some(value) if value >= table_end => value,
+            _ => return Ok(false),
+        };
+        let arch_end = match arch_start.checked_add(size) {
+            Some(value) if value <= file_len => value,
+            _ => return Ok(false),
+        };
+        if arch_end <= arch_start {
+            return Ok(false);
+        }
+        if !valid_arch {
+            let magic = read_at(file, arch_start, 4)?.unwrap_or_default();
+            valid_arch = matches!(
+                magic.as_slice(),
+                b"\xfe\xed\xfa\xce"
+                    | b"\xce\xfa\xed\xfe"
+                    | b"\xfe\xed\xfa\xcf"
+                    | b"\xcf\xfa\xed\xfe"
+            );
+        }
+    }
+    Ok(valid_arch)
+}
+
+fn validate_wasm(file: &File, file_len: u64, offset: u64) -> Result<bool> {
+    let header = match read_at(file, offset, 8)? {
+        Some(bytes) => bytes,
+        None => return Ok(false),
+    };
+    Ok(header == b"\0asm\x01\0\0\0" && offset.saturating_add(8) <= file_len)
+}
+
+fn read_at(file: &File, offset: u64, len: usize) -> Result<Option<Vec<u8>>> {
+    let mut bytes = vec![0_u8; len];
+    let mut read = 0usize;
+    while read < len {
+        let count = read_into_at(file, offset.saturating_add(read as u64), &mut bytes[read..])?;
+        if count == 0 {
+            return Ok(None);
+        }
+        read += count;
+    }
+    Ok(Some(bytes))
+}
+
+#[cfg(unix)]
+fn read_into_at(file: &File, offset: u64, bytes: &mut [u8]) -> Result<usize> {
+    use std::os::unix::fs::FileExt;
+    Ok(file.read_at(bytes, offset)?)
+}
+
+#[cfg(windows)]
+fn read_into_at(file: &File, offset: u64, bytes: &mut [u8]) -> Result<usize> {
+    use std::os::windows::fs::FileExt;
+    Ok(file.seek_read(bytes, offset)?)
+}
+
+#[cfg(not(any(unix, windows)))]
+compile_error!("Layerfault binary scanning requires positional file reads on this platform");
 
 fn read_u16(bytes: &[u8], little: bool) -> u16 {
     let bytes: [u8; 2] = bytes.try_into().expect("two bytes");
@@ -360,15 +606,15 @@ mod tests {
     fn minimal_elf64() -> Vec<u8> {
         let mut bytes = vec![0_u8; 128];
         bytes[0..4].copy_from_slice(b"\x7fELF");
-        bytes[4] = 2; // 64-bit
-        bytes[5] = 1; // little-endian
-        bytes[6] = 1; // ELF version
-        bytes[16..18].copy_from_slice(&2_u16.to_le_bytes()); // ET_EXEC
-        bytes[18..20].copy_from_slice(&62_u16.to_le_bytes()); // x86-64
-        bytes[40..48].copy_from_slice(&64_u64.to_le_bytes()); // section table offset
-        bytes[52..54].copy_from_slice(&64_u16.to_le_bytes()); // ELF header size
-        bytes[58..60].copy_from_slice(&64_u16.to_le_bytes()); // section header size
-        bytes[60..62].copy_from_slice(&1_u16.to_le_bytes()); // one section
+        bytes[4] = 2;
+        bytes[5] = 1;
+        bytes[6] = 1;
+        bytes[16..18].copy_from_slice(&2_u16.to_le_bytes());
+        bytes[18..20].copy_from_slice(&62_u16.to_le_bytes());
+        bytes[40..48].copy_from_slice(&64_u64.to_le_bytes());
+        bytes[52..54].copy_from_slice(&64_u16.to_le_bytes());
+        bytes[58..60].copy_from_slice(&64_u16.to_le_bytes());
+        bytes[60..62].copy_from_slice(&1_u16.to_le_bytes());
         bytes
     }
 
@@ -388,53 +634,66 @@ mod tests {
         bytes
     }
 
-    #[test]
-    fn structurally_valid_elf_is_detected() -> Result<()> {
-        let path = std::env::temp_dir().join("layerfault_binary_real_elf");
-        fs::write(&path, minimal_elf64())?;
+    fn minimal_macho64() -> Vec<u8> {
+        let mut bytes = vec![0_u8; 40];
+        bytes[0..4].copy_from_slice(b"\xcf\xfa\xed\xfe");
+        bytes[4..8].copy_from_slice(&0x01000007_u32.to_le_bytes());
+        bytes[8..12].copy_from_slice(&3_u32.to_le_bytes());
+        bytes[12..16].copy_from_slice(&2_u32.to_le_bytes());
+        bytes[16..20].copy_from_slice(&1_u32.to_le_bytes());
+        bytes[20..24].copy_from_slice(&8_u32.to_le_bytes());
+        bytes[32..36].copy_from_slice(&1_u32.to_le_bytes());
+        bytes[36..40].copy_from_slice(&8_u32.to_le_bytes());
+        bytes
+    }
+
+    fn scan_fixture(label: &str, bytes: &[u8]) -> Result<LayerScanResult> {
+        let path =
+            std::env::temp_dir().join(format!("layerfault-binary-{label}-{}", std::process::id()));
+        fs::write(&path, bytes)?;
         let file = File::open(&path)?;
         let result =
             BinaryScanner::scan_file(&file, file.metadata()?.len(), "sha256:test", "model")?;
+        let _ = fs::remove_file(path);
+        Ok(result)
+    }
+
+    #[test]
+    fn structurally_valid_elf_is_detected() -> Result<()> {
+        let result = scan_fixture("elf", &minimal_elf64())?;
         assert_eq!(result.status, ScanStatus::Fail);
         assert!(result.matches.iter().any(|m| m.contains("T12-001")));
-        let _ = fs::remove_file(path);
         Ok(())
     }
 
     #[test]
     fn structurally_valid_pe_is_detected() -> Result<()> {
-        let path = std::env::temp_dir().join("layerfault_binary_real_pe");
-        fs::write(&path, minimal_pe64())?;
-        let file = File::open(&path)?;
-        let result =
-            BinaryScanner::scan_file(&file, file.metadata()?.len(), "sha256:test", "model")?;
+        let result = scan_fixture("pe", &minimal_pe64())?;
         assert_eq!(result.status, ScanStatus::Fail);
         assert!(result.matches.iter().any(|m| m.contains("T12-002")));
-        let _ = fs::remove_file(path);
         Ok(())
     }
 
     #[test]
-    fn four_byte_elf_coincidence_is_not_a_failure() -> Result<()> {
-        let path = std::env::temp_dir().join("layerfault_binary_false_elf");
-        fs::write(&path, b"noise\x7fELFnoise")?;
-        let file = File::open(&path)?;
-        let result =
-            BinaryScanner::scan_file(&file, file.metadata()?.len(), "sha256:test", "model")?;
-        assert_eq!(result.status, ScanStatus::Pass);
-        let _ = fs::remove_file(path);
+    fn structurally_valid_macho_is_detected() -> Result<()> {
+        let result = scan_fixture("macho", &minimal_macho64())?;
+        assert_eq!(result.status, ScanStatus::Fail);
+        assert!(result.matches.iter().any(|m| m.contains("T12-003")));
         Ok(())
     }
 
     #[test]
-    fn four_byte_mz_coincidence_is_not_a_failure() -> Result<()> {
-        let path = std::env::temp_dir().join("layerfault_binary_false_mz");
-        fs::write(&path, b"MZ\x90\x00 but not a PE")?;
-        let file = File::open(&path)?;
-        let result =
-            BinaryScanner::scan_file(&file, file.metadata()?.len(), "sha256:test", "model")?;
+    fn wasm_header_is_detected() -> Result<()> {
+        let result = scan_fixture("wasm", b"\0asm\x01\0\0\0")?;
+        assert_eq!(result.status, ScanStatus::Fail);
+        assert!(result.matches.iter().any(|m| m.contains("T12-004")));
+        Ok(())
+    }
+
+    #[test]
+    fn short_magic_coincidences_are_not_failures() -> Result<()> {
+        let result = scan_fixture("false", b"noise\x7fELFnoiseMZ\x90\x00")?;
         assert_eq!(result.status, ScanStatus::Pass);
-        let _ = fs::remove_file(path);
         Ok(())
     }
 }

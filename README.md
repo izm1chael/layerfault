@@ -72,7 +72,7 @@ GGUF and Safetensors parsing is bounded and hostile-input aware. Layerfault chec
 Model packages can contain more than weights. Layerfault also identifies security-relevant surrounding content such as:
 
 - custom Python, scripts, native libraries and executable content;
-- Hugging Face `auto_map` and `trust_remote_code` requirements;
+- Hugging Face `auto_map` custom-loader mappings and explicit `trust_remote_code` settings;
 - dangerous execution/network primitives;
 - suspicious template/Jinja constructs;
 - Pickle, PyTorch checkpoint, Joblib and other code-capable serialization formats;

@@ -28,6 +28,23 @@ pub struct PackageReport {
     pub findings: Vec<LayerScanResult>,
 }
 
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct PackageFingerprintReport {
+    pub root: String,
+    pub fingerprint: String,
+    pub files: Vec<PackageEntry>,
+    pub total_bytes: u64,
+}
+
+#[derive(Default)]
+struct PackageMemberEvidence {
+    relative_path: String,
+    auto_map: bool,
+    remote_trust: bool,
+    modules: BTreeSet<String>,
+    module_scope_operation: Option<&'static str>,
+}
+
 impl PackageReport {
     pub fn blocking(&self) -> bool {
         self.findings
@@ -81,6 +98,7 @@ pub fn inspect(root: &Path) -> Result<PackageReport> {
 
     paths.sort_by_key(|path| safe_relative(&root, path).unwrap_or_default());
     let mut files = Vec::new();
+    let mut member_evidence = Vec::new();
     let mut total_bytes = 0_u64;
 
     for path in paths {
@@ -98,6 +116,7 @@ pub fn inspect(root: &Path) -> Result<PackageReport> {
             sha256: Some(digest.clone()),
         });
         findings.extend(scan_package_file(&path, &rel, &file, size, &digest)?);
+        member_evidence.push(capture_custom_code_evidence(&rel, &file, size)?);
         let changed = if crate::hashcache::eligible(size) {
             !crate::hashcache::identity_unchanged(&path, &file, &hash.identity)?
         } else {
@@ -116,7 +135,7 @@ pub fn inspect(root: &Path) -> Result<PackageReport> {
         }
     }
 
-    correlate_custom_code(&root, &files, &mut findings)?;
+    correlate_custom_code(&files, &member_evidence, &mut findings);
 
     let fingerprint = package_fingerprint(&files);
     findings.sort_by(|a, b| {
@@ -135,7 +154,71 @@ pub fn inspect(root: &Path) -> Result<PackageReport> {
 }
 
 pub fn fingerprint(root: &Path) -> Result<String> {
-    Ok(inspect(root)?.fingerprint)
+    Ok(fingerprint_report(root)?.fingerprint)
+}
+
+/// Compute package identity without running the deep security scanners. The
+/// same no-follow hashing and race checks are retained, so callers that only
+/// need a stable package identity no longer pay for duplicate content parsing.
+pub fn fingerprint_report(root: &Path) -> Result<PackageFingerprintReport> {
+    let metadata = std::fs::symlink_metadata(root)
+        .with_context(|| format!("Unable to inspect package root '{}'", root.display()))?;
+    if metadata.file_type().is_symlink() {
+        return Err(anyhow!("Package root '{}' is a symlink; supply the real package directory so identity boundaries are explicit", root.display()));
+    }
+    if !metadata.is_dir() {
+        return Err(anyhow!("'{}' is not a directory", root.display()));
+    }
+    let root = root.canonicalize()?;
+    let mut paths = Vec::new();
+    for entry in WalkDir::new(&root).follow_links(false) {
+        let entry = entry?;
+        if entry.depth() == 0 {
+            continue;
+        }
+        let rel = safe_relative(&root, entry.path())?;
+        if ignored_path(&rel) {
+            continue;
+        }
+        if entry.file_type().is_symlink() {
+            return Err(anyhow!(
+                "Package contains symlink '{}'; fingerprint-only identity refuses ambiguous package members",
+                rel
+            ));
+        }
+        if entry.file_type().is_file() {
+            paths.push(entry.into_path());
+        }
+    }
+    paths.sort_by_key(|path| safe_relative(&root, path).unwrap_or_default());
+    let mut files = Vec::new();
+    let mut total_bytes = 0_u64;
+    for path in paths {
+        let rel = safe_relative(&root, &path)?;
+        let file = open_readonly_nofollow(&path)?;
+        let size = file.metadata()?.len();
+        let hash = crate::hashcache::sha256_prefixed(&path, &file)?;
+        if !crate::hashcache::identity_unchanged(&path, &file, &hash.identity)? {
+            return Err(anyhow!(
+                "Package file '{}' changed while its fingerprint was being computed",
+                rel
+            ));
+        }
+        total_bytes = total_bytes.saturating_add(size);
+        files.push(PackageEntry {
+            relative_path: rel,
+            kind: classify(&path).to_owned(),
+            size,
+            sha256: Some(hash.sha256),
+        });
+    }
+    let fingerprint = package_fingerprint(&files);
+    Ok(PackageFingerprintReport {
+        root: root.display().to_string(),
+        fingerprint,
+        files,
+        total_bytes,
+    })
 }
 
 pub fn inspect_member(display_path: &Path, content_path: &Path) -> Result<Vec<LayerScanResult>> {
@@ -244,6 +327,19 @@ fn scan_package_file(
             "LF-SERIALIZATION-BIN",
             format!("Legacy .bin artifact '{}' is opaque to Layerfault; verify the producer and loading path before use", rel),
         ));
+    }
+
+    let executable_prefix = prefix(file, 8)?;
+    if crate::scanner::BinaryScanner::looks_executable_prefix(&executable_prefix) {
+        let binary = crate::scanner::BinaryScanner::scan_file(
+            file,
+            size,
+            digest,
+            "application/vnd.layerfault.package-member",
+        )?;
+        if binary.status == ScanStatus::Fail {
+            out.push(binary);
+        }
     }
 
     if is_native_or_script(&ext, &lower) {
@@ -358,27 +454,53 @@ fn is_documentation_path(rel: &str) -> bool {
             .is_some_and(|name| name.starts_with("readme"))
 }
 
-fn correlate_custom_code(
-    root: &Path,
-    files: &[PackageEntry],
-    findings: &mut Vec<LayerScanResult>,
-) -> Result<()> {
-    let mut auto_map = false;
-    let mut remote_trust = false;
-    let mut modules = BTreeSet::new();
-    for entry in files {
-        if !entry.relative_path.to_ascii_lowercase().ends_with(".json") {
-            continue;
-        }
-        let path = root.join(&entry.relative_path);
-        let bytes = read_all_from_file(&open_readonly_nofollow(&path)?, MAX_TEXT_SCAN_BYTES)?;
-        let Ok(value) = serde_json::from_slice::<serde_json::Value>(&bytes) else {
-            continue;
-        };
-        collect_custom_loader_metadata(&value, &mut auto_map, &mut remote_trust, &mut modules);
+fn capture_custom_code_evidence(
+    rel: &str,
+    file: &std::fs::File,
+    size: u64,
+) -> Result<PackageMemberEvidence> {
+    let mut evidence = PackageMemberEvidence {
+        relative_path: rel.to_owned(),
+        ..PackageMemberEvidence::default()
+    };
+    if size > MAX_TEXT_SCAN_BYTES {
+        return Ok(evidence);
     }
-    if !auto_map || !remote_trust {
-        return Ok(());
+    let lower = rel.to_ascii_lowercase();
+    if !lower.ends_with(".json") && !lower.ends_with(".py") {
+        return Ok(evidence);
+    }
+    let bytes = read_all_from_file(file, MAX_TEXT_SCAN_BYTES)?;
+    if lower.ends_with(".json") {
+        if let Ok(value) = serde_json::from_slice::<serde_json::Value>(&bytes) {
+            collect_custom_loader_metadata(
+                &value,
+                &mut evidence.auto_map,
+                &mut evidence.remote_trust,
+                &mut evidence.modules,
+            );
+        }
+    } else if let Ok(text) = std::str::from_utf8(&bytes) {
+        evidence.module_scope_operation = module_scope_operation(text);
+    }
+    Ok(evidence)
+}
+
+fn correlate_custom_code(
+    files: &[PackageEntry],
+    evidence: &[PackageMemberEvidence],
+    findings: &mut Vec<LayerScanResult>,
+) {
+    let mut modules = BTreeSet::new();
+    let mut package_remote_trust = false;
+    for item in evidence {
+        if item.auto_map {
+            modules.extend(item.modules.iter().cloned());
+        }
+        package_remote_trust |= item.remote_trust;
+    }
+    if modules.is_empty() {
+        return;
     }
 
     for module in modules {
@@ -389,14 +511,19 @@ fn correlate_custom_code(
         else {
             continue;
         };
-        let path = root.join(&entry.relative_path);
-        let file = open_readonly_nofollow(&path)?;
-        let bytes = read_all_from_file(&file, MAX_TEXT_SCAN_BYTES)?;
-        let Ok(text) = std::str::from_utf8(&bytes) else {
+        let Some(item) = evidence.iter().find(|item| {
+            item.relative_path
+                .eq_ignore_ascii_case(&entry.relative_path)
+        }) else {
             continue;
         };
-        let Some(operation) = module_scope_operation(text) else {
+        let Some(operation) = item.module_scope_operation else {
             continue;
+        };
+        let trust_context = if package_remote_trust {
+            "; package metadata also sets trust_remote_code=true"
+        } else {
+            "; this code becomes importable when the caller enables trust_remote_code at runtime"
         };
         findings.push(finding(
             entry.sha256.as_deref().unwrap_or("module"),
@@ -406,12 +533,11 @@ fn correlate_custom_code(
             Confidence::High,
             "LF-CODE-IMPORT-SIDE-EFFECT",
             format!(
-                "Hugging Face auto_map/trust_remote_code routes loading through '{}', which performs '{}' at module scope",
-                entry.relative_path, operation
+                "Hugging Face auto_map routes loading through '{}', which performs '{}' at module scope{}",
+                entry.relative_path, operation, trust_context
             ),
         ));
     }
-    Ok(())
 }
 
 fn collect_custom_loader_metadata(
@@ -891,6 +1017,85 @@ mod tests {
                     .iter()
                     .any(|value| value.contains("LF-CODE-OS-SYSTEM"))
         }));
+        let _ = fs::remove_dir_all(root);
+        Ok(())
+    }
+
+    #[test]
+    fn oversized_json_does_not_abort_package_admission() -> Result<()> {
+        let root = std::env::temp_dir().join(format!(
+            "layerfault-package-large-json-{}",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(&root)?;
+        let mut body = vec![b' '; (MAX_TEXT_SCAN_BYTES + 1024) as usize];
+        body[0] = b'{';
+        let last = body.len() - 1;
+        body[last] = b'}';
+        fs::write(root.join("tokenizer.json"), body)?;
+        let report = inspect(&root)?;
+        assert!(report.findings.iter().any(|finding| finding
+            .matches
+            .iter()
+            .any(|value| value.contains("LF-PACKAGE-TEXT-LIMIT"))));
+        let _ = fs::remove_dir_all(root);
+        Ok(())
+    }
+
+    #[test]
+    fn auto_map_import_side_effect_blocks_without_package_remote_trust_flag() -> Result<()> {
+        let root = std::env::temp_dir().join(format!(
+            "layerfault-package-automap-runtime-trust-{}",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(&root)?;
+        fs::write(
+            root.join("config.json"),
+            br#"{"auto_map":{"AutoModel":"modeling_example.Example"}}"#,
+        )?;
+        fs::write(
+            root.join("modeling_example.py"),
+            b"os.system('echo imported')\n",
+        )?;
+        let report = inspect(&root)?;
+        assert!(report.findings.iter().any(|finding| {
+            finding.status == ScanStatus::Fail
+                && finding
+                    .matches
+                    .iter()
+                    .any(|value| value.contains("LF-CODE-IMPORT-SIDE-EFFECT"))
+        }));
+        let _ = fs::remove_dir_all(root);
+        Ok(())
+    }
+
+    #[test]
+    fn renamed_elf_member_is_detected_by_content() -> Result<()> {
+        let root = std::env::temp_dir().join(format!(
+            "layerfault-package-renamed-elf-{}",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(&root)?;
+        let mut elf = vec![0_u8; 128];
+        elf[0..4].copy_from_slice(b"\x7fELF");
+        elf[4] = 2;
+        elf[5] = 1;
+        elf[6] = 1;
+        elf[16..18].copy_from_slice(&2_u16.to_le_bytes());
+        elf[18..20].copy_from_slice(&62_u16.to_le_bytes());
+        elf[40..48].copy_from_slice(&64_u64.to_le_bytes());
+        elf[52..54].copy_from_slice(&64_u16.to_le_bytes());
+        elf[58..60].copy_from_slice(&64_u16.to_le_bytes());
+        elf[60..62].copy_from_slice(&1_u16.to_le_bytes());
+        fs::write(root.join("weights.dat"), elf)?;
+        let report = inspect(&root)?;
+        assert!(report.findings.iter().any(|finding| finding
+            .matches
+            .iter()
+            .any(|value| value.contains("T12-001"))));
         let _ = fs::remove_dir_all(root);
         Ok(())
     }

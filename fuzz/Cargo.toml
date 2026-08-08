@@ -10,6 +10,7 @@ cargo-fuzz = true
 [dependencies]
 libfuzzer-sys = "0.4"
 layerfault = { path = ".." }
+tempfile = "3"
 
 [[bin]]
 name = "manifest"
@@ -28,6 +29,55 @@ bench = false
 [[bin]]
 name = "heuristics"
 path = "fuzz_targets/heuristics.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "safetensors"
+path = "fuzz_targets/safetensors.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "onnx"
+path = "fuzz_targets/onnx.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "tflite"
+path = "fuzz_targets/tflite.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "keras"
+path = "fuzz_targets/keras.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "package"
+path = "fuzz_targets/package.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "tensorflow"
+path = "fuzz_targets/tensorflow.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "binary"
+path = "fuzz_targets/binary.rs"
 test = false
 doc = false
 bench = false

@@ -28,3 +28,21 @@ Layerfault is an offline-first security and admission-control CLI for local AI m
 This release is intentionally marked as a pre-release. Feature development is frozen while the project undergoes adversarial testing, real-model compatibility testing, false-positive calibration, resource/performance testing and release hardening.
 
 Layerfault does not claim that static artifact inspection can prove opaque neural weights are free of learned backdoors or malicious learned behaviour. See `THREATS.md` for the complete security boundary.
+
+## RC hardening overlay
+
+The live-test hardening pass adds the following before final RC promotion:
+
+- streamed heuristic scanning with no 10 MiB all-or-nothing bypass, invalid-UTF-8 normalization, invisible/bidi de-obfuscation, RegexSet prefiltering, and bounded evidence retention;
+- Hugging Face `auto_map` module-scope correlation without requiring a package-local `trust_remote_code=true` flag, plus safe handling of oversized JSON metadata;
+- content-based package executable detection and structural Mach-O / WebAssembly coverage in addition to ELF / PE;
+- true single-flight descriptor scans across parallel model workers;
+- fused integrity hashing and executable discovery for Ollama model/tensor descriptors and cold standalone GGUF/Safetensors admission;
+- separate priority collection for GGUF prompt/template/system metadata with explicit truncation evidence;
+- ONNX external tensor sidecar containment, range checks, hashing, and compound identity;
+- fingerprint-only package identity paths that do not invoke the complete security scanner;
+- detector-contract-scoped persistent evidence cache revisions;
+- bounded platform HTTP worker/queue handling; and
+- fuzz targets for Safetensors, ONNX, TensorFlow SavedModel, TFLite, Keras, binary-object parsing, and package correlation in addition to the existing manifest/GGUF/heuristic targets.
+
+`number_prefix` remains present transitively in the embedded-inference dependency graph through legacy `indicatif` consumers; documentation now records that accurately instead of claiming the crate disappeared from `Cargo.lock`.

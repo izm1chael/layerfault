@@ -2,12 +2,24 @@
 
 use anyhow::{anyhow, bail, Context, Result};
 use serde::Serialize;
+use sha2::{Digest, Sha256};
+use std::collections::BTreeMap;
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
+use std::path::{Path, PathBuf};
 
 const MAX_FIELDS: u64 = 5_000_000;
 const MAX_STRING: u64 = 4 * 1024 * 1024;
 const MAX_DEPTH: usize = 32;
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct OnnxExternalData {
+    pub location: String,
+    pub relative_path: String,
+    pub offset: Option<u64>,
+    pub length: Option<u64>,
+    pub checksum: Option<String>,
+}
 
 #[derive(Debug, Clone, Serialize)]
 pub struct OnnxSummary {
@@ -23,7 +35,7 @@ pub struct OnnxSummary {
     pub output_count: u64,
     pub opsets: Vec<(String, u64)>,
     pub custom_domains: Vec<String>,
-    pub external_data: Vec<String>,
+    pub external_data: Vec<OnnxExternalData>,
     pub training_info_count: u64,
 }
 
@@ -33,11 +45,12 @@ pub fn inspect(file: &File, len: u64) -> Result<OnnxSummary> {
 }
 
 pub fn scan(
+    path: &Path,
     file: &File,
     len: u64,
     digest: &str,
     media: &str,
-) -> Result<crate::scanner::LayerScanResult> {
+) -> Result<(crate::scanner::LayerScanResult, Option<String>)> {
     let start = std::time::Instant::now();
     match inspect(file, len) {
         Ok(summary) => {
@@ -52,35 +65,186 @@ pub fn scan(
                     summary.custom_domains.join(", ")
                 ));
             }
-            if !summary.external_data.is_empty() {
-                matches.push(format!(
-                    "[LF-ONNX-EXTERNAL-DATA] {} external tensor data reference(s) validated as local relative paths",
-                    summary.external_data.len()
-                ));
-            }
-            Ok(result(
-                digest,
-                media,
-                status,
-                class,
+            let compound_identity = if summary.external_data.is_empty() {
+                None
+            } else {
+                match bind_external_data(path, digest, &summary.external_data) {
+                    Ok((identity, bound)) => {
+                        matches.extend(bound);
+                        Some(identity)
+                    }
+                    Err(error) => {
+                        status = crate::scanner::ScanStatus::Fail;
+                        class = crate::scanner::FindingClass::Integrity;
+                        matches.push(format!(
+                            "[LF-ONNX-EXTERNAL-INTEGRITY] external tensor data could not be integrity-bound: {error}"
+                        ));
+                        None
+                    }
+                }
+            };
+            let detail = if let Some(identity) = &compound_identity {
+                format!(
+                    "ONNX structure validated: {} node(s), {} initializer(s), IR {:?}; {} external tensor sidecar(s) integrity-bound as {}",
+                    summary.node_count,
+                    summary.initializer_count,
+                    summary.ir_version,
+                    summary.external_data.len(),
+                    identity
+                )
+            } else {
                 format!(
                     "ONNX structure validated: {} node(s), {} initializer(s), IR {:?}",
                     summary.node_count, summary.initializer_count, summary.ir_version
-                ),
-                matches,
-                start,
+                )
+            };
+            Ok((
+                result(digest, media, status, class, detail, matches, start),
+                compound_identity,
             ))
         }
-        Err(error) => Ok(result(
-            digest,
-            media,
-            crate::scanner::ScanStatus::Fail,
-            crate::scanner::FindingClass::Structural,
-            format!("Invalid or unsafe ONNX structure: {error}"),
-            vec!["[LF-ONNX-STRUCT] ONNX structural validation failed".to_owned()],
-            start,
+        Err(error) => Ok((
+            result(
+                digest,
+                media,
+                crate::scanner::ScanStatus::Fail,
+                crate::scanner::FindingClass::Structural,
+                format!("Invalid or unsafe ONNX structure: {error}"),
+                vec!["[LF-ONNX-STRUCT] ONNX structural validation failed".to_owned()],
+                start,
+            ),
+            None,
         )),
     }
+}
+
+struct BoundSidecar {
+    path: PathBuf,
+    file: File,
+    identity: crate::hashcache::FileIdentity,
+    len: u64,
+    digest: String,
+}
+
+fn bind_external_data(
+    model_path: &Path,
+    model_digest: &str,
+    external: &[OnnxExternalData],
+) -> Result<(String, Vec<String>)> {
+    let parent = model_path.parent().unwrap_or_else(|| Path::new("."));
+    let parent = parent
+        .canonicalize()
+        .with_context(|| format!("unable to canonicalize ONNX parent '{}'", parent.display()))?;
+    let mut hasher = Sha256::new();
+    hasher.update(b"layerfault-onnx-compound-identity\0");
+    hasher.update(model_digest.as_bytes());
+    hasher.update([0]);
+    let mut matches = Vec::new();
+    let mut sidecars = BTreeMap::<String, BoundSidecar>::new();
+
+    for item in external {
+        let relative = PathBuf::from(&item.relative_path);
+        let candidate = parent.join(&relative);
+        let metadata = std::fs::symlink_metadata(&candidate).with_context(|| {
+            format!(
+                "ONNX external tensor sidecar '{}' is missing or unreadable",
+                item.relative_path
+            )
+        })?;
+        if metadata.file_type().is_symlink() || !metadata.is_file() {
+            bail!(
+                "ONNX external tensor sidecar '{}' must be a regular non-symlink file",
+                item.relative_path
+            );
+        }
+        let canonical = candidate.canonicalize()?;
+        if !canonical.starts_with(&parent) {
+            bail!(
+                "ONNX external tensor sidecar '{}' resolves outside the model directory",
+                item.relative_path
+            );
+        }
+        let cache_key = canonical.to_string_lossy().into_owned();
+        if !sidecars.contains_key(&cache_key) {
+            let sidecar = crate::safeio::open_readonly_nofollow(&canonical)?;
+            let sidecar_len = sidecar.metadata()?.len();
+            let outcome = crate::hashcache::sha256_prefixed(&canonical, &sidecar)?;
+            if !crate::hashcache::identity_unchanged(&canonical, &sidecar, &outcome.identity)? {
+                bail!(
+                    "ONNX external tensor sidecar '{}' changed while being integrity-bound",
+                    item.relative_path
+                );
+            }
+            sidecars.insert(
+                cache_key.clone(),
+                BoundSidecar {
+                    path: canonical.clone(),
+                    file: sidecar,
+                    identity: outcome.identity,
+                    len: sidecar_len,
+                    digest: outcome.sha256,
+                },
+            );
+        }
+        let bound = sidecars
+            .get(&cache_key)
+            .expect("sidecar inserted before lookup");
+        let sidecar_len = bound.len;
+        let sidecar_digest = bound.digest.clone();
+        let offset = item.offset.unwrap_or(0);
+        if offset > sidecar_len {
+            bail!(
+                "ONNX external tensor sidecar '{}' offset {} exceeds file length {}",
+                item.relative_path,
+                offset,
+                sidecar_len
+            );
+        }
+        if let Some(length) = item.length {
+            let end = offset
+                .checked_add(length)
+                .ok_or_else(|| anyhow!("ONNX external tensor range overflows u64"))?;
+            if end > sidecar_len {
+                bail!(
+                    "ONNX external tensor sidecar '{}' range {}..{} exceeds file length {}",
+                    item.relative_path,
+                    offset,
+                    end,
+                    sidecar_len
+                );
+            }
+        }
+        hasher.update(item.relative_path.as_bytes());
+        hasher.update([0]);
+        hasher.update(sidecar_len.to_le_bytes());
+        hasher.update(sidecar_digest.as_bytes());
+        hasher.update(offset.to_le_bytes());
+        hasher.update(item.length.unwrap_or(u64::MAX).to_le_bytes());
+        hasher.update([0xff]);
+        matches.push(format!(
+            "[LF-ONNX-EXTERNAL-DATA] '{}' {} bytes {} offset={} length={}",
+            item.relative_path,
+            sidecar_len,
+            sidecar_digest,
+            offset,
+            item.length
+                .map(|value| value.to_string())
+                .unwrap_or_else(|| "to-eof".to_owned())
+        ));
+    }
+    for bound in sidecars.values() {
+        if !crate::hashcache::identity_unchanged(&bound.path, &bound.file, &bound.identity)? {
+            bail!(
+                "ONNX external tensor sidecar '{}' changed while compound identity was being computed",
+                bound.path.display()
+            );
+        }
+    }
+
+    Ok((
+        format!("lfonnx:sha256:{}", hex::encode(hasher.finalize())),
+        matches,
+    ))
 }
 
 fn parse_model(reader: &mut Proto) -> Result<OnnxSummary> {
@@ -161,8 +325,9 @@ fn parse_model(reader: &mut Proto) -> Result<OnnxSummary> {
 
     out.custom_domains.sort();
     out.custom_domains.dedup();
-    out.external_data.sort();
-    out.external_data.dedup();
+    out.external_data
+        .sort_by(|a, b| a.relative_path.cmp(&b.relative_path));
+    out.external_data.dedup_by(|a, b| a == b);
     Ok(out)
 }
 
@@ -270,6 +435,8 @@ fn parse_node(reader: &mut Proto, out: &mut OnnxSummary) -> Result<()> {
 }
 
 fn parse_tensor(reader: &mut Proto, out: &mut OnnxSummary) -> Result<()> {
+    let mut external = BTreeMap::<String, String>::new();
+    let mut data_location_external = false;
     while let Some(field) = reader.next()? {
         match (field.no, field.wire) {
             (13, 2) => {
@@ -281,12 +448,12 @@ fn parse_tensor(reader: &mut Proto, out: &mut OnnxSummary) -> Result<()> {
                     )?,
                 )? {
                     validate_external_entry(&key, &value)?;
-                    if key == "location" {
-                        validate_external_location(&value)?;
-                        out.external_data.push(value);
+                    if external.insert(key.clone(), value).is_some() {
+                        bail!("duplicate ONNX external_data key '{key}'");
                     }
                 }
             }
+            (14, 0) => data_location_external = reader.varint()? == 1,
             (9, 2) => reader.skip_len(
                 field
                     .len
@@ -294,6 +461,44 @@ fn parse_tensor(reader: &mut Proto, out: &mut OnnxSummary) -> Result<()> {
             )?,
             _ => reader.skip(field)?,
         }
+    }
+
+    if data_location_external || !external.is_empty() {
+        let location = external
+            .get("location")
+            .ok_or_else(|| anyhow!("ONNX external tensor data is missing location"))?
+            .clone();
+        validate_external_location(&location)?;
+        let basepath = external.get("basepath").cloned().unwrap_or_default();
+        if !basepath.is_empty() {
+            validate_external_location(&basepath)?;
+        }
+        let relative_path = if basepath.is_empty() {
+            location.clone()
+        } else {
+            Path::new(&basepath)
+                .join(&location)
+                .to_string_lossy()
+                .replace('\\', "/")
+        };
+        validate_external_location(&relative_path)?;
+        let offset = external
+            .get("offset")
+            .map(|value| value.parse::<u64>())
+            .transpose()
+            .context("ONNX external_data offset is invalid")?;
+        let length = external
+            .get("length")
+            .map(|value| value.parse::<u64>())
+            .transpose()
+            .context("ONNX external_data length is invalid")?;
+        out.external_data.push(OnnxExternalData {
+            location,
+            relative_path,
+            offset,
+            length,
+            checksum: external.get("checksum").cloned(),
+        });
     }
     Ok(())
 }
@@ -610,7 +815,7 @@ mod tests {
         let summary = inspect(&file, bytes.len() as u64).expect("parse nested ONNX");
         assert_eq!(summary.graph_name.as_deref(), Some("graph"));
         assert_eq!(summary.initializer_count, 1);
-        assert_eq!(summary.external_data, vec!["data/weights.bin".to_owned()]);
+        assert_eq!(summary.external_data[0].relative_path, "data/weights.bin");
         let _ = fs::remove_file(path);
     }
 
@@ -620,7 +825,7 @@ mod tests {
         let path = write_fixture("curdir", &bytes);
         let file = File::open(&path).expect("open ONNX fixture");
         let summary = inspect(&file, bytes.len() as u64).expect("parse ONNX");
-        assert_eq!(summary.external_data, vec!["./weights.bin".to_owned()]);
+        assert_eq!(summary.external_data[0].relative_path, "./weights.bin");
         let _ = fs::remove_file(path);
     }
 
@@ -634,5 +839,56 @@ mod tests {
             .to_string()
             .contains("unsafe ONNX external_data location"));
         let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn external_sidecar_is_integrity_bound() -> Result<()> {
+        let root =
+            std::env::temp_dir().join(format!("layerfault-onnx-sidecar-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(root.join("data"))?;
+        let model = model_with_external("data/weights.bin");
+        let model_path = root.join("model.onnx");
+        fs::write(&model_path, &model)?;
+        fs::write(root.join("data/weights.bin"), b"tensor-bytes")?;
+        let file = File::open(&model_path)?;
+        let (finding, compound) = scan(
+            &model_path,
+            &file,
+            model.len() as u64,
+            "sha256:model",
+            "application/x-onnx",
+        )?;
+        assert_ne!(finding.status, crate::scanner::ScanStatus::Fail);
+        assert!(compound
+            .as_deref()
+            .is_some_and(|value| value.starts_with("lfonnx:sha256:")));
+        let _ = fs::remove_dir_all(root);
+        Ok(())
+    }
+
+    #[test]
+    fn missing_external_sidecar_prevents_clean_pass() -> Result<()> {
+        let root = std::env::temp_dir().join(format!(
+            "layerfault-onnx-missing-sidecar-{}",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(&root)?;
+        let model = model_with_external("weights.bin");
+        let model_path = root.join("model.onnx");
+        fs::write(&model_path, &model)?;
+        let file = File::open(&model_path)?;
+        let (finding, compound) = scan(
+            &model_path,
+            &file,
+            model.len() as u64,
+            "sha256:model",
+            "application/x-onnx",
+        )?;
+        assert_eq!(finding.status, crate::scanner::ScanStatus::Fail);
+        assert!(compound.is_none());
+        let _ = fs::remove_dir_all(root);
+        Ok(())
     }
 }

@@ -12,7 +12,8 @@ use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 
 const CACHE_SCHEMA_VERSION: u32 = 1;
-const SCANNER_CACHE_REVISION: &str = env!("LAYERFAULT_BUILD_ID");
+const DIGEST_CACHE_REVISION: &str = "sha256-v1";
+const EVIDENCE_CACHE_REVISION: &str = env!("LAYERFAULT_SCANNER_REVISION");
 const DEFAULT_MIN_CACHE_BYTES: u64 = 16 * 1024 * 1024;
 const MAX_RECORD_BYTES: u64 = 16 * 1024 * 1024;
 const GUARD_BYTES: usize = 4096;
@@ -111,7 +112,7 @@ pub fn sha256_prefixed(path: &Path, file: &File) -> Result<HashOutcome> {
         }
         let record = DigestRecord {
             schema_version: CACHE_SCHEMA_VERSION,
-            scanner_revision: SCANNER_CACHE_REVISION.to_owned(),
+            scanner_revision: DIGEST_CACHE_REVISION.to_owned(),
             identity: final_identity.clone(),
             guard_sha256,
             sha256: sha256.clone(),
@@ -129,6 +130,83 @@ pub fn sha256_prefixed(path: &Path, file: &File) -> Result<HashOutcome> {
         cache_hit: false,
         identity: after,
     })
+}
+
+/// Hash a file while exposing each freshly-read chunk to a caller. When the
+/// digest cache is valid no full read occurs and `streamed` is false; callers
+/// can then perform whatever single pass they still require. This lets cold
+/// artifact admission fuse hashing with executable discovery without weakening
+/// the conservative cache guard/identity checks.
+pub fn sha256_prefixed_with_observer<F>(
+    path: &Path,
+    file: &File,
+    mut observe: F,
+) -> Result<(HashOutcome, bool)>
+where
+    F: FnMut(&[u8]) -> Result<()>,
+{
+    let before = capture_identity(path, file)?;
+    if eligible(before.len) {
+        if let Some(record) = load_digest_record(&before)? {
+            let guard = guard_sha256(file, before.len)?;
+            let after = capture_identity(path, file)?;
+            if after == before && guard == record.guard_sha256 {
+                return Ok((
+                    HashOutcome {
+                        sha256: record.sha256,
+                        cache_hit: true,
+                        identity: before,
+                    },
+                    false,
+                ));
+            }
+        }
+    }
+
+    let sha256 = sha256_uncached_prefixed_with_observer(file, &mut observe)?;
+    let after = capture_identity(path, file)?;
+    if after != before {
+        return Err(anyhow!(
+            "File '{}' changed while its SHA-256 was being computed",
+            path.display()
+        ));
+    }
+
+    if eligible(after.len) {
+        let guard_sha256 = guard_sha256(file, after.len)?;
+        let final_identity = capture_identity(path, file)?;
+        if final_identity != after {
+            return Err(anyhow!(
+                "File '{}' changed while its cache guard was being computed",
+                path.display()
+            ));
+        }
+        let record = DigestRecord {
+            schema_version: CACHE_SCHEMA_VERSION,
+            scanner_revision: DIGEST_CACHE_REVISION.to_owned(),
+            identity: final_identity.clone(),
+            guard_sha256,
+            sha256: sha256.clone(),
+        };
+        store_record("digests", &final_identity, "sha256", &record)?;
+        return Ok((
+            HashOutcome {
+                sha256,
+                cache_hit: false,
+                identity: final_identity,
+            },
+            true,
+        ));
+    }
+
+    Ok((
+        HashOutcome {
+            sha256,
+            cache_hit: false,
+            identity: after,
+        },
+        true,
+    ))
 }
 
 pub fn sha256_hex(path: &Path, file: &File) -> Result<HashOutcome> {
@@ -157,6 +235,25 @@ pub fn sha256_uncached_prefixed(file: &File) -> Result<String> {
     Ok(format!("sha256:{}", hex::encode(hasher.finalize())))
 }
 
+fn sha256_uncached_prefixed_with_observer<F>(file: &File, observe: &mut F) -> Result<String>
+where
+    F: FnMut(&[u8]) -> Result<()>,
+{
+    let mut reader = file.try_clone()?;
+    reader.seek(SeekFrom::Start(0))?;
+    let mut hasher = Sha256::new();
+    let mut buffer = vec![0_u8; 1024 * 1024];
+    loop {
+        let count = reader.read(&mut buffer)?;
+        if count == 0 {
+            break;
+        }
+        hasher.update(&buffer[..count]);
+        observe(&buffer[..count])?;
+    }
+    Ok(format!("sha256:{}", hex::encode(hasher.finalize())))
+}
+
 pub fn identity_unchanged(path: &Path, file: &File, before: &FileIdentity) -> Result<bool> {
     Ok(capture_identity(path, file)? == *before)
 }
@@ -179,7 +276,7 @@ where
         return Ok(None);
     };
     if record.schema_version != CACHE_SCHEMA_VERSION
-        || record.scanner_revision != SCANNER_CACHE_REVISION
+        || record.scanner_revision != EVIDENCE_CACHE_REVISION
         || record.identity != current
         || record.discriminator != discriminator
     {
@@ -215,7 +312,7 @@ where
     }
     let record = EvidenceRecord {
         schema_version: CACHE_SCHEMA_VERSION,
-        scanner_revision: SCANNER_CACHE_REVISION.to_owned(),
+        scanner_revision: EVIDENCE_CACHE_REVISION.to_owned(),
         guard_sha256,
         identity: current.clone(),
         discriminator: discriminator.to_owned(),
@@ -304,7 +401,7 @@ fn load_digest_record(identity: &FileIdentity) -> Result<Option<DigestRecord>> {
         return Ok(None);
     };
     if record.schema_version != CACHE_SCHEMA_VERSION
-        || record.scanner_revision != SCANNER_CACHE_REVISION
+        || record.scanner_revision != DIGEST_CACHE_REVISION
         || record.identity != *identity
         || !valid_prefixed_sha256(&record.sha256)
     {

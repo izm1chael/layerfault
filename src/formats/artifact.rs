@@ -22,6 +22,8 @@ pub struct ArtifactReport {
     pub format: ArtifactFormat,
     pub size: u64,
     pub sha256: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub compound_identity: Option<String>,
     pub results: Vec<LayerScanResult>,
 }
 
@@ -94,30 +96,25 @@ fn inspect_opened(
             ArtifactScanMode::StructureOnly => "structure",
         }
     );
-    if let Some(report) = crate::hashcache::load_evidence::<ArtifactReport>(
-        "artifact-reports",
-        path,
-        &file,
-        &discriminator,
-    )? {
-        if precomputed_sha256
-            .as_deref()
-            .is_none_or(|expected| report.sha256.as_deref() == Some(expected))
-        {
-            return Ok(report);
+    // ONNX reports may bind external tensor sidecars. A cache record keyed only
+    // by the main protobuf file cannot prove those sidecars are still unchanged,
+    // so compound ONNX admission deliberately revalidates them on every scan.
+    let evidence_cache_safe = format != ArtifactFormat::Onnx;
+    if evidence_cache_safe {
+        if let Some(report) = crate::hashcache::load_evidence::<ArtifactReport>(
+            "artifact-reports",
+            path,
+            &file,
+            &discriminator,
+        )? {
+            if precomputed_sha256
+                .as_deref()
+                .is_none_or(|expected| report.sha256.as_deref() == Some(expected))
+            {
+                return Ok(report);
+            }
         }
     }
-    let sha256 = if mode == ArtifactScanMode::Full {
-        match precomputed_sha256 {
-            Some(value) => Some(value),
-            None => Some(crate::hashcache::sha256_prefixed(path, &file)?.sha256),
-        }
-    } else {
-        None
-    };
-    let identity = sha256
-        .clone()
-        .unwrap_or_else(|| format!("file:{}", path.display()));
     let media = match format {
         ArtifactFormat::Gguf => "application/x-gguf",
         ArtifactFormat::Safetensors => "application/x-safetensors",
@@ -130,26 +127,66 @@ fn inspect_opened(
         ArtifactFormat::KerasHdf5 => "application/x-hdf5",
         ArtifactFormat::Unknown => "application/octet-stream",
     };
+    let fuse_binary = mode == ArtifactScanMode::Full
+        && matches!(format, ArtifactFormat::Gguf | ArtifactFormat::Safetensors)
+        && precomputed_sha256.is_none();
+    let mut fused_binary = None;
+    let sha256 = if mode == ArtifactScanMode::Full {
+        match precomputed_sha256 {
+            Some(value) => Some(value),
+            None if fuse_binary => {
+                let mut stream = crate::scanner::binary::BinaryStreamScanner::new();
+                let (outcome, streamed) =
+                    crate::hashcache::sha256_prefixed_with_observer(path, &file, |bytes| {
+                        stream.observe(&file, size, bytes)
+                    })?;
+                let identity = outcome.sha256.clone();
+                fused_binary = Some(if streamed {
+                    stream.finish(&identity, media)
+                } else {
+                    BinaryScanner::scan_file(&file, size, &identity, media)?
+                });
+                Some(identity)
+            }
+            None => Some(crate::hashcache::sha256_prefixed(path, &file)?.sha256),
+        }
+    } else {
+        None
+    };
+    let identity = sha256
+        .clone()
+        .unwrap_or_else(|| format!("file:{}", path.display()));
     let mut results = Vec::new();
+    let mut compound_identity = None;
     match format {
         ArtifactFormat::Gguf => {
             results.extend(MetadataScanner::scan_file_results(
                 &file, size, &identity, media,
             )?);
             if mode == ArtifactScanMode::Full {
-                results.push(BinaryScanner::scan_file(&file, size, &identity, media)?);
+                results.push(match fused_binary.take() {
+                    Some(result) => result,
+                    None => BinaryScanner::scan_file(&file, size, &identity, media)?,
+                });
             }
         }
         ArtifactFormat::Safetensors => {
             results.push(safetensors::scan_file(&file, size, &identity, media)?);
             if mode == ArtifactScanMode::Full {
-                results.push(BinaryScanner::scan_file(&file, size, &identity, media)?);
+                results.push(match fused_binary.take() {
+                    Some(result) => result,
+                    None => BinaryScanner::scan_file(&file, size, &identity, media)?,
+                });
             }
         }
         ArtifactFormat::SafetensorsIndex => {
             results.push(safetensors::scan_index(path, &file, size, &identity, media)?);
         }
-        ArtifactFormat::Onnx => results.push(onnx::scan(&file, size, &identity, media)?),
+        ArtifactFormat::Onnx => {
+            let (finding, compound) = onnx::scan(path, &file, size, &identity, media)?;
+            compound_identity = compound;
+            results.push(finding);
+        }
         ArtifactFormat::TensorFlowSavedModel => results.push(tensorflow::scan_saved_model(&file, size, &identity, media)?),
         ArtifactFormat::TensorFlowCheckpoint => results.push(tensorflow::scan_checkpoint(path, &file, size, &identity, media)?),
         ArtifactFormat::TensorFlowLite => results.push(tflite::scan(&file, size, &identity, media)?),
@@ -184,6 +221,7 @@ fn inspect_opened(
         format,
         size,
         sha256,
+        compound_identity,
         results,
     };
     if !crate::hashcache::identity_unchanged(path, &file, &before)? {
@@ -192,14 +230,16 @@ fn inspect_opened(
             path.display()
         ));
     }
-    crate::hashcache::store_evidence(
-        "artifact-reports",
-        path,
-        &file,
-        &before,
-        &discriminator,
-        &report,
-    )?;
+    if evidence_cache_safe {
+        crate::hashcache::store_evidence(
+            "artifact-reports",
+            path,
+            &file,
+            &before,
+            &discriminator,
+            &report,
+        )?;
+    }
     Ok(report)
 }
 
@@ -207,6 +247,7 @@ pub fn inspect_dir(
     root: &Path,
     recursive: bool,
     mode: ArtifactScanMode,
+    jobs: usize,
 ) -> Result<Vec<ArtifactReport>> {
     if !root.is_dir() {
         return Err(anyhow!("'{}' is not a directory", root.display()));
@@ -230,10 +271,15 @@ pub fn inspect_dir(
         }
     }
     paths.sort();
-    paths
-        .into_par_iter()
-        .map(|path| inspect(&path, mode))
-        .collect()
+    let pool = rayon::ThreadPoolBuilder::new()
+        .num_threads(jobs.clamp(1, 64))
+        .build()?;
+    pool.install(|| {
+        paths
+            .into_par_iter()
+            .map(|path| inspect(&path, mode))
+            .collect()
+    })
 }
 
 fn known_extension(path: &Path) -> bool {

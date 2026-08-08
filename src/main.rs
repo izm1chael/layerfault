@@ -236,6 +236,9 @@ struct ScanDirArgs {
     recursive: bool,
     #[arg(long, default_value_t = false)]
     structure_only: bool,
+    /// Maximum concurrent artifact scans (1-64).
+    #[arg(long, value_parser = parse_jobs)]
+    jobs: Option<usize>,
     #[arg(long, default_value_t = false)]
     json: bool,
 }
@@ -1319,6 +1322,9 @@ fn print_artifact_report(result: &artifact::ArtifactReport) {
         result.size,
         result.sha256.as_deref().unwrap_or("not-computed")
     );
+    if let Some(identity) = &result.compound_identity {
+        println!("  compound_identity={identity}");
+    }
     print_actionable_findings(&result.results);
 }
 

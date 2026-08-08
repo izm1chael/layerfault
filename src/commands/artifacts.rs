@@ -74,7 +74,12 @@ pub(crate) fn run_scan_dir(args: ScanDirArgs) -> Result<()> {
     } else {
         ArtifactScanMode::Full
     };
-    let reports = artifact::inspect_dir(&args.path, args.recursive, mode)?;
+    let reports = artifact::inspect_dir(
+        &args.path,
+        args.recursive,
+        mode,
+        args.jobs.unwrap_or_else(app::default_jobs),
+    )?;
     if args.json {
         let output = reports.iter().map(artifact_json_report).collect::<Vec<_>>();
         println!("{}", serde_json::to_string_pretty(&output)?);

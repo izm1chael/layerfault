@@ -44,7 +44,7 @@ The pre-publication dependency gate also requires:
 
 - `anyhow >= 1.0.103` (fixes RUSTSEC-2026-0190),
 - `crossbeam-epoch >= 0.9.20` (fixes RUSTSEC-2026-0204),
-- `indicatif >= 0.18.6`, which removes the unmaintained `number_prefix` dependency reported by RUSTSEC-2025-0119.
+- Layerfault's direct `indicatif` dependency is pinned to `>= 0.18.6`. The current embedded-inference dependency graph still carries `indicatif 0.17.x` and the unmaintained `number_prefix` crate transitively through `hf-hub` / `tokenizers` (RUSTSEC-2025-0119). This is tracked as an informational supply-chain debt item rather than described as removed; release gates must evaluate the actual `Cargo.lock` graph.
 
 The transactional cleanup installer updates `Cargo.lock` to those resolved versions before running locked builds and tests.
 

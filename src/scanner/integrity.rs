@@ -1,7 +1,8 @@
 use crate::manifest::{resolve_blob_path, Layer};
 use crate::safeio::{open_readonly_nofollow, read_all_from_file};
 use crate::scanner::{
-    duration_ms, CheckType, Confidence, FindingClass, LayerScanResult, ScanStatus,
+    binary::BinaryStreamScanner, duration_ms, CheckType, Confidence, FindingClass, LayerScanResult,
+    ScanStatus,
 };
 use anyhow::{anyhow, Result};
 use digest::Digest;
@@ -18,6 +19,7 @@ const MAX_SIGNATURE_BYTES: u64 = 4096;
 pub struct VerifiedBlob {
     pub file: File,
     pub len: u64,
+    pub binary_scan: Option<LayerScanResult>,
 }
 
 pub struct IntegrityScanner;
@@ -30,6 +32,27 @@ impl IntegrityScanner {
         base_dir: &Path,
         layer: &Layer,
         m: &indicatif::MultiProgress,
+    ) -> Result<(LayerScanResult, Option<VerifiedBlob>)> {
+        Self::open_and_verify_internal(base_dir, layer, m, None)
+    }
+
+    /// Integrity verification with executable-object discovery fused into the
+    /// same sequential read. This avoids reading multi-gigabyte model/tensor
+    /// descriptors a second time solely for ELF/PE/Mach-O/WASM discovery.
+    pub fn open_and_verify_with_binary(
+        base_dir: &Path,
+        layer: &Layer,
+        m: &indicatif::MultiProgress,
+        binary_media_type: &str,
+    ) -> Result<(LayerScanResult, Option<VerifiedBlob>)> {
+        Self::open_and_verify_internal(base_dir, layer, m, Some(binary_media_type))
+    }
+
+    fn open_and_verify_internal(
+        base_dir: &Path,
+        layer: &Layer,
+        m: &indicatif::MultiProgress,
+        binary_media_type: Option<&str>,
     ) -> Result<(LayerScanResult, Option<VerifiedBlob>)> {
         let started = Instant::now();
         let blob_path = resolve_blob_path(base_dir, &layer.digest)?;
@@ -70,8 +93,14 @@ impl IntegrityScanner {
             "[{elapsed_precise}] {bar:40.cyan/blue} {bytes}/{total_bytes} ({eta})",
         )?);
 
+        let mut binary = binary_media_type.map(|_| BinaryStreamScanner::new());
         let mut reader = pb.wrap_read(file.try_clone()?);
-        let computed = hash_reader(&layer.digest, &mut reader)?;
+        let computed = hash_reader(&layer.digest, &mut reader, |bytes| {
+            if let Some(scanner) = binary.as_mut() {
+                scanner.observe(&file, actual_size, bytes)?;
+            }
+            Ok(())
+        })?;
         pb.finish_and_clear();
 
         let expected = layer
@@ -94,11 +123,16 @@ impl IntegrityScanner {
             ));
         }
 
+        let binary_scan = match (binary, binary_media_type) {
+            (Some(scanner), Some(media)) => Some(scanner.finish(&layer.digest, media)),
+            _ => None,
+        };
         Ok((
             result(layer, ScanStatus::Pass, None, duration_ms(started)),
             Some(VerifiedBlob {
                 file,
                 len: actual_size,
+                binary_scan,
             }),
         ))
     }
@@ -217,7 +251,10 @@ impl IntegrityScanner {
     }
 }
 
-fn hash_reader(expected_digest: &str, reader: &mut impl Read) -> Result<String> {
+fn hash_reader<F>(expected_digest: &str, reader: &mut impl Read, mut observe: F) -> Result<String>
+where
+    F: FnMut(&[u8]) -> Result<()>,
+{
     let algorithm = expected_digest
         .split_once(':')
         .map(|(algorithm, _)| algorithm)
@@ -233,6 +270,7 @@ fn hash_reader(expected_digest: &str, reader: &mut impl Read) -> Result<String> 
                     break;
                 }
                 hasher.update(&buffer[..count]);
+                observe(&buffer[..count])?;
             }
             Ok(hex::encode(hasher.finalize()))
         }
@@ -244,6 +282,7 @@ fn hash_reader(expected_digest: &str, reader: &mut impl Read) -> Result<String> 
                     break;
                 }
                 hasher.update(&buffer[..count]);
+                observe(&buffer[..count])?;
             }
             Ok(hex::encode(hasher.finalize()))
         }

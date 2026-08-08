@@ -1,11 +1,16 @@
 use anyhow::{anyhow, Result};
 use std::io::Read;
-use std::sync::{Arc, Mutex};
+use std::sync::{
+    mpsc::{sync_channel, TrySendError},
+    Arc, Mutex,
+};
 use std::time::{SystemTime, UNIX_EPOCH};
 use tiny_http::{Header, Method, Request, Response, Server, StatusCode};
 
 const MAX_REQUEST_BODY: u64 = 1024 * 1024;
 const REQUESTS_PER_MINUTE: u64 = 600;
+const MAX_HTTP_WORKERS: usize = 32;
+const HTTP_QUEUE_DEPTH: usize = 1024;
 
 struct State {
     db: Mutex<super::db::PlatformDb>,
@@ -30,17 +35,51 @@ pub fn serve(config: super::PlatformConfig) -> Result<()> {
             count: 0,
         }),
     });
+    let workers = std::thread::available_parallelism()
+        .map(|value| value.get())
+        .unwrap_or(4)
+        .clamp(2, MAX_HTTP_WORKERS);
+    let (sender, receiver) = sync_channel::<Request>(HTTP_QUEUE_DEPTH);
+    let receiver = Arc::new(Mutex::new(receiver));
+    for index in 0..workers {
+        let receiver = Arc::clone(&receiver);
+        let state = Arc::clone(&state);
+        std::thread::Builder::new()
+            .name(format!("layerfault-http-{index}"))
+            .spawn(move || loop {
+                let request = {
+                    let guard = match receiver.lock() {
+                        Ok(guard) => guard,
+                        Err(_) => return,
+                    };
+                    match guard.recv() {
+                        Ok(request) => request,
+                        Err(_) => return,
+                    }
+                };
+                if let Err(error) = handle(request, &state) {
+                    eprintln!("platform request error: {error:#}");
+                }
+            })?;
+    }
     eprintln!(
-        "Layerfault platform listening on http://{}",
-        state.config.listen
+        "Layerfault platform listening on http://{} with {} bounded worker(s)",
+        state.config.listen, workers
     );
     for request in server.incoming_requests() {
-        let state = Arc::clone(&state);
-        std::thread::spawn(move || {
-            if let Err(error) = handle(request, &state) {
-                eprintln!("platform request error: {error:#}");
+        match sender.try_send(request) {
+            Ok(()) => {}
+            Err(TrySendError::Full(request)) => {
+                let _ = respond_json(
+                    request,
+                    503,
+                    &serde_json::json!({"error":"server request queue is full"}),
+                );
             }
-        });
+            Err(TrySendError::Disconnected(_)) => {
+                return Err(anyhow!("platform HTTP worker pool stopped unexpectedly"));
+            }
+        }
     }
     Ok(())
 }

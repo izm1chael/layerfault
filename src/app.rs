@@ -14,7 +14,10 @@ use rayon::prelude::*;
 use std::collections::BTreeMap;
 use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
+
+type LayerScanCell = Arc<OnceLock<Vec<LayerScanResult>>>;
+type LayerScanCache = Arc<Mutex<BTreeMap<String, LayerScanCell>>>;
 
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct EvaluatedReport {
@@ -72,7 +75,7 @@ pub fn scan_selected(
     } else {
         MultiProgress::new()
     };
-    let cache = Arc::new(Mutex::new(BTreeMap::<String, Vec<LayerScanResult>>::new()));
+    let cache: LayerScanCache = Arc::new(Mutex::new(BTreeMap::new()));
     Ok(pool.install(|| {
         models
             .into_par_iter()
@@ -86,7 +89,7 @@ fn scan_model_safe(
     model_ref: ModelRef,
     options: &ScanOptions<'_>,
     progress: &MultiProgress,
-    cache: &Arc<Mutex<BTreeMap<String, Vec<LayerScanResult>>>>,
+    cache: &LayerScanCache,
 ) -> EvaluatedReport {
     let model_name = model_ref.name.clone();
     match scan_model(base_dir, model_ref, options, progress, cache) {
@@ -119,7 +122,7 @@ fn scan_model(
     model_ref: ModelRef,
     options: &ScanOptions<'_>,
     progress: &MultiProgress,
-    cache: &Arc<Mutex<BTreeMap<String, Vec<LayerScanResult>>>>,
+    cache: &LayerScanCache,
 ) -> Result<EvaluatedReport> {
     let model = manifest::load_model(&model_ref)?;
     let mut results = manifest_compatibility_results(&model);
@@ -199,11 +202,12 @@ fn scan_layer_cached(
     layer: &Layer,
     thresholds: &ThresholdConfig,
     progress: &MultiProgress,
-    cache: &Arc<Mutex<BTreeMap<String, Vec<LayerScanResult>>>>,
+    cache: &LayerScanCache,
 ) -> Vec<LayerScanResult> {
-    // The cache is deliberately scoped to one scan_selected() invocation. It is
-    // keyed by the manifest content digest and scanner semantics, never by mtime
-    // or file size, so it cannot become a persistent trust bypass.
+    // One OnceLock per descriptor key coalesces concurrent misses. Shared base
+    // layers referenced by many models are therefore hashed/scanned once, not
+    // once per racing model worker. Failed scans are removed after all current
+    // waiters receive the same safe result so a later encounter may retry.
     let key = format!(
         "{}|{}|{}|{}|{}",
         layer.digest,
@@ -212,22 +216,31 @@ fn scan_layer_cached(
         thresholds.max_ctx,
         thresholds.max_predict
     );
-    if let Ok(guard) = cache.lock() {
-        if let Some(results) = guard.get(&key) {
-            return results.clone();
-        }
-    }
-    let results = scan_layer_safe(base_dir, layer, thresholds, progress);
-    // Only cache a descriptor whose integrity check succeeded. Failed or
-    // operational results are always re-evaluated if encountered again.
+    let cell = match cache.lock() {
+        Ok(mut guard) => Arc::clone(
+            guard
+                .entry(key.clone())
+                .or_insert_with(|| Arc::new(OnceLock::new())),
+        ),
+        Err(_) => return scan_layer_safe(base_dir, layer, thresholds, progress),
+    };
+    let results = cell
+        .get_or_init(|| scan_layer_safe(base_dir, layer, thresholds, progress))
+        .clone();
+
     let verified = results.iter().any(|result| {
         result.check_type == CheckType::IntegrityHash && result.status == ScanStatus::Pass
     }) && !results
         .iter()
         .any(|result| result.check_type == CheckType::ScanError);
-    if verified {
+    if !verified {
         if let Ok(mut guard) = cache.lock() {
-            guard.entry(key).or_insert_with(|| results.clone());
+            if guard
+                .get(&key)
+                .is_some_and(|current| Arc::ptr_eq(current, &cell))
+            {
+                guard.remove(&key);
+            }
         }
     }
     results
@@ -255,14 +268,25 @@ fn scan_layer(
     thresholds: &ThresholdConfig,
     progress: &MultiProgress,
 ) -> Result<Vec<LayerScanResult>> {
-    let (integrity, verified) = IntegrityScanner::open_and_verify(base_dir, layer, progress)?;
+    let media_type = layer.base_media_type();
+    let full_media = layer.media_type.as_str();
+    let binary_media = matches!(
+        media_type,
+        "application/vnd.ollama.image.model"
+            | "application/vnd.ollama.image.projector"
+            | "application/vnd.ollama.image.adapter"
+            | "application/vnd.ollama.image.draft"
+            | "application/vnd.ollama.image.tensor"
+    );
+    let (integrity, verified) = if binary_media {
+        IntegrityScanner::open_and_verify_with_binary(base_dir, layer, progress, full_media)?
+    } else {
+        IntegrityScanner::open_and_verify(base_dir, layer, progress)?
+    };
     let mut results = vec![integrity];
     let Some(verified) = verified else {
         return Ok(results);
     };
-
-    let media_type = layer.base_media_type();
-    let full_media = layer.media_type.as_str();
     let is_gguf = file_starts_with_gguf(&verified.file)?;
 
     match media_type {
@@ -270,12 +294,15 @@ fn scan_layer(
         | "application/vnd.ollama.image.projector"
         | "application/vnd.ollama.image.adapter"
         | "application/vnd.ollama.image.draft" => {
-            results.push(scanner::BinaryScanner::scan_file(
-                &verified.file,
-                verified.len,
-                &layer.digest,
-                full_media,
-            )?);
+            results.push(match verified.binary_scan.clone() {
+                Some(result) => result,
+                None => scanner::BinaryScanner::scan_file(
+                    &verified.file,
+                    verified.len,
+                    &layer.digest,
+                    full_media,
+                )?,
+            });
             if is_gguf {
                 results.extend(MetadataScanner::scan_file_results(
                     &verified.file,
@@ -293,12 +320,15 @@ fn scan_layer(
             }
         }
         "application/vnd.ollama.image.tensor" => {
-            results.push(scanner::BinaryScanner::scan_file(
-                &verified.file,
-                verified.len,
-                &layer.digest,
-                full_media,
-            )?);
+            results.push(match verified.binary_scan.clone() {
+                Some(result) => result,
+                None => scanner::BinaryScanner::scan_file(
+                    &verified.file,
+                    verified.len,
+                    &layer.digest,
+                    full_media,
+                )?,
+            });
         }
         "application/vnd.ollama.image.template"
         | "application/vnd.ollama.image.system"

@@ -31,7 +31,7 @@ Every result has three independent dimensions:
 | T9 | Hardcoded Secrets | Heuristics | High-severity content indicator; values are redacted |
 | T10 | Excessive Agency / Execution Reference | Heuristics | Warning unless corroborated |
 | T11 | Subtle Poisoning Indicator | Heuristics | Warning |
-| T12 | Embedded Executable | Binary | Fail only after ELF/PE structural validation |
+| T12 | Embedded Executable | Binary | Fail only after structural ELF/PE/Mach-O validation or a valid WebAssembly module header |
 | T13 | Local Attestation | Integrity | Missing/unverified = Warn; invalid under supplied key = Fail |
 | T14 | PII Leakage | Heuristics | Warning; values are redacted |
 | T15 | GGUF Metadata Content Indicator | Metadata | Inherits the underlying heuristic result |
@@ -86,11 +86,13 @@ A malformed or truncated GGUF produces a structural `FAIL`; it cannot become `PA
 
 Future/unknown tensor encodings are reported as compatibility warnings when the surrounding structure can still be safely bounded. Layerfault avoids claiming exact tensor-size validation for an encoding it does not understand. The v0.3 compatibility table includes the currently assigned GGML types through 42, including MXFP4 (39), NVFP4 (40), Q1_0 (41), and Q2_0 (42).
 
-Selected human-readable GGUF metadata (for example chat templates, prompts, descriptions, and licenses) is passed through the content heuristic engine. Huge tokenizer vocabularies are not copied wholesale into heuristic memory.
+Selected human-readable GGUF metadata (for example chat templates, prompts, descriptions, and licenses) is passed through the content heuristic engine. Prompt/template/system metadata has an independent higher-priority collection budget so verbose descriptions cannot silently crowd it out. If either bounded security-text budget is exhausted, Layerfault emits `LF-GGUF-TEXT-LIMIT` rather than presenting the content view as complete. Huge tokenizer vocabularies are not copied wholesale into heuristic memory.
 
 ## 6. Content heuristics T1-T6, T9-T11, T14
 
-The regex signature table in `scanner/heuristics.rs` preserves individual signature IDs and bounded context.
+The regex signature table in `scanner/heuristics.rs` preserves individual signature IDs and bounded context. File-backed text layers are scanned incrementally across the complete descriptor with overlap between chunks; Layerfault no longer skips heuristic inspection merely because a layer exceeds 10 MiB. Invalid UTF-8 is decoded lossily for detection and zero-width/bidirectional control characters are removed from a parallel detection view while the original bytes remain the integrity evidence. Any normalization without a signature match is surfaced as an operational warning rather than a silent clean pass.
+
+A `RegexSet` first identifies candidate rule families for each streamed window, so Layerfault does not run every extraction expression over every byte. Match counting continues for severity/corroboration, while retained evidence is capped globally and per signature to prevent attacker-controlled report/memory amplification.
 
 Multi-vector escalation is deliberately narrow: only distinct **T1-T6** families participate. Three or more T1-T6 categories in one scanned text layer become a high-confidence `FAIL`. Secret, PII, package, or policy signatures do not accidentally inflate that count.
 
@@ -132,9 +134,9 @@ A fixed seed alone is informational and does not create a warning.
 
 Layerfault no longer treats four bytes such as `\x7fELF` or `MZ` as an executable.
 
-Candidate offsets are escalated to `FAIL` only when the surrounding bytes form a plausible, internally bounded ELF or PE structure. The validator checks fields such as class/endianness/version, machine/header sizes and table bounds for ELF, and DOS/PE signatures, machine, section count, optional-header magic/size, and section-table bounds for PE.
+Candidate offsets are escalated to `FAIL` only after format-specific validation. ELF validation checks class/endianness/version, machine/header sizes and table bounds; PE validates DOS/PE signatures, machine, section count, optional-header magic/size and section-table bounds; Mach-O validates thin/fat headers, architecture ranges and bounded load-command tables. WebAssembly requires the complete standard magic/version header before T12 evidence is emitted.
 
-Random four-byte coincidences therefore remain `PASS`.
+All structural reads are positional and cursor-independent. On cold Ollama model/tensor scans and standalone GGUF/Safetensors admission, executable discovery consumes the same sequential chunks already being hashed, eliminating a second whole-artifact read. Random short magic coincidences therefore remain `PASS`.
 
 ## 9. Local attestation T13
 
@@ -204,7 +206,7 @@ The repository includes three validation layers:
 
 - unit tests for parser/detector edge cases;
 - CLI integration tests that construct isolated synthetic Ollama stores and exercise digest mismatch, malformed GGUF, current parameterized tensor layers, model-failure isolation, redaction, SARIF, and valid legacy GGUF paths; and
-- `cargo-fuzz` targets for manifest JSON, GGUF bytes, and UTF-8 heuristic input.
+- `cargo-fuzz` targets for manifest JSON, GGUF, arbitrary-byte heuristic input, Safetensors, ONNX, TensorFlow SavedModel, TFLite, Keras archives, binary object parsing, and package custom-code correlation.
 
 The scheduled fuzz workflow uses Rust nightly/libFuzzer for bounded smoke runs. Fuzzing is intended to discover panics, pathological parser behavior, and unchecked assumptions; it is not a substitute for semantic detector evaluation.
 
@@ -261,6 +263,10 @@ A `lfpkg:sha256:` identity binds a sorted canonical description of package-relat
 Layerfault rejects a direct package root that is itself a symlink and never follows package-internal symlinks. The Hugging Face cache adapter is intentionally different because snapshots are symlink trees by design: a snapshot link is accepted only when its canonical target stays inside that repository's local `blobs` directory. Content-addressed scan reuse is keyed by both resolved blob and presented filename role so the same bytes linked as `config.json` and `modeling_*.py` cannot inherit the wrong classification.
 
 Whole-package inspection is static and bounded. Layerfault does not import model Python, execute shell/native files, invoke package installers, or deserialize Pickle/PyTorch objects. Code-capable serialization is therefore treated as an admission risk rather than opened with the vulnerable loader it is intended to protect.
+
+Hugging Face `auto_map` is sufficient to establish that a package declares a custom loader relationship; Layerfault does not require a package-local `trust_remote_code=true` value before correlating the referenced local Python module. Runtime callers normally provide that trust decision externally. Correlation uses bytes captured from the same no-follow descriptor already fingerprinted/scanned, avoiding a second path reopen. Oversized JSON members produce bounded coverage evidence instead of aborting package admission.
+
+ONNX models that declare external tensor data are treated as compound artifacts. Each relative sidecar is containment-checked, opened without following the final symlink, range-checked and hashed; the resulting sidecar identities and ranges are bound into an `lfonnx:sha256:` compound identity. A missing, unsafe or changing sidecar is an integrity failure. Compound ONNX reports are not reused from a cache keyed only by the main protobuf file.
 
 ## 17. Runtime advisory boundary
 
