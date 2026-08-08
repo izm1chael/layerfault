@@ -32,6 +32,14 @@ struct Cli {
     #[command(subcommand)]
     command: Option<Command>,
 
+    /// Disable persistent local hash/scan-evidence reuse and force fresh file reads.
+    #[arg(long, global = true, default_value_t = false)]
+    no_cache: bool,
+
+    /// Override the persistent Layerfault cache directory.
+    #[arg(long, global = true, value_name = "PATH")]
+    cache_dir: Option<PathBuf>,
+
     /// Backward-compatible Ollama scan flags. Prefer `layerfault scan ...` for new automation.
     #[command(flatten)]
     legacy_scan: ScanArgs,
@@ -1161,6 +1169,12 @@ struct VersionArgs {
 
 fn main() -> Result<()> {
     let cli = Cli::parse();
+    if cli.no_cache {
+        std::env::set_var("LAYERFAULT_HASH_CACHE", "off");
+    }
+    if let Some(cache_dir) = cli.cache_dir.as_ref() {
+        std::env::set_var("LAYERFAULT_CACHE_DIR", cache_dir.as_os_str());
+    }
     match cli.command {
         Some(Command::Scan(args)) => commands::ollama::run_scan(args),
         Some(Command::Inspect(args)) => commands::artifacts::run_inspect(args),

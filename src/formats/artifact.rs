@@ -5,11 +5,9 @@ use crate::scanner::{
 };
 use anyhow::{anyhow, Context, Result};
 use rayon::prelude::*;
-use sha2::{Digest, Sha256};
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
-use std::time::Instant;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ArtifactScanMode {
@@ -17,7 +15,7 @@ pub enum ArtifactScanMode {
     StructureOnly,
 }
 
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ArtifactReport {
     pub path: String,
     pub name: String,
@@ -42,7 +40,7 @@ pub fn inspect(path: &Path, mode: ArtifactScanMode) -> Result<ArtifactReport> {
     cloned.seek(SeekFrom::Start(0))?;
     let count = cloned.read(&mut prefix)?;
     let format = ArtifactFormat::detect(path, &prefix[..count]);
-    inspect_opened(path, file, format, mode)
+    inspect_opened(path, file, format, mode, None)
 }
 
 pub fn inspect_with_format(
@@ -51,7 +49,7 @@ pub fn inspect_with_format(
     mode: ArtifactScanMode,
 ) -> Result<ArtifactReport> {
     let file = open_readonly_nofollow(path)?;
-    inspect_opened(path, file, format, mode)
+    inspect_opened(path, file, format, mode, None)
 }
 
 pub fn inspect_opened_file(
@@ -60,7 +58,23 @@ pub fn inspect_opened_file(
     format: ArtifactFormat,
     mode: ArtifactScanMode,
 ) -> Result<ArtifactReport> {
-    inspect_opened(path, file.try_clone()?, format, mode)
+    inspect_opened(path, file.try_clone()?, format, mode, None)
+}
+
+pub fn inspect_opened_file_with_sha256(
+    path: &Path,
+    file: &File,
+    format: ArtifactFormat,
+    mode: ArtifactScanMode,
+    sha256: &str,
+) -> Result<ArtifactReport> {
+    inspect_opened(
+        path,
+        file.try_clone()?,
+        format,
+        mode,
+        Some(sha256.to_owned()),
+    )
 }
 
 fn inspect_opened(
@@ -68,10 +82,36 @@ fn inspect_opened(
     file: File,
     format: ArtifactFormat,
     mode: ArtifactScanMode,
+    precomputed_sha256: Option<String>,
 ) -> Result<ArtifactReport> {
     let size = file.metadata()?.len();
+    let before = crate::hashcache::capture_identity(path, &file)?;
+    let discriminator = format!(
+        "artifact:{}:{}",
+        format.as_str(),
+        match mode {
+            ArtifactScanMode::Full => "full",
+            ArtifactScanMode::StructureOnly => "structure",
+        }
+    );
+    if let Some(report) = crate::hashcache::load_evidence::<ArtifactReport>(
+        "artifact-reports",
+        path,
+        &file,
+        &discriminator,
+    )? {
+        if precomputed_sha256
+            .as_deref()
+            .is_none_or(|expected| report.sha256.as_deref() == Some(expected))
+        {
+            return Ok(report);
+        }
+    }
     let sha256 = if mode == ArtifactScanMode::Full {
-        Some(hash_sha256(&file)?)
+        match precomputed_sha256 {
+            Some(value) => Some(value),
+            None => Some(crate::hashcache::sha256_prefixed(path, &file)?.sha256),
+        }
     } else {
         None
     };
@@ -134,7 +174,7 @@ fn inspect_opened(
             });
         }
     }
-    Ok(ArtifactReport {
+    let report = ArtifactReport {
         path: path.display().to_string(),
         name: path
             .file_name()
@@ -145,7 +185,22 @@ fn inspect_opened(
         size,
         sha256,
         results,
-    })
+    };
+    if !crate::hashcache::identity_unchanged(path, &file, &before)? {
+        return Err(anyhow!(
+            "Artifact '{}' changed while it was being scanned",
+            path.display()
+        ));
+    }
+    crate::hashcache::store_evidence(
+        "artifact-reports",
+        path,
+        &file,
+        &before,
+        &discriminator,
+        &report,
+    )?;
+    Ok(report)
 }
 
 pub fn inspect_dir(
@@ -205,21 +260,4 @@ fn known_extension(path: &Path) -> bool {
                 name.to_ascii_lowercase()
                     .ends_with(".safetensors.index.json")
             })
-}
-
-fn hash_sha256(file: &File) -> Result<String> {
-    let started = Instant::now();
-    let mut reader = file.try_clone()?;
-    reader.seek(SeekFrom::Start(0))?;
-    let mut hasher = Sha256::new();
-    let mut buf = vec![0_u8; 1024 * 1024];
-    loop {
-        let read = reader.read(&mut buf)?;
-        if read == 0 {
-            break;
-        }
-        hasher.update(&buf[..read]);
-    }
-    let _ = started;
-    Ok(format!("sha256:{}", hex::encode(hasher.finalize())))
 }

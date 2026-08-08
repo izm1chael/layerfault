@@ -88,7 +88,8 @@ pub fn inspect(root: &Path) -> Result<PackageReport> {
         let file = open_readonly_nofollow(&path)?;
         let size = file.metadata()?.len();
         total_bytes = total_bytes.saturating_add(size);
-        let digest = hash_sha256(&file)?;
+        let hash = crate::hashcache::sha256_prefixed(&path, &file)?;
+        let digest = hash.sha256.clone();
         let kind = classify(&path);
         files.push(PackageEntry {
             relative_path: rel.clone(),
@@ -97,8 +98,12 @@ pub fn inspect(root: &Path) -> Result<PackageReport> {
             sha256: Some(digest.clone()),
         });
         findings.extend(scan_package_file(&path, &rel, &file, size, &digest)?);
-        let after = hash_sha256(&file)?;
-        if after != digest {
+        let changed = if crate::hashcache::eligible(size) {
+            !crate::hashcache::identity_unchanged(&path, &file, &hash.identity)?
+        } else {
+            crate::hashcache::sha256_uncached_prefixed(&file)? != digest
+        };
+        if changed {
             findings.push(finding(
                 &digest,
                 CheckType::PackageSecurity,
@@ -106,10 +111,7 @@ pub fn inspect(root: &Path) -> Result<PackageReport> {
                 FindingClass::Integrity,
                 Confidence::High,
                 "LF-PACKAGE-RACE",
-                format!(
-                    "Package file '{}' changed while it was being scanned: {} -> {}",
-                    rel, digest, after
-                ),
+                format!("Package file '{}' changed while it was being scanned", rel),
             ));
         }
     }
@@ -139,11 +141,16 @@ pub fn fingerprint(root: &Path) -> Result<String> {
 pub fn inspect_member(display_path: &Path, content_path: &Path) -> Result<Vec<LayerScanResult>> {
     let file = open_readonly_nofollow(content_path)?;
     let size = file.metadata()?.len();
-    let digest = hash_sha256(&file)?;
+    let hash = crate::hashcache::sha256_prefixed(content_path, &file)?;
+    let digest = hash.sha256.clone();
     let rel = display_path.display().to_string();
     let mut findings = scan_package_file(display_path, &rel, &file, size, &digest)?;
-    let after = hash_sha256(&file)?;
-    if after != digest {
+    let changed = if crate::hashcache::eligible(size) {
+        !crate::hashcache::identity_unchanged(content_path, &file, &hash.identity)?
+    } else {
+        crate::hashcache::sha256_uncached_prefixed(&file)? != digest
+    };
+    if changed {
         findings.push(finding(
             &digest,
             CheckType::PackageSecurity,
@@ -152,8 +159,8 @@ pub fn inspect_member(display_path: &Path, content_path: &Path) -> Result<Vec<La
             Confidence::High,
             "LF-PACKAGE-RACE",
             format!(
-                "Package member '{}' changed while it was being scanned: {} -> {}",
-                rel, digest, after
+                "Package member '{}' changed while it was being scanned",
+                rel
             ),
         ));
     }
@@ -186,7 +193,13 @@ fn scan_package_file(
     let mut out = Vec::new();
     let format = ArtifactFormat::detect(path, &prefix(file, 8)?);
     if format != ArtifactFormat::Unknown {
-        match artifact::inspect_opened_file(path, file, format, artifact::ArtifactScanMode::Full) {
+        match artifact::inspect_opened_file_with_sha256(
+            path,
+            file,
+            format,
+            artifact::ArtifactScanMode::Full,
+            digest,
+        ) {
             Ok(report) => out.extend(report.results),
             Err(error) => out.push(finding(
                 digest,
@@ -666,21 +679,6 @@ fn find_bytes(haystack: &[u8], needle: &[u8]) -> bool {
     haystack
         .windows(needle.len())
         .any(|window| window == needle)
-}
-
-fn hash_sha256(file: &std::fs::File) -> Result<String> {
-    let mut reader = file.try_clone()?;
-    reader.seek(SeekFrom::Start(0))?;
-    let mut hasher = Sha256::new();
-    let mut buffer = vec![0_u8; 1024 * 1024];
-    loop {
-        let n = reader.read(&mut buffer)?;
-        if n == 0 {
-            break;
-        }
-        hasher.update(&buffer[..n]);
-    }
-    Ok(format!("sha256:{}", hex::encode(hasher.finalize())))
 }
 
 fn finding(

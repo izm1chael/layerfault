@@ -6,7 +6,7 @@ use regex::Regex;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet, HashMap};
-use std::io::{BufRead, BufReader, Read};
+use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 
 const MAX_FILES: usize = 100_000;
@@ -659,17 +659,8 @@ fn detail(rule: &str) -> &'static str {
 }
 
 fn hash_file(path: &Path) -> Result<String> {
-    let mut file = crate::safeio::open_readonly_nofollow(path)?;
-    let mut hasher = Sha256::new();
-    let mut buffer = [0u8; 1024 * 1024];
-    loop {
-        let n = file.read(&mut buffer)?;
-        if n == 0 {
-            break;
-        }
-        hasher.update(&buffer[..n]);
-    }
-    Ok(hex::encode(hasher.finalize()))
+    let file = crate::safeio::open_readonly_nofollow(path)?;
+    Ok(crate::hashcache::sha256_hex(path, &file)?.sha256)
 }
 
 #[cfg(test)]

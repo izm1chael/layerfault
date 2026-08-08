@@ -11,7 +11,7 @@ pub(super) fn duration_ms(started: Instant) -> u64 {
     u64::try_from(millis).unwrap_or(u64::MAX)
 }
 
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct LayerScanResult {
     pub layer_digest: String,
     pub media_type: String,
@@ -24,7 +24,7 @@ pub struct LayerScanResult {
     pub duration_ms: u64,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "PascalCase")]
 pub enum ScanStatus {
     Pass,
@@ -53,7 +53,7 @@ pub enum FindingClass {
     Informational,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "PascalCase")]
 pub enum CheckType {
     IntegrityHash,

@@ -6,7 +6,6 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
-use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 
@@ -117,7 +116,7 @@ pub fn build_snapshot(path: &Path) -> Result<ModelSnapshot> {
 pub fn snapshot_artifact(path: &Path) -> Result<ModelSnapshot> {
     let mut file = crate::safeio::open_readonly_nofollow(path)?;
     let file_len = file.metadata()?.len();
-    let sha = hash_file(&file)?;
+    let sha = crate::hashcache::sha256_hex(path, &file)?.sha256;
     file.seek(SeekFrom::Start(0))?;
     let mut prefix = [0_u8; 8];
     let count = file.read(&mut prefix)?;
@@ -710,22 +709,7 @@ fn hash_optional_file(path: &Path) -> Result<Option<String>> {
         return Ok(None);
     }
     let file = crate::safeio::open_readonly_nofollow(path)?;
-    Ok(Some(hash_file(&file)?))
-}
-
-fn hash_file(file: &File) -> Result<String> {
-    let mut reader = file.try_clone()?;
-    reader.seek(SeekFrom::Start(0))?;
-    let mut hasher = Sha256::new();
-    let mut buffer = [0_u8; 1024 * 1024];
-    loop {
-        let count = reader.read(&mut buffer)?;
-        if count == 0 {
-            break;
-        }
-        hasher.update(&buffer[..count]);
-    }
-    Ok(hex::encode(hasher.finalize()))
+    Ok(Some(crate::hashcache::sha256_hex(path, &file)?.sha256))
 }
 
 fn hash_json<T: Serialize + ?Sized>(value: &T) -> Result<String> {

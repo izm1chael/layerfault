@@ -18,6 +18,7 @@ pub mod evidence;
 pub mod explain;
 pub mod formats;
 pub mod gc;
+pub mod hashcache;
 pub mod hub;
 pub mod inventory;
 pub mod judge;

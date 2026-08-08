@@ -31,6 +31,36 @@ pub fn config_dir() -> Result<PathBuf> {
     }
 }
 
+pub fn cache_dir() -> Result<PathBuf> {
+    if let Ok(value) = std::env::var("LAYERFAULT_CACHE_DIR") {
+        if !value.trim().is_empty() {
+            return Ok(PathBuf::from(value));
+        }
+    }
+
+    #[cfg(windows)]
+    {
+        let base = std::env::var("LOCALAPPDATA")
+            .or_else(|_| std::env::var("APPDATA"))
+            .map(PathBuf::from)
+            .map_err(|_| anyhow!("Cannot determine LOCALAPPDATA; set LAYERFAULT_CACHE_DIR"))?;
+        return Ok(base.join("layerfault").join("cache"));
+    }
+
+    #[cfg(not(windows))]
+    {
+        if let Ok(value) = std::env::var("XDG_CACHE_HOME") {
+            if !value.trim().is_empty() {
+                return Ok(PathBuf::from(value).join("layerfault"));
+            }
+        }
+        let home = std::env::var("HOME")
+            .map(PathBuf::from)
+            .map_err(|_| anyhow!("Cannot determine HOME; set LAYERFAULT_CACHE_DIR"))?;
+        Ok(home.join(".cache").join("layerfault"))
+    }
+}
+
 pub fn ensure_private_dir(path: &Path) -> Result<()> {
     fs::create_dir_all(path).with_context(|| format!("Unable to create '{}'", path.display()))?;
 
