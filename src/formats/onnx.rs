@@ -105,28 +105,55 @@ fn parse_model(reader: &mut Proto) -> Result<OnnxSummary> {
         match (field.no, field.wire) {
             (1, 0) => out.ir_version = Some(reader.varint()?),
             (2, 2) => {
-                out.producer_name =
-                    Some(reader.string(field.len.ok_or_else(|| anyhow!("missing protobuf length"))?)?)
+                out.producer_name = Some(
+                    reader.string(
+                        field
+                            .len
+                            .ok_or_else(|| anyhow!("missing protobuf length"))?,
+                    )?,
+                )
             }
             (3, 2) => {
-                out.producer_version =
-                    Some(reader.string(field.len.ok_or_else(|| anyhow!("missing protobuf length"))?)?)
+                out.producer_version = Some(
+                    reader.string(
+                        field
+                            .len
+                            .ok_or_else(|| anyhow!("missing protobuf length"))?,
+                    )?,
+                )
             }
             (4, 2) => {
-                out.domain =
-                    Some(reader.string(field.len.ok_or_else(|| anyhow!("missing protobuf length"))?)?)
+                out.domain = Some(
+                    reader.string(
+                        field
+                            .len
+                            .ok_or_else(|| anyhow!("missing protobuf length"))?,
+                    )?,
+                )
             }
             (5, 0) => out.model_version = Some(reader.varint()?),
             (7, 2) => parse_graph(
-                &mut reader.sub(field.len.ok_or_else(|| anyhow!("missing protobuf length"))?)?,
+                &mut reader.sub(
+                    field
+                        .len
+                        .ok_or_else(|| anyhow!("missing protobuf length"))?,
+                )?,
                 &mut out,
             )?,
             (8, 2) => out.opsets.push(parse_opset(
-                &mut reader.sub(field.len.ok_or_else(|| anyhow!("missing protobuf length"))?)?,
+                &mut reader.sub(
+                    field
+                        .len
+                        .ok_or_else(|| anyhow!("missing protobuf length"))?,
+                )?,
             )?),
             (20, 2) => {
                 out.training_info_count += 1;
-                reader.skip_len(field.len.ok_or_else(|| anyhow!("missing protobuf length"))?)?;
+                reader.skip_len(
+                    field
+                        .len
+                        .ok_or_else(|| anyhow!("missing protobuf length"))?,
+                )?;
             }
             _ => reader.skip(field)?,
         }
@@ -145,8 +172,11 @@ fn parse_opset(reader: &mut Proto) -> Result<(String, u64)> {
     while let Some(field) = reader.next()? {
         match (field.no, field.wire) {
             (1, 2) => {
-                domain =
-                    reader.string(field.len.ok_or_else(|| anyhow!("missing protobuf length"))?)?
+                domain = reader.string(
+                    field
+                        .len
+                        .ok_or_else(|| anyhow!("missing protobuf length"))?,
+                )?
             }
             (2, 0) => version = reader.varint()?,
             _ => reader.skip(field)?,
@@ -161,28 +191,49 @@ fn parse_graph(reader: &mut Proto, out: &mut OnnxSummary) -> Result<()> {
             (1, 2) => {
                 out.node_count += 1;
                 parse_node(
-                    &mut reader.sub(field.len.ok_or_else(|| anyhow!("missing protobuf length"))?)?,
+                    &mut reader.sub(
+                        field
+                            .len
+                            .ok_or_else(|| anyhow!("missing protobuf length"))?,
+                    )?,
                     out,
                 )?;
             }
             (2, 2) => {
-                out.graph_name =
-                    Some(reader.string(field.len.ok_or_else(|| anyhow!("missing protobuf length"))?)?)
+                out.graph_name = Some(
+                    reader.string(
+                        field
+                            .len
+                            .ok_or_else(|| anyhow!("missing protobuf length"))?,
+                    )?,
+                )
             }
             (5, 2) => {
                 out.initializer_count += 1;
                 parse_tensor(
-                    &mut reader.sub(field.len.ok_or_else(|| anyhow!("missing protobuf length"))?)?,
+                    &mut reader.sub(
+                        field
+                            .len
+                            .ok_or_else(|| anyhow!("missing protobuf length"))?,
+                    )?,
                     out,
                 )?;
             }
             (11, 2) => {
                 out.input_count += 1;
-                reader.skip_len(field.len.ok_or_else(|| anyhow!("missing protobuf length"))?)?;
+                reader.skip_len(
+                    field
+                        .len
+                        .ok_or_else(|| anyhow!("missing protobuf length"))?,
+                )?;
             }
             (12, 2) => {
                 out.output_count += 1;
-                reader.skip_len(field.len.ok_or_else(|| anyhow!("missing protobuf length"))?)?;
+                reader.skip_len(
+                    field
+                        .len
+                        .ok_or_else(|| anyhow!("missing protobuf length"))?,
+                )?;
             }
             _ => reader.skip(field)?,
         }
@@ -196,11 +247,18 @@ fn parse_node(reader: &mut Proto, out: &mut OnnxSummary) -> Result<()> {
     while let Some(field) = reader.next()? {
         match (field.no, field.wire) {
             (4, 2) => {
-                op = reader.string(field.len.ok_or_else(|| anyhow!("missing protobuf length"))?)?
+                op = reader.string(
+                    field
+                        .len
+                        .ok_or_else(|| anyhow!("missing protobuf length"))?,
+                )?
             }
             (7, 2) => {
-                domain =
-                    reader.string(field.len.ok_or_else(|| anyhow!("missing protobuf length"))?)?
+                domain = reader.string(
+                    field
+                        .len
+                        .ok_or_else(|| anyhow!("missing protobuf length"))?,
+                )?
             }
             _ => reader.skip(field)?,
         }
@@ -216,7 +274,11 @@ fn parse_tensor(reader: &mut Proto, out: &mut OnnxSummary) -> Result<()> {
         match (field.no, field.wire) {
             (13, 2) => {
                 if let Some((key, value)) = parse_external_entry(
-                    &mut reader.sub(field.len.ok_or_else(|| anyhow!("missing protobuf length"))?)?,
+                    &mut reader.sub(
+                        field
+                            .len
+                            .ok_or_else(|| anyhow!("missing protobuf length"))?,
+                    )?,
                 )? {
                     validate_external_entry(&key, &value)?;
                     if key == "location" {
@@ -225,9 +287,11 @@ fn parse_tensor(reader: &mut Proto, out: &mut OnnxSummary) -> Result<()> {
                     }
                 }
             }
-            (9, 2) => {
-                reader.skip_len(field.len.ok_or_else(|| anyhow!("missing protobuf length"))?)?
-            }
+            (9, 2) => reader.skip_len(
+                field
+                    .len
+                    .ok_or_else(|| anyhow!("missing protobuf length"))?,
+            )?,
             _ => reader.skip(field)?,
         }
     }
@@ -241,12 +305,20 @@ fn parse_external_entry(reader: &mut Proto) -> Result<Option<(String, String)>> 
         match (field.no, field.wire) {
             (1, 2) => {
                 key = Some(
-                    reader.string(field.len.ok_or_else(|| anyhow!("missing protobuf length"))?)?,
+                    reader.string(
+                        field
+                            .len
+                            .ok_or_else(|| anyhow!("missing protobuf length"))?,
+                    )?,
                 )
             }
             (2, 2) => {
                 value = Some(
-                    reader.string(field.len.ok_or_else(|| anyhow!("missing protobuf length"))?)?,
+                    reader.string(
+                        field
+                            .len
+                            .ok_or_else(|| anyhow!("missing protobuf length"))?,
+                    )?,
                 )
             }
             _ => reader.skip(field)?,
@@ -263,9 +335,9 @@ fn validate_external_entry(key: &str, value: &str) -> Result<()> {
     match key {
         "location" | "checksum" | "basepath" => Ok(()),
         "offset" | "length" => {
-            value
-                .parse::<u64>()
-                .with_context(|| format!("ONNX external_data {key} is not a non-negative integer"))?;
+            value.parse::<u64>().with_context(|| {
+                format!("ONNX external_data {key} is not a non-negative integer")
+            })?;
             Ok(())
         }
         other => bail!("unsupported ONNX external_data key '{other}'"),
@@ -396,8 +468,7 @@ impl Proto {
             bail!("length-delimited protobuf field extends beyond message");
         }
         self.file.seek(SeekFrom::Start(self.pos))?;
-        let mut bytes =
-            vec![0u8; usize::try_from(len).context("protobuf field too large")?];
+        let mut bytes = vec![0u8; usize::try_from(len).context("protobuf field too large")?];
         self.file.read_exact(&mut bytes)?;
         self.pos = end;
         Ok(bytes)
@@ -435,7 +506,11 @@ impl Proto {
                 Ok(())
             }
             1 => self.skip_len(8),
-            2 => self.skip_len(field.len.ok_or_else(|| anyhow!("missing protobuf length"))?),
+            2 => self.skip_len(
+                field
+                    .len
+                    .ok_or_else(|| anyhow!("missing protobuf length"))?,
+            ),
             5 => self.skip_len(4),
             other => bail!("unsupported protobuf wire type {other}"),
         }
@@ -521,10 +596,8 @@ mod tests {
     }
 
     fn write_fixture(label: &str, bytes: &[u8]) -> std::path::PathBuf {
-        let path = std::env::temp_dir().join(format!(
-            "layerfault-onnx-{label}-{}",
-            std::process::id()
-        ));
+        let path =
+            std::env::temp_dir().join(format!("layerfault-onnx-{label}-{}", std::process::id()));
         fs::write(&path, bytes).expect("write ONNX fixture");
         path
     }
@@ -557,7 +630,9 @@ mod tests {
         let path = write_fixture("traversal", &bytes);
         let file = File::open(&path).expect("open ONNX fixture");
         let error = inspect(&file, bytes.len() as u64).expect_err("reject traversal");
-        assert!(error.to_string().contains("unsafe ONNX external_data location"));
+        assert!(error
+            .to_string()
+            .contains("unsafe ONNX external_data location"));
         let _ = fs::remove_file(path);
     }
 }

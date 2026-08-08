@@ -175,14 +175,28 @@ pub fn inspect_dir(
         }
     }
     paths.sort();
-    paths.into_par_iter().map(|path| inspect(&path, mode)).collect()
+    paths
+        .into_par_iter()
+        .map(|path| inspect(&path, mode))
+        .collect()
 }
 
 fn known_extension(path: &Path) -> bool {
     path.extension()
         .and_then(|value| value.to_str())
         .is_some_and(|ext| {
-            matches!(ext.to_ascii_lowercase().as_str(), "gguf" | "safetensors" | "onnx" | "tflite" | "keras" | "h5" | "hdf5" | "index" | "pb")
+            matches!(
+                ext.to_ascii_lowercase().as_str(),
+                "gguf"
+                    | "safetensors"
+                    | "onnx"
+                    | "tflite"
+                    | "keras"
+                    | "h5"
+                    | "hdf5"
+                    | "index"
+                    | "pb"
+            )
         })
         || path
             .file_name()

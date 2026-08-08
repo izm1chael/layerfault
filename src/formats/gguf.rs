@@ -51,7 +51,8 @@ impl GgufMetadataEntry {
     }
 
     pub fn as_u64(&self) -> Option<u64> {
-        self.unsigned_value.or_else(|| self.signed_value.and_then(|v| u64::try_from(v).ok()))
+        self.unsigned_value
+            .or_else(|| self.signed_value.and_then(|v| u64::try_from(v).ok()))
     }
 }
 
@@ -108,7 +109,10 @@ impl<R: Read + Seek> GgufReader<R> {
 
     fn ensure_header_budget(&mut self, additional: u64) -> Result<()> {
         let pos = self.position()?;
-        if pos.checked_add(additional).is_none_or(|end| end > MAX_HEADER_BYTES) {
+        if pos
+            .checked_add(additional)
+            .is_none_or(|end| end > MAX_HEADER_BYTES)
+        {
             bail!("GGUF header/metadata exceeds {MAX_HEADER_BYTES} byte safety budget");
         }
         Ok(())
@@ -121,24 +125,40 @@ impl<R: Read + Seek> GgufReader<R> {
         Ok(bytes)
     }
 
-    fn read_u8(&mut self) -> Result<u8> { Ok(self.read_exact_vec(1)?[0]) }
-    fn read_i8(&mut self) -> Result<i8> { Ok(self.read_u8()? as i8) }
+    fn read_u8(&mut self) -> Result<u8> {
+        Ok(self.read_exact_vec(1)?[0])
+    }
+    fn read_i8(&mut self) -> Result<i8> {
+        Ok(self.read_u8()? as i8)
+    }
 
     fn read_u16(&mut self) -> Result<u16> {
         let bytes: [u8; 2] = self.read_exact_vec(2)?.try_into().expect("fixed length");
-        Ok(match self.endian { Endian::Little => u16::from_le_bytes(bytes), Endian::Big => u16::from_be_bytes(bytes) })
+        Ok(match self.endian {
+            Endian::Little => u16::from_le_bytes(bytes),
+            Endian::Big => u16::from_be_bytes(bytes),
+        })
     }
     fn read_i16(&mut self) -> Result<i16> {
         let bytes: [u8; 2] = self.read_exact_vec(2)?.try_into().expect("fixed length");
-        Ok(match self.endian { Endian::Little => i16::from_le_bytes(bytes), Endian::Big => i16::from_be_bytes(bytes) })
+        Ok(match self.endian {
+            Endian::Little => i16::from_le_bytes(bytes),
+            Endian::Big => i16::from_be_bytes(bytes),
+        })
     }
     fn read_u32(&mut self) -> Result<u32> {
         let bytes: [u8; 4] = self.read_exact_vec(4)?.try_into().expect("fixed length");
-        Ok(match self.endian { Endian::Little => u32::from_le_bytes(bytes), Endian::Big => u32::from_be_bytes(bytes) })
+        Ok(match self.endian {
+            Endian::Little => u32::from_le_bytes(bytes),
+            Endian::Big => u32::from_be_bytes(bytes),
+        })
     }
     fn read_i32(&mut self) -> Result<i32> {
         let bytes: [u8; 4] = self.read_exact_vec(4)?.try_into().expect("fixed length");
-        Ok(match self.endian { Endian::Little => i32::from_le_bytes(bytes), Endian::Big => i32::from_be_bytes(bytes) })
+        Ok(match self.endian {
+            Endian::Little => i32::from_le_bytes(bytes),
+            Endian::Big => i32::from_be_bytes(bytes),
+        })
     }
     fn read_f32(&mut self) -> Result<f32> {
         let bits = self.read_u32()?;
@@ -146,11 +166,17 @@ impl<R: Read + Seek> GgufReader<R> {
     }
     fn read_u64(&mut self) -> Result<u64> {
         let bytes: [u8; 8] = self.read_exact_vec(8)?.try_into().expect("fixed length");
-        Ok(match self.endian { Endian::Little => u64::from_le_bytes(bytes), Endian::Big => u64::from_be_bytes(bytes) })
+        Ok(match self.endian {
+            Endian::Little => u64::from_le_bytes(bytes),
+            Endian::Big => u64::from_be_bytes(bytes),
+        })
     }
     fn read_i64(&mut self) -> Result<i64> {
         let bytes: [u8; 8] = self.read_exact_vec(8)?.try_into().expect("fixed length");
-        Ok(match self.endian { Endian::Little => i64::from_le_bytes(bytes), Endian::Big => i64::from_be_bytes(bytes) })
+        Ok(match self.endian {
+            Endian::Little => i64::from_le_bytes(bytes),
+            Endian::Big => i64::from_be_bytes(bytes),
+        })
     }
     fn read_f64(&mut self) -> Result<f64> {
         let bits = self.read_u64()?;
@@ -158,18 +184,25 @@ impl<R: Read + Seek> GgufReader<R> {
     }
 
     fn read_count(&mut self) -> Result<u64> {
-        if self.version == 1 { Ok(self.read_u32()? as u64) } else { self.read_u64() }
+        if self.version == 1 {
+            Ok(self.read_u32()? as u64)
+        } else {
+            self.read_u64()
+        }
     }
 
     fn read_string_bytes(&mut self, max_len: u64) -> Result<Vec<u8>> {
         let len = self.read_count()?;
-        if len > max_len { bail!("GGUF string length {len} exceeds safety limit {max_len}"); }
+        if len > max_len {
+            bail!("GGUF string length {len} exceeds safety limit {max_len}");
+        }
         let len = usize::try_from(len).context("GGUF string length does not fit usize")?;
         self.read_exact_vec(len)
     }
 
     fn read_string(&mut self, max_len: u64) -> Result<String> {
-        String::from_utf8(self.read_string_bytes(max_len)?).context("GGUF string is not valid UTF-8")
+        String::from_utf8(self.read_string_bytes(max_len)?)
+            .context("GGUF string is not valid UTF-8")
     }
 }
 
@@ -183,11 +216,15 @@ struct CapturedValue {
 }
 
 fn parse_reader<R: Read + Seek>(mut raw: R, file_len: u64) -> Result<GgufInventory> {
-    if file_len < 8 { bail!("file is too small to contain GGUF magic and version"); }
+    if file_len < 8 {
+        bail!("file is too small to contain GGUF magic and version");
+    }
     raw.seek(SeekFrom::Start(0))?;
     let mut prefix = [0_u8; 8];
     raw.read_exact(&mut prefix)?;
-    if &prefix[..4] != b"GGUF" { bail!("missing GGUF magic"); }
+    if &prefix[..4] != b"GGUF" {
+        bail!("missing GGUF magic");
+    }
 
     let le_version = u32::from_le_bytes(prefix[4..8].try_into().expect("fixed slice"));
     let be_version = u32::from_be_bytes(prefix[4..8].try_into().expect("fixed slice"));
@@ -200,13 +237,23 @@ fn parse_reader<R: Read + Seek>(mut raw: R, file_len: u64) -> Result<GgufInvento
     };
 
     let minimum_header = if version == 1 { 16 } else { 24 };
-    if file_len < minimum_header { bail!("file is too small for a GGUF v{version} header"); }
+    if file_len < minimum_header {
+        bail!("file is too small for a GGUF v{version} header");
+    }
 
-    let mut reader = GgufReader { file: raw, endian, version };
+    let mut reader = GgufReader {
+        file: raw,
+        endian,
+        version,
+    };
     let tensor_count = reader.read_count()?;
     let metadata_count = reader.read_count()?;
-    if tensor_count > MAX_TENSORS { bail!("tensor count {tensor_count} exceeds safety cap {MAX_TENSORS}"); }
-    if metadata_count > MAX_METADATA_FIELDS { bail!("metadata count {metadata_count} exceeds safety cap {MAX_METADATA_FIELDS}"); }
+    if tensor_count > MAX_TENSORS {
+        bail!("tensor count {tensor_count} exceeds safety cap {MAX_TENSORS}");
+    }
+    if metadata_count > MAX_METADATA_FIELDS {
+        bail!("metadata count {metadata_count} exceeds safety cap {MAX_METADATA_FIELDS}");
+    }
 
     let mut metadata = BTreeMap::new();
     let mut collected_text = String::new();
@@ -215,7 +262,9 @@ fn parse_reader<R: Read + Seek>(mut raw: R, file_len: u64) -> Result<GgufInvento
     for _ in 0..metadata_count {
         let key = reader.read_string(65_535)?;
         validate_metadata_key(&key)?;
-        if metadata.contains_key(&key) { bail!("duplicate GGUF metadata key '{key}'"); }
+        if metadata.contains_key(&key) {
+            bail!("duplicate GGUF metadata key '{key}'");
+        }
         let value_type = reader.read_u32()?;
         let mut hasher = Sha256::new();
         hasher.update(value_type.to_le_bytes());
@@ -228,17 +277,22 @@ fn parse_reader<R: Read + Seek>(mut raw: R, file_len: u64) -> Result<GgufInvento
             &mut hasher,
         )?;
         if key == "general.alignment" {
-            if let Some(value) = capture.unsigned_value { alignment = value; }
+            if let Some(value) = capture.unsigned_value {
+                alignment = value;
+            }
         }
-        metadata.insert(key, GgufMetadataEntry {
-            value_type,
-            digest: format!("sha256:{}", hex::encode(hasher.finalize())),
-            string_value: capture.string_value,
-            unsigned_value: capture.unsigned_value,
-            signed_value: capture.signed_value,
-            float_value: capture.float_value,
-            bool_value: capture.bool_value,
-        });
+        metadata.insert(
+            key,
+            GgufMetadataEntry {
+                value_type,
+                digest: format!("sha256:{}", hex::encode(hasher.finalize())),
+                string_value: capture.string_value,
+                unsigned_value: capture.unsigned_value,
+                signed_value: capture.signed_value,
+                float_value: capture.float_value,
+                bool_value: capture.bool_value,
+            },
+        );
     }
 
     if alignment < 8 || !alignment.is_multiple_of(8) || alignment > 1024 * 1024 {
@@ -249,14 +303,22 @@ fn parse_reader<R: Read + Seek>(mut raw: R, file_len: u64) -> Result<GgufInvento
     let mut tensor_names = BTreeSet::new();
     for _ in 0..tensor_count {
         let name = reader.read_string(16 * 1024)?;
-        if name.is_empty() { bail!("tensor name must not be empty"); }
-        if !tensor_names.insert(name.clone()) { bail!("duplicate GGUF tensor name '{name}'"); }
+        if name.is_empty() {
+            bail!("tensor name must not be empty");
+        }
+        if !tensor_names.insert(name.clone()) {
+            bail!("duplicate GGUF tensor name '{name}'");
+        }
         let n_dimensions = reader.read_u32()?;
-        if n_dimensions == 0 || n_dimensions > 4 { bail!("tensor '{name}' has invalid dimension count {n_dimensions}"); }
+        if n_dimensions == 0 || n_dimensions > 4 {
+            bail!("tensor '{name}' has invalid dimension count {n_dimensions}");
+        }
         let mut dimensions = Vec::with_capacity(n_dimensions as usize);
         for _ in 0..n_dimensions {
             let dimension = reader.read_u64()?;
-            if dimension == 0 { bail!("tensor '{name}' contains a zero dimension"); }
+            if dimension == 0 {
+                bail!("tensor '{name}' contains a zero dimension");
+            }
             dimensions.push(dimension);
         }
         let tensor_type = reader.read_u32()?;
@@ -264,8 +326,12 @@ fn parse_reader<R: Read + Seek>(mut raw: R, file_len: u64) -> Result<GgufInvento
             bail!("tensor '{name}' uses removed GGML type {tensor_type}");
         }
         let offset = reader.read_u64()?;
-        if offset % alignment != 0 { bail!("tensor '{name}' offset {offset} is not aligned to {alignment}"); }
-        let elements = dimensions.iter().try_fold(1_u64, |acc, v| acc.checked_mul(*v))
+        if offset % alignment != 0 {
+            bail!("tensor '{name}' offset {offset} is not aligned to {alignment}");
+        }
+        let elements = dimensions
+            .iter()
+            .try_fold(1_u64, |acc, v| acc.checked_mul(*v))
             .ok_or_else(|| anyhow!("tensor '{name}' dimension product overflows u64"))?;
         let byte_len = match tensor_layout(tensor_type) {
             Some((block_elements, block_bytes)) => {
@@ -277,21 +343,32 @@ fn parse_reader<R: Read + Seek>(mut raw: R, file_len: u64) -> Result<GgufInvento
                     bail!("tensor '{name}' element count {elements} is not divisible by block size {block_elements} for type {tensor_type}");
                 }
                 let blocks = elements / block_elements;
-                let bytes = blocks.checked_mul(block_bytes)
-                    .ok_or_else(|| anyhow!("tensor '{name}' byte-size calculation overflows u64"))?;
+                let bytes = blocks.checked_mul(block_bytes).ok_or_else(|| {
+                    anyhow!("tensor '{name}' byte-size calculation overflows u64")
+                })?;
                 Some(bytes)
             }
             None => None,
         };
-        tensors.push(GgufTensor { name, dimensions, tensor_type, offset, byte_len });
+        tensors.push(GgufTensor {
+            name,
+            dimensions,
+            tensor_type,
+            offset,
+            byte_len,
+        });
     }
 
     let descriptor_end = reader.position()?;
     let tensor_data_start = align_up(descriptor_end, alignment)?;
-    if tensor_data_start > file_len { bail!("aligned tensor-data start {tensor_data_start} is beyond file length {file_len}"); }
+    if tensor_data_start > file_len {
+        bail!("aligned tensor-data start {tensor_data_start} is beyond file length {file_len}");
+    }
     validate_padding(&mut reader.file, descriptor_end, tensor_data_start)?;
     let tensor_data_len = file_len - tensor_data_start;
-    if !tensors.is_empty() && tensor_data_len == 0 { bail!("GGUF declares tensors but contains no tensor data"); }
+    if !tensors.is_empty() && tensor_data_len == 0 {
+        bail!("GGUF declares tensors but contains no tensor data");
+    }
     let mut warnings = Vec::new();
     validate_tensor_ranges(&tensors, tensor_data_len, &mut warnings)?;
 
@@ -318,8 +395,12 @@ fn validate_metadata_key(key: &str) -> Result<()> {
 
 fn should_collect_metadata(key: &str) -> bool {
     let key = key.to_ascii_lowercase();
-    key.contains("template") || key.contains("prompt") || key.contains("system")
-        || key.starts_with("general.") || key.contains("license") || key.contains("description")
+    key.contains("template")
+        || key.contains("prompt")
+        || key.contains("system")
+        || key.starts_with("general.")
+        || key.contains("license")
+        || key.contains("description")
 }
 
 fn read_metadata_value<R: Read + Seek>(
@@ -330,93 +411,203 @@ fn read_metadata_value<R: Read + Seek>(
     collected: &mut String,
     hasher: &mut Sha256,
 ) -> Result<CapturedValue> {
-    if depth > MAX_ARRAY_DEPTH { bail!("nested GGUF metadata array exceeds depth cap {MAX_ARRAY_DEPTH}"); }
+    if depth > MAX_ARRAY_DEPTH {
+        bail!("nested GGUF metadata array exceeds depth cap {MAX_ARRAY_DEPTH}");
+    }
     let mut out = CapturedValue::default();
     match value_type {
-        0 => { let v = reader.read_u8()?; hasher.update([v]); out.unsigned_value = Some(v as u64); }
-        1 => { let v = reader.read_i8()?; hasher.update(v.to_le_bytes()); out.signed_value = Some(v as i64); }
-        2 => { let v = reader.read_u16()?; hasher.update(v.to_le_bytes()); out.unsigned_value = Some(v as u64); }
-        3 => { let v = reader.read_i16()?; hasher.update(v.to_le_bytes()); out.signed_value = Some(v as i64); }
-        4 => { let v = reader.read_u32()?; hasher.update(v.to_le_bytes()); out.unsigned_value = Some(v as u64); }
-        5 => { let v = reader.read_i32()?; hasher.update(v.to_le_bytes()); out.signed_value = Some(v as i64); }
-        6 => { let v = reader.read_f32()?; hasher.update(v.to_bits().to_le_bytes()); out.float_value = Some(v as f64); }
+        0 => {
+            let v = reader.read_u8()?;
+            hasher.update([v]);
+            out.unsigned_value = Some(v as u64);
+        }
+        1 => {
+            let v = reader.read_i8()?;
+            hasher.update(v.to_le_bytes());
+            out.signed_value = Some(v as i64);
+        }
+        2 => {
+            let v = reader.read_u16()?;
+            hasher.update(v.to_le_bytes());
+            out.unsigned_value = Some(v as u64);
+        }
+        3 => {
+            let v = reader.read_i16()?;
+            hasher.update(v.to_le_bytes());
+            out.signed_value = Some(v as i64);
+        }
+        4 => {
+            let v = reader.read_u32()?;
+            hasher.update(v.to_le_bytes());
+            out.unsigned_value = Some(v as u64);
+        }
+        5 => {
+            let v = reader.read_i32()?;
+            hasher.update(v.to_le_bytes());
+            out.signed_value = Some(v as i64);
+        }
+        6 => {
+            let v = reader.read_f32()?;
+            hasher.update(v.to_bits().to_le_bytes());
+            out.float_value = Some(v as f64);
+        }
         7 => {
             let v = reader.read_u8()?;
-            if v > 1 { bail!("GGUF boolean value must be 0 or 1, got {v}"); }
-            hasher.update([v]); out.bool_value = Some(v == 1);
+            if v > 1 {
+                bail!("GGUF boolean value must be 0 or 1, got {v}");
+            }
+            hasher.update([v]);
+            out.bool_value = Some(v == 1);
         }
         8 => {
             let bytes = reader.read_string_bytes(MAX_STRING_BYTES)?;
             hasher.update((bytes.len() as u64).to_le_bytes());
             hasher.update(&bytes);
             let value = String::from_utf8(bytes).context("GGUF string is not valid UTF-8")?;
-            if collect_strings { append_collected_text(collected, &value); }
-            if value.len() <= MAX_CAPTURED_STRING_BYTES { out.string_value = Some(value); }
+            if collect_strings {
+                append_collected_text(collected, &value);
+            }
+            if value.len() <= MAX_CAPTURED_STRING_BYTES {
+                out.string_value = Some(value);
+            }
         }
         9 => {
             let element_type = reader.read_u32()?;
-            if element_type > 12 { bail!("unknown GGUF array element type {element_type}"); }
+            if element_type > 12 {
+                bail!("unknown GGUF array element type {element_type}");
+            }
             let count = reader.read_count()?;
-            if count > MAX_ARRAY_ITEMS { bail!("GGUF array count {count} exceeds safety cap {MAX_ARRAY_ITEMS}"); }
+            if count > MAX_ARRAY_ITEMS {
+                bail!("GGUF array count {count} exceeds safety cap {MAX_ARRAY_ITEMS}");
+            }
             hasher.update(element_type.to_le_bytes());
             hasher.update(count.to_le_bytes());
             for _ in 0..count {
                 let mut child = Sha256::new();
                 child.update(element_type.to_le_bytes());
-                let _ = read_metadata_value(reader, element_type, depth + 1, collect_strings, collected, &mut child)?;
+                let _ = read_metadata_value(
+                    reader,
+                    element_type,
+                    depth + 1,
+                    collect_strings,
+                    collected,
+                    &mut child,
+                )?;
                 hasher.update(child.finalize());
             }
         }
-        10 => { let v = reader.read_u64()?; hasher.update(v.to_le_bytes()); out.unsigned_value = Some(v); }
-        11 => { let v = reader.read_i64()?; hasher.update(v.to_le_bytes()); out.signed_value = Some(v); }
-        12 => { let v = reader.read_f64()?; hasher.update(v.to_bits().to_le_bytes()); out.float_value = Some(v); }
+        10 => {
+            let v = reader.read_u64()?;
+            hasher.update(v.to_le_bytes());
+            out.unsigned_value = Some(v);
+        }
+        11 => {
+            let v = reader.read_i64()?;
+            hasher.update(v.to_le_bytes());
+            out.signed_value = Some(v);
+        }
+        12 => {
+            let v = reader.read_f64()?;
+            hasher.update(v.to_bits().to_le_bytes());
+            out.float_value = Some(v);
+        }
         other => bail!("unknown GGUF metadata value type {other}"),
     }
     Ok(out)
 }
 
 fn append_collected_text(output: &mut String, value: &str) {
-    if output.len() >= MAX_COLLECTED_TEXT_BYTES { return; }
+    if output.len() >= MAX_COLLECTED_TEXT_BYTES {
+        return;
+    }
     let remaining = MAX_COLLECTED_TEXT_BYTES - output.len();
-    if !output.is_empty() && remaining > 0 { output.push('\n'); }
+    if !output.is_empty() && remaining > 0 {
+        output.push('\n');
+    }
     let allowed = remaining.saturating_sub(1);
-    if value.len() <= allowed { output.push_str(value); return; }
+    if value.len() <= allowed {
+        output.push_str(value);
+        return;
+    }
     let mut end = allowed.min(value.len());
-    while end > 0 && !value.is_char_boundary(end) { end -= 1; }
+    while end > 0 && !value.is_char_boundary(end) {
+        end -= 1;
+    }
     output.push_str(&value[..end]);
 }
 
 fn align_up(value: u64, alignment: u64) -> Result<u64> {
     let remainder = value % alignment;
-    if remainder == 0 { return Ok(value); }
-    value.checked_add(alignment - remainder).ok_or_else(|| anyhow!("alignment calculation overflow"))
+    if remainder == 0 {
+        return Ok(value);
+    }
+    value
+        .checked_add(alignment - remainder)
+        .ok_or_else(|| anyhow!("alignment calculation overflow"))
 }
 
 fn validate_padding<R: Read + Seek>(file: &mut R, start: u64, end: u64) -> Result<()> {
-    if end <= start { return Ok(()); }
+    if end <= start {
+        return Ok(());
+    }
     file.seek(SeekFrom::Start(start))?;
     let mut padding = vec![0_u8; usize::try_from(end - start)?];
     file.read_exact(&mut padding)?;
-    if padding.iter().any(|byte| *byte != 0) { bail!("GGUF alignment padding contains non-zero bytes"); }
+    if padding.iter().any(|byte| *byte != 0) {
+        bail!("GGUF alignment padding contains non-zero bytes");
+    }
     Ok(())
 }
 
-fn validate_tensor_ranges(tensors: &[GgufTensor], tensor_data_len: u64, warnings: &mut Vec<String>) -> Result<()> {
+fn validate_tensor_ranges(
+    tensors: &[GgufTensor],
+    tensor_data_len: u64,
+    warnings: &mut Vec<String>,
+) -> Result<()> {
     let mut ordered: Vec<&GgufTensor> = tensors.iter().collect();
     ordered.sort_by_key(|tensor| tensor.offset);
     let mut unknown_types = BTreeSet::new();
     for (index, tensor) in ordered.iter().enumerate() {
         if tensor.offset >= tensor_data_len && tensor_data_len != 0 {
-            bail!("tensor '{}' begins at relative offset {} beyond tensor-data length {}", tensor.name, tensor.offset, tensor_data_len);
+            bail!(
+                "tensor '{}' begins at relative offset {} beyond tensor-data length {}",
+                tensor.name,
+                tensor.offset,
+                tensor_data_len
+            );
         }
         let next_offset = ordered.get(index + 1).map(|next| next.offset);
         if next_offset.is_some_and(|next| next <= tensor.offset) {
-            bail!("tensor '{}' overlaps another tensor at offset {}", tensor.name, tensor.offset);
+            bail!(
+                "tensor '{}' overlaps another tensor at offset {}",
+                tensor.name,
+                tensor.offset
+            );
         }
         if let Some(bytes) = tensor.byte_len {
-            let end = tensor.offset.checked_add(bytes).ok_or_else(|| anyhow!("tensor '{}' end offset overflows u64", tensor.name))?;
-            if end > tensor_data_len { bail!("tensor '{}' range {}..{} exceeds tensor-data length {}", tensor.name, tensor.offset, end, tensor_data_len); }
-            if let Some(next) = next_offset { if end > next { bail!("tensor '{}' calculated range ends at {}, overlapping next tensor at {}", tensor.name, end, next); } }
+            let end = tensor
+                .offset
+                .checked_add(bytes)
+                .ok_or_else(|| anyhow!("tensor '{}' end offset overflows u64", tensor.name))?;
+            if end > tensor_data_len {
+                bail!(
+                    "tensor '{}' range {}..{} exceeds tensor-data length {}",
+                    tensor.name,
+                    tensor.offset,
+                    end,
+                    tensor_data_len
+                );
+            }
+            if let Some(next) = next_offset {
+                if end > next {
+                    bail!(
+                        "tensor '{}' calculated range ends at {}, overlapping next tensor at {}",
+                        tensor.name,
+                        end,
+                        next
+                    );
+                }
+            }
         } else {
             unknown_types.insert(tensor.tensor_type);
         }
@@ -430,15 +621,42 @@ fn validate_tensor_ranges(tensors: &[GgufTensor], tensor_data_len: u64, warnings
 /// (elements per block, bytes per block) for common/current ggml types.
 pub fn tensor_layout(tensor_type: u32) -> Option<(u64, u64)> {
     match tensor_type {
-        0 => Some((1, 4)), 1 => Some((1, 2)), 2 => Some((32, 18)), 3 => Some((32, 20)),
-        6 => Some((32, 22)), 7 => Some((32, 24)), 8 => Some((32, 34)), 9 => Some((32, 36)),
-        10 => Some((256, 84)), 11 => Some((256, 110)), 12 => Some((256, 144)), 13 => Some((256, 176)),
-        14 => Some((256, 210)), 15 => Some((256, 292)), 16 => Some((256, 66)), 17 => Some((256, 74)),
-        18 => Some((256, 98)), 19 => Some((256, 50)), 20 => Some((32, 18)), 21 => Some((256, 110)),
-        22 => Some((256, 82)), 23 => Some((256, 136)), 24 => Some((1, 1)), 25 => Some((1, 2)),
-        26 => Some((1, 4)), 27 => Some((1, 8)), 28 => Some((1, 8)), 29 => Some((256, 56)),
-        30 => Some((1, 2)), 34 => Some((256, 54)), 35 => Some((256, 66)), 39 => Some((32, 17)),
-        40 => Some((64, 36)), 41 => Some((128, 18)), 42 => Some((64, 18)), _ => None,
+        0 => Some((1, 4)),
+        1 => Some((1, 2)),
+        2 => Some((32, 18)),
+        3 => Some((32, 20)),
+        6 => Some((32, 22)),
+        7 => Some((32, 24)),
+        8 => Some((32, 34)),
+        9 => Some((32, 36)),
+        10 => Some((256, 84)),
+        11 => Some((256, 110)),
+        12 => Some((256, 144)),
+        13 => Some((256, 176)),
+        14 => Some((256, 210)),
+        15 => Some((256, 292)),
+        16 => Some((256, 66)),
+        17 => Some((256, 74)),
+        18 => Some((256, 98)),
+        19 => Some((256, 50)),
+        20 => Some((32, 18)),
+        21 => Some((256, 110)),
+        22 => Some((256, 82)),
+        23 => Some((256, 136)),
+        24 => Some((1, 1)),
+        25 => Some((1, 2)),
+        26 => Some((1, 4)),
+        27 => Some((1, 8)),
+        28 => Some((1, 8)),
+        29 => Some((256, 56)),
+        30 => Some((1, 2)),
+        34 => Some((256, 54)),
+        35 => Some((256, 66)),
+        39 => Some((32, 17)),
+        40 => Some((64, 36)),
+        41 => Some((128, 18)),
+        42 => Some((64, 18)),
+        _ => None,
     }
 }
 
@@ -487,8 +705,14 @@ mod tests {
         let err = validate_gguf_bytes(&bytes).expect_err("indivisible first dimension must fail");
         let message = err.to_string();
         assert!(message.contains("overflow_tensor"), "{message}");
-        assert!(message.contains("first dimension 4611686018427387905"), "{message}");
-        assert!(message.contains("is not divisible by block size 32 for type 6"), "{message}");
+        assert!(
+            message.contains("first dimension 4611686018427387905"),
+            "{message}"
+        );
+        assert!(
+            message.contains("is not divisible by block size 32 for type 6"),
+            "{message}"
+        );
     }
 
     /// Regression for corpus case 10-gguf-stride-overflow: a known tensor layout
@@ -501,7 +725,10 @@ mod tests {
         let err = validate_gguf_bytes(&bytes).expect_err("byte-size overflow must fail");
         let message = err.to_string();
         assert!(message.contains("exploit"), "{message}");
-        assert!(message.contains("byte-size calculation overflows u64"), "{message}");
+        assert!(
+            message.contains("byte-size calculation overflows u64"),
+            "{message}"
+        );
     }
 
     /// A genuinely unsupported tensor layout, with an offset/range that is still

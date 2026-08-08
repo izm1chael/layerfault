@@ -25,8 +25,7 @@ pub fn inspect_saved_model(file: &File, len: u64) -> Result<TensorFlowSummary> {
     let scan = len.min(MAX_PB_SCAN);
     let mut cloned = file.try_clone()?;
     cloned.seek(SeekFrom::Start(0))?;
-    let mut bytes =
-        vec![0u8; usize::try_from(scan).context("SavedModel scan length too large")?];
+    let mut bytes = vec![0u8; usize::try_from(scan).context("SavedModel scan length too large")?];
     cloned.read_exact(&mut bytes)?;
 
     let mut suspicious = Vec::new();

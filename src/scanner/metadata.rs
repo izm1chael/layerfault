@@ -52,9 +52,18 @@ fn results_from_inventory(
     media_type: &str,
     started: Instant,
 ) -> Result<Vec<LayerScanResult>> {
-    let status = if parsed.warnings.is_empty() { ScanStatus::Pass } else { ScanStatus::Warn };
-    let class = if parsed.warnings.is_empty() { FindingClass::Structural } else { FindingClass::Compatibility };
-    let detail = Some(format!(
+    let status = if parsed.warnings.is_empty() {
+        ScanStatus::Pass
+    } else {
+        ScanStatus::Warn
+    };
+    let class = if parsed.warnings.is_empty() {
+        FindingClass::Structural
+    } else {
+        FindingClass::Compatibility
+    };
+    let detail =
+        Some(format!(
         "GGUF v{} {}-endian structure validated: {} tensor(s), {} metadata field(s), alignment {}",
         parsed.version,
         if parsed.endian == Endian::Little { "little" } else { "big" },

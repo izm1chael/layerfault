@@ -167,8 +167,12 @@ pub struct ChainVerification {
 pub fn load_manifest(path: &Path) -> Result<TransformationManifest> {
     let file = crate::safeio::open_readonly_nofollow(path)?;
     let bytes = crate::safeio::read_all_from_file(&file, MAX_CHAIN_BYTES)?;
-    let manifest: TransformationManifest = serde_json::from_slice(&bytes)
-        .with_context(|| format!("transformation manifest '{}' is invalid JSON", path.display()))?;
+    let manifest: TransformationManifest = serde_json::from_slice(&bytes).with_context(|| {
+        format!(
+            "transformation manifest '{}' is invalid JSON",
+            path.display()
+        )
+    })?;
     validate_manifest(&manifest)?;
     Ok(manifest)
 }
@@ -202,7 +206,10 @@ pub fn manifest_digest(manifest: &TransformationManifest) -> Result<String> {
     ))
 }
 
-pub fn verify_chain(path: &Path, trust_store: &crate::trust::TrustStore) -> Result<ChainVerification> {
+pub fn verify_chain(
+    path: &Path,
+    trust_store: &crate::trust::TrustStore,
+) -> Result<ChainVerification> {
     let chain = load_chain(path)?;
     let mut findings = Vec::new();
     let mut verified = Vec::with_capacity(chain.links.len());
@@ -224,10 +231,10 @@ pub fn verify_chain(path: &Path, trust_store: &crate::trust::TrustStore) -> Resu
                 .verify(&canonical_manifest_bytes(&link.manifest)?, &signature)
                 .is_ok();
         let trusted_key = trust_store.find_by_fingerprint(&computed_fingerprint);
-        let trusted_signer = trusted_key.is_some_and(|key| trust_store.key_active(key, crate::paths::now_unix()));
-        let authorized_for_child = trusted_key.is_some_and(|key| {
-            trust_store.authorized_for(key, &link.manifest.child.identity)
-        });
+        let trusted_signer =
+            trusted_key.is_some_and(|key| trust_store.key_active(key, crate::paths::now_unix()));
+        let authorized_for_child = trusted_key
+            .is_some_and(|key| trust_store.authorized_for(key, &link.manifest.child.identity));
         all_crypto &= valid_signature;
         all_trusted &= trusted_signer && authorized_for_child;
 
@@ -242,7 +249,8 @@ pub fn verify_chain(path: &Path, trust_store: &crate::trust::TrustStore) -> Resu
             link.manifest.parent.identity.clone(),
             link.manifest.child.identity.clone(),
         );
-        if !seen_edges.insert(edge) || link.manifest.parent.identity == link.manifest.child.identity {
+        if !seen_edges.insert(edge) || link.manifest.parent.identity == link.manifest.child.identity
+        {
             contradicted = true;
             findings.push("LF-LINEAGE-CHAIN-CYCLE".to_owned());
         }
@@ -280,8 +288,14 @@ pub fn verify_chain(path: &Path, trust_store: &crate::trust::TrustStore) -> Resu
     };
     Ok(ChainVerification {
         state,
-        root_identity: chain.links.first().map(|v| v.manifest.parent.identity.clone()),
-        endpoint_identity: chain.links.last().map(|v| v.manifest.child.identity.clone()),
+        root_identity: chain
+            .links
+            .first()
+            .map(|v| v.manifest.parent.identity.clone()),
+        endpoint_identity: chain
+            .links
+            .last()
+            .map(|v| v.manifest.child.identity.clone()),
         links: verified,
         findings,
     })
@@ -302,7 +316,10 @@ fn optional_eq(left: &Option<String>, right: &Option<String>) -> bool {
 
 fn validate_manifest(manifest: &TransformationManifest) -> Result<()> {
     if manifest.version != 1 {
-        bail!("unsupported transformation manifest version {}", manifest.version);
+        bail!(
+            "unsupported transformation manifest version {}",
+            manifest.version
+        );
     }
     for endpoint in [&manifest.parent, &manifest.child] {
         if endpoint.identity.trim().is_empty() || endpoint.identity.len() > 8192 {
@@ -320,7 +337,9 @@ fn validate_manifest(manifest: &TransformationManifest) -> Result<()> {
 }
 
 fn validate_digest(value: Option<&str>) -> Result<()> {
-    let Some(value) = value else { return Ok(()); };
+    let Some(value) = value else {
+        return Ok(());
+    };
     let value = value.strip_prefix("sha256:").unwrap_or(value);
     if value.len() != 64 || !value.bytes().all(|b| b.is_ascii_hexdigit()) {
         bail!("artifact SHA-256 must contain exactly 64 hexadecimal characters");
@@ -343,14 +362,28 @@ mod tests {
 
     #[test]
     fn claim_parser_accepts_common_aliases() {
-        assert_eq!(TransformationType::parse("lora").unwrap(), TransformationType::LoraAdapter);
-        assert_eq!(TransformationType::parse("finetune").unwrap(), TransformationType::FineTune);
+        assert_eq!(
+            TransformationType::parse("lora").unwrap(),
+            TransformationType::LoraAdapter
+        );
+        assert_eq!(
+            TransformationType::parse("finetune").unwrap(),
+            TransformationType::FineTune
+        );
     }
 
     #[test]
     fn endpoint_optional_hashes_do_not_create_false_contradiction() {
-        let a = TransformationEndpoint { identity: "x".into(), artifact_sha256: None, package_fingerprint: None };
-        let b = TransformationEndpoint { identity: "x".into(), artifact_sha256: Some(format!("sha256:{}", "a".repeat(64))), package_fingerprint: None };
+        let a = TransformationEndpoint {
+            identity: "x".into(),
+            artifact_sha256: None,
+            package_fingerprint: None,
+        };
+        let b = TransformationEndpoint {
+            identity: "x".into(),
+            artifact_sha256: Some(format!("sha256:{}", "a".repeat(64))),
+            package_fingerprint: None,
+        };
         assert!(endpoint_matches(&a, &b));
     }
 }

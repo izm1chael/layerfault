@@ -32,7 +32,13 @@ fn review_quick_exit_matches_clean_final_decision() {
     fs::create_dir_all(&root).expect("create package");
     write_safetensors(&root.join("model.safetensors"));
 
-    let output = run(&["review", root.to_str().unwrap(), "--profile", "quick", "--json"]);
+    let output = run(&[
+        "review",
+        root.to_str().unwrap(),
+        "--profile",
+        "quick",
+        "--json",
+    ]);
     assert_eq!(
         output.status.code(),
         Some(0),
@@ -53,7 +59,13 @@ fn review_quick_preserves_static_block_exit() {
     fs::write(root.join("model.pkl"), [0x80_u8, 4, 1, 2, 3])
         .expect("write unsafe serialization fixture");
 
-    let output = run(&["review", root.to_str().unwrap(), "--profile", "quick", "--json"]);
+    let output = run(&[
+        "review",
+        root.to_str().unwrap(),
+        "--profile",
+        "quick",
+        "--json",
+    ]);
     assert_eq!(
         output.status.code(),
         Some(3),
@@ -97,9 +109,9 @@ fn dataset_poisoning_evidence_returns_warning_exit() {
     );
     let value: Value = serde_json::from_slice(&output.stdout).expect("dataset JSON");
     assert_eq!(value["state"], "REVIEW");
-    assert!(value["indicators"]
-        .as_array()
-        .is_some_and(|items| items.iter().any(|item| item["rule_id"] == "LF-DATASET-ZERO-WIDTH")));
+    assert!(value["indicators"].as_array().is_some_and(|items| items
+        .iter()
+        .any(|item| item["rule_id"] == "LF-DATASET-ZERO-WIDTH")));
 
     let _ = fs::remove_dir_all(root);
 }
@@ -118,14 +130,16 @@ fn nested_compressed_joblib_blocks_at_cli_package_boundary() {
     let output = run(&["inspect", root.to_str().unwrap(), "--json"]);
     assert_eq!(output.status.code(), Some(3));
     let value: Value = serde_json::from_slice(&output.stdout).expect("inspect JSON");
-    assert!(value["findings"].as_array().is_some_and(|items| items.iter().any(
-        |item| item["matches"]
-            .as_array()
-            .is_some_and(|matches| matches.iter().any(|m| {
-                m.as_str()
-                    .is_some_and(|text| text.contains("LF-SERIALIZATION-UNSAFE"))
-            }))
-    )));
+    assert!(value["findings"]
+        .as_array()
+        .is_some_and(|items| items
+            .iter()
+            .any(|item| item["matches"]
+                .as_array()
+                .is_some_and(|matches| matches.iter().any(|m| {
+                    m.as_str()
+                        .is_some_and(|text| text.contains("LF-SERIALIZATION-UNSAFE"))
+                })))));
 
     let _ = fs::remove_dir_all(root);
 }

@@ -18,7 +18,9 @@ pub struct PlatformConfig {
 
 impl PlatformConfig {
     pub fn from_values(database: String, listen: Option<String>) -> Result<Self> {
-        if database.trim().is_empty() { bail!("platform database must not be empty"); }
+        if database.trim().is_empty() {
+            bail!("platform database must not be empty");
+        }
         Ok(Self {
             database,
             listen: listen.unwrap_or_else(|| "127.0.0.1:8787".to_owned()),

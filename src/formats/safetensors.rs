@@ -423,15 +423,30 @@ pub fn inventory_file(file: &File, file_len: u64) -> Result<SafetensorsInventory
     })
 }
 
-pub fn read_tensor_bytes(file: &File, inventory: &SafetensorsInventory, tensor: &SafetensorsTensor, max_bytes: u64) -> Result<Vec<u8>> {
-    let len = tensor.end.checked_sub(tensor.start).ok_or_else(|| anyhow!("invalid tensor range"))?;
+pub fn read_tensor_bytes(
+    file: &File,
+    inventory: &SafetensorsInventory,
+    tensor: &SafetensorsTensor,
+    max_bytes: u64,
+) -> Result<Vec<u8>> {
+    let len = tensor
+        .end
+        .checked_sub(tensor.start)
+        .ok_or_else(|| anyhow!("invalid tensor range"))?;
     if len > max_bytes {
-        bail!("tensor '{}' is {len} bytes, above read cap {max_bytes}", tensor.name);
+        bail!(
+            "tensor '{}' is {len} bytes, above read cap {max_bytes}",
+            tensor.name
+        );
     }
-    let absolute = inventory.data_start.checked_add(tensor.start).ok_or_else(|| anyhow!("tensor offset overflow"))?;
+    let absolute = inventory
+        .data_start
+        .checked_add(tensor.start)
+        .ok_or_else(|| anyhow!("tensor offset overflow"))?;
     let mut reader = file.try_clone()?;
     reader.seek(SeekFrom::Start(absolute))?;
-    let mut bytes = vec![0_u8; usize::try_from(len).context("tensor byte length does not fit usize")?];
+    let mut bytes =
+        vec![0_u8; usize::try_from(len).context("tensor byte length does not fit usize")?];
     reader.read_exact(&mut bytes)?;
     Ok(bytes)
 }

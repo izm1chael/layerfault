@@ -797,7 +797,10 @@ mod tests {
         ));
         let _ = fs::remove_dir_all(&root);
         fs::create_dir_all(&root)?;
-        fs::write(root.join("weights.dat.gz.bz2"), b"BZh91AY&SYbounded-fixture")?;
+        fs::write(
+            root.join("weights.dat.gz.bz2"),
+            b"BZh91AY&SYbounded-fixture",
+        )?;
         let report = inspect(&root)?;
         assert!(!report.findings.iter().any(|finding| {
             finding.status == ScanStatus::Fail

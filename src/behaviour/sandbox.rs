@@ -25,7 +25,10 @@ impl Workspace {
             "{}-{}-{}",
             std::process::id(),
             crate::paths::now_unix(),
-            std::thread::current().name().unwrap_or("worker").replace('/', "_")
+            std::thread::current()
+                .name()
+                .unwrap_or("worker")
+                .replace('/', "_")
         );
         let root = std::env::temp_dir().join(format!("layerfault-behaviour-{nonce}"));
         let home = root.join("home");
@@ -85,8 +88,9 @@ pub fn command_for(
 ) -> Result<SandboxedCommand> {
     match wrapper {
         Some((path, mechanism)) if mechanism == "bwrap-fs-net" => {
-            let canonical_runtime = std::fs::canonicalize(runtime)
-                .with_context(|| format!("unable to canonicalize runtime '{}'", runtime.display()))?;
+            let canonical_runtime = std::fs::canonicalize(runtime).with_context(|| {
+                format!("unable to canonicalize runtime '{}'", runtime.display())
+            })?;
             let canonical_model = std::fs::canonicalize(model)
                 .with_context(|| format!("unable to canonicalize model '{}'", model.display()))?;
             let mut command = std::process::Command::new(path);

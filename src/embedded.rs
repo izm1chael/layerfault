@@ -58,8 +58,12 @@ pub fn run(
     let tokenizer_sha256 = hash_path(tokenizer_path)?;
     let tokenizer = candelabra::load_tokenizer(tokenizer_path)
         .with_context(|| format!("unable to load tokenizer '{}'", tokenizer_path.display()))?;
-    let mut model = candelabra::Model::load(model_path)
-        .with_context(|| format!("unable to load admitted GGUF '{}' into embedded backend", model_path.display()))?;
+    let mut model = candelabra::Model::load(model_path).with_context(|| {
+        format!(
+            "unable to load admitted GGUF '{}' into embedded backend",
+            model_path.display()
+        )
+    })?;
     let architecture = model.architecture().to_owned();
 
     let config = candelabra::InferenceConfig {
@@ -81,21 +85,15 @@ pub fn run(
     let mut output = String::new();
     let mut capped = false;
     let started = Instant::now();
-    let _inference = candelabra::run_inference(
-        &mut model,
-        &tokenizer,
-        &config,
-        cancel,
-        |token| {
-            if output.len().saturating_add(token.len()) > MAX_OUTPUT_BYTES {
-                capped = true;
-                cancel_for_callback.store(true, Ordering::SeqCst);
-                return Ok(());
-            }
-            output.push_str(&token);
-            Ok(())
-        },
-    )
+    let _inference = candelabra::run_inference(&mut model, &tokenizer, &config, cancel, |token| {
+        if output.len().saturating_add(token.len()) > MAX_OUTPUT_BYTES {
+            capped = true;
+            cancel_for_callback.store(true, Ordering::SeqCst);
+            return Ok(());
+        }
+        output.push_str(&token);
+        Ok(())
+    })
     .map_err(|error| anyhow!("embedded inference failed: {error}"))?;
 
     Ok(EmbeddedResult {
@@ -117,10 +115,8 @@ pub fn run(
 }
 
 fn static_admit(path: &Path) -> Result<()> {
-    let report = crate::formats::artifact::inspect(
-        path,
-        crate::formats::artifact::ArtifactScanMode::Full,
-    )?;
+    let report =
+        crate::formats::artifact::inspect(path, crate::formats::artifact::ArtifactScanMode::Full)?;
     if report.blocking() {
         bail!(
             "static admission blocked artifact '{}'; embedded inference was not run",

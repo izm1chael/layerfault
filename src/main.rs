@@ -619,7 +619,6 @@ enum PolicyCommand {
     },
 }
 
-
 #[derive(clap::Args, Debug)]
 struct DatasetArgs {
     #[command(subcommand)]
@@ -628,10 +627,27 @@ struct DatasetArgs {
 
 #[derive(Subcommand, Debug)]
 enum DatasetCommand {
-    Inspect { dataset: PathBuf, #[arg(long, default_value_t=false)] json: bool },
-    Fingerprint { dataset: PathBuf, #[arg(long, default_value_t=false)] json: bool },
-    Compare { left: PathBuf, right: PathBuf, #[arg(long, default_value_t=false)] json: bool },
-    PoisoningReview { dataset: PathBuf, #[arg(long, default_value_t=false)] json: bool },
+    Inspect {
+        dataset: PathBuf,
+        #[arg(long, default_value_t = false)]
+        json: bool,
+    },
+    Fingerprint {
+        dataset: PathBuf,
+        #[arg(long, default_value_t = false)]
+        json: bool,
+    },
+    Compare {
+        left: PathBuf,
+        right: PathBuf,
+        #[arg(long, default_value_t = false)]
+        json: bool,
+    },
+    PoisoningReview {
+        dataset: PathBuf,
+        #[arg(long, default_value_t = false)]
+        json: bool,
+    },
 }
 
 #[derive(clap::Args, Debug)]
@@ -644,68 +660,202 @@ struct ResearchArgs {
 enum ResearchCommand {
     TriggerSearch {
         model: PathBuf,
-        #[arg(long)] base: Option<PathBuf>,
-        #[arg(long, default_value="llama-cpp")] runtime: String,
-        #[arg(long)] runtime_path: Option<PathBuf>,
-        #[arg(long)] tokenizer: Option<PathBuf>,
-        #[arg(long="alphabet", required=true)] alphabet: Vec<String>,
-        #[arg(long, default_value_t=1)] min_length: usize,
-        #[arg(long, default_value_t=3)] max_length: usize,
-        #[arg(long, default_value_t=10_000)] max_candidates: u64,
-        #[arg(long, default_value="")] prefix: String,
-        #[arg(long, default_value="")] suffix: String,
-        #[arg(long, default_value_t=0)] seed: u64,
-        #[arg(long, default_value_t=120)] timeout_seconds: u64,
-        #[arg(long, default_value_t=false)] json: bool,
+        #[arg(long)]
+        base: Option<PathBuf>,
+        #[arg(long, default_value = "llama-cpp")]
+        runtime: String,
+        #[arg(long)]
+        runtime_path: Option<PathBuf>,
+        #[arg(long)]
+        tokenizer: Option<PathBuf>,
+        #[arg(long = "alphabet", required = true)]
+        alphabet: Vec<String>,
+        #[arg(long, default_value_t = 1)]
+        min_length: usize,
+        #[arg(long, default_value_t = 3)]
+        max_length: usize,
+        #[arg(long, default_value_t = 10_000)]
+        max_candidates: u64,
+        #[arg(long, default_value = "")]
+        prefix: String,
+        #[arg(long, default_value = "")]
+        suffix: String,
+        #[arg(long, default_value_t = 0)]
+        seed: u64,
+        #[arg(long, default_value_t = 120)]
+        timeout_seconds: u64,
+        #[arg(long, default_value_t = false)]
+        json: bool,
     },
     Backdoor {
         model: PathBuf,
-        #[arg(long)] base: Option<PathBuf>,
-        #[arg(long, default_value="llama-cpp")] runtime: String,
-        #[arg(long)] runtime_path: Option<PathBuf>,
-        #[arg(long)] tokenizer: Option<PathBuf>,
-        #[arg(long, default_value_t=0)] seed: u64,
-        #[arg(long, default_value_t=false)] json: bool,
+        #[arg(long)]
+        base: Option<PathBuf>,
+        #[arg(long, default_value = "llama-cpp")]
+        runtime: String,
+        #[arg(long)]
+        runtime_path: Option<PathBuf>,
+        #[arg(long)]
+        tokenizer: Option<PathBuf>,
+        #[arg(long, default_value_t = 0)]
+        seed: u64,
+        #[arg(long, default_value_t = false)]
+        json: bool,
     },
     ActivationDiff {
         base: PathBuf,
         derived: PathBuf,
-        #[arg(long)] tokenizer: PathBuf,
-        #[arg(long, default_value_t=false)] json: bool,
+        #[arg(long)]
+        tokenizer: PathBuf,
+        #[arg(long, default_value_t = false)]
+        json: bool,
     },
-    Campaign { #[arg(long, default_value_t=false)] json: bool },
+    Campaign {
+        #[arg(long, default_value_t = false)]
+        json: bool,
+    },
 }
 
 #[derive(clap::Args, Debug)]
-struct HubArgs { #[command(subcommand)] command: HubCommand }
+struct HubArgs {
+    #[command(subcommand)]
+    command: HubCommand,
+}
 
 #[derive(Subcommand, Debug)]
 enum HubCommand {
-    Model { repo: String, #[arg(long)] revision: Option<String>, #[arg(long, default_value_t=false)] json: bool },
-    Files { repo: String, #[arg(long)] revision: Option<String>, #[arg(long, default_value_t=false)] json: bool },
-    Download { repo: String, #[arg(long)] revision: String, #[arg(long)] file: String, #[arg(long)] staging: PathBuf, #[arg(long)] max_bytes: Option<u64>, #[arg(long, default_value_t=false)] json: bool },
-    Review { repo: String, #[arg(long)] revision: String, #[arg(long)] staging: Option<PathBuf>, #[arg(long, default_value_t=false)] json: bool },
-    Crawl { #[arg(long, default_value_t=100)] limit: usize, #[arg(long)] cursor: Option<String>, #[arg(long, default_value_t=false)] json: bool },
+    Model {
+        repo: String,
+        #[arg(long)]
+        revision: Option<String>,
+        #[arg(long, default_value_t = false)]
+        json: bool,
+    },
+    Files {
+        repo: String,
+        #[arg(long)]
+        revision: Option<String>,
+        #[arg(long, default_value_t = false)]
+        json: bool,
+    },
+    Download {
+        repo: String,
+        #[arg(long)]
+        revision: String,
+        #[arg(long)]
+        file: String,
+        #[arg(long)]
+        staging: PathBuf,
+        #[arg(long)]
+        max_bytes: Option<u64>,
+        #[arg(long, default_value_t = false)]
+        json: bool,
+    },
+    Review {
+        repo: String,
+        #[arg(long)]
+        revision: String,
+        #[arg(long)]
+        staging: Option<PathBuf>,
+        #[arg(long, default_value_t = false)]
+        json: bool,
+    },
+    Crawl {
+        #[arg(long, default_value_t = 100)]
+        limit: usize,
+        #[arg(long)]
+        cursor: Option<String>,
+        #[arg(long, default_value_t = false)]
+        json: bool,
+    },
 }
 
 #[derive(clap::Args, Debug)]
-struct PlatformArgs { #[command(subcommand)] command: PlatformCommand }
+struct PlatformArgs {
+    #[command(subcommand)]
+    command: PlatformCommand,
+}
 
 #[derive(Subcommand, Debug)]
 enum PlatformCommand {
-    Migrate { #[arg(long)] database: String },
-    Doctor { #[arg(long)] database: String, #[arg(long, default_value_t=false)] json: bool },
-    Serve { #[arg(long)] database: String, #[arg(long, default_value="127.0.0.1:8787")] listen: String },
-    Worker { #[arg(long)] database: String, #[arg(long, default_value_t=false)] once: bool },
-    Crawl { #[arg(long)] database: String, #[arg(long, default_value_t=100)] limit: usize, #[arg(long)] cursor: Option<String>, #[arg(long, default_value_t=false)] continuous: bool, #[arg(long, default_value_t=300)] interval_seconds: u64, #[arg(long, default_value_t=false)] json: bool },
-    PublishWeekly { #[arg(long)] database: String, #[arg(long, default_value_t=false)] json: bool },
-    Newsletter { #[command(subcommand)] command: NewsletterCommand },
+    Migrate {
+        #[arg(long)]
+        database: String,
+    },
+    Doctor {
+        #[arg(long)]
+        database: String,
+        #[arg(long, default_value_t = false)]
+        json: bool,
+    },
+    Serve {
+        #[arg(long)]
+        database: String,
+        #[arg(long, default_value = "127.0.0.1:8787")]
+        listen: String,
+    },
+    Worker {
+        #[arg(long)]
+        database: String,
+        #[arg(long, default_value_t = false)]
+        once: bool,
+    },
+    Crawl {
+        #[arg(long)]
+        database: String,
+        #[arg(long, default_value_t = 100)]
+        limit: usize,
+        #[arg(long)]
+        cursor: Option<String>,
+        #[arg(long, default_value_t = false)]
+        continuous: bool,
+        #[arg(long, default_value_t = 300)]
+        interval_seconds: u64,
+        #[arg(long, default_value_t = false)]
+        json: bool,
+    },
+    PublishWeekly {
+        #[arg(long)]
+        database: String,
+        #[arg(long, default_value_t = false)]
+        json: bool,
+    },
+    Newsletter {
+        #[command(subcommand)]
+        command: NewsletterCommand,
+    },
 }
 
 #[derive(Subcommand, Debug)]
 enum NewsletterCommand {
-    Generate { #[arg(long)] database: String, #[arg(long)] public_base: Option<String>, #[arg(long, default_value="markdown")] format: String, #[arg(long)] output: Option<PathBuf> },
-    Send { #[arg(long)] database: String, #[arg(long)] public_base: Option<String>, #[arg(long)] to: String, #[arg(long)] from: String, #[arg(long)] smtp_host: String, #[arg(long, default_value="LAYERFAULT_SMTP_USERNAME")] username_env: String, #[arg(long, default_value="LAYERFAULT_SMTP_PASSWORD")] password_env: String, #[arg(long, default_value_t=false)] dry_run: bool },
+    Generate {
+        #[arg(long)]
+        database: String,
+        #[arg(long)]
+        public_base: Option<String>,
+        #[arg(long, default_value = "markdown")]
+        format: String,
+        #[arg(long)]
+        output: Option<PathBuf>,
+    },
+    Send {
+        #[arg(long)]
+        database: String,
+        #[arg(long)]
+        public_base: Option<String>,
+        #[arg(long)]
+        to: String,
+        #[arg(long)]
+        from: String,
+        #[arg(long)]
+        smtp_host: String,
+        #[arg(long, default_value = "LAYERFAULT_SMTP_USERNAME")]
+        username_env: String,
+        #[arg(long, default_value = "LAYERFAULT_SMTP_PASSWORD")]
+        password_env: String,
+        #[arg(long, default_value_t = false)]
+        dry_run: bool,
+    },
 }
 
 #[derive(clap::Args, Debug)]

@@ -92,9 +92,13 @@ pub fn secret_from_env(name: &str) -> Result<Option<String>> {
             let bytes = crate::safeio::read_all_from_file(&file, 1024 * 1024)?;
             let value = String::from_utf8(bytes).context("secret file is not valid UTF-8")?;
             let value = value.trim_end_matches(['\r', '\n']).to_owned();
-            if value.is_empty() { return Ok(None); }
+            if value.is_empty() {
+                return Ok(None);
+            }
             return Ok(Some(value));
         }
     }
-    Ok(std::env::var(name).ok().filter(|value| !value.trim().is_empty()))
+    Ok(std::env::var(name)
+        .ok()
+        .filter(|value| !value.trim().is_empty()))
 }

@@ -20,11 +20,16 @@ fn finite_trigger_space_is_bounded_and_deterministic() {
         false,
     )
     .expect("finite trigger space");
-    assert_eq!(layerfault::research::total_candidates(&space).expect("candidate count"), 14);
+    assert_eq!(
+        layerfault::research::total_candidates(&space).expect("candidate count"),
+        14
+    );
     let first = layerfault::research::enumerate(&space).expect("first enumeration");
     let second = layerfault::research::enumerate(&space).expect("second enumeration");
     assert_eq!(first, second);
-    assert!(first.iter().all(|value| value.starts_with("pre-") && value.ends_with("-post")));
+    assert!(first
+        .iter()
+        .all(|value| value.starts_with("pre-") && value.ends_with("-post")));
 }
 
 #[test]
@@ -35,8 +40,12 @@ fn sqlite_job_queue_is_idempotent_and_reclaims_ready_jobs() {
     let mut db = layerfault::platform::db::PlatformDb::connect(&url).expect("open sqlite");
     db.migrate().expect("migrate");
     let payload = serde_json::json!({"repo":"owner/model","revision":"0123456789abcdef"});
-    let a = db.enqueue("hub-review", "same-key", &payload, 10).expect("enqueue");
-    let b = db.enqueue("hub-review", "same-key", &payload, 10).expect("idempotent enqueue");
+    let a = db
+        .enqueue("hub-review", "same-key", &payload, 10)
+        .expect("enqueue");
+    let b = db
+        .enqueue("hub-review", "same-key", &payload, 10)
+        .expect("idempotent enqueue");
     assert_eq!(a, b);
     let job = db.claim("test-worker", 60).expect("claim").expect("job");
     assert_eq!(job.id, a);
@@ -61,7 +70,10 @@ fn dataset_poisoning_review_is_evidence_not_proof() {
     let report = layerfault::dataset::poisoning_review(&root).expect("poisoning review");
     assert!(report.records_analyzed >= 5);
     assert!(report.boundary.to_ascii_lowercase().contains("evidence"));
-    assert!(!report.boundary.to_ascii_lowercase().contains("proves malicious"));
+    assert!(!report
+        .boundary
+        .to_ascii_lowercase()
+        .contains("proves malicious"));
     let _ = std::fs::remove_dir_all(root);
 }
 
