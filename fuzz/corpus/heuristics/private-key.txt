@@ -1,0 +1,3 @@
+-----BEGIN PRIVATE KEY-----
+fixture
+-----END PRIVATE KEY-----

@@ -19,38 +19,46 @@ jobs:
           rustup default nightly
       - name: Install pinned cargo-fuzz
         run: cargo install cargo-fuzz --version 0.13.2 --locked
-      - name: Fuzz manifest parser
+      - name: Verify deterministic seed corpus
+        run: |
+          python3 fuzz/generate_corpus.py
+          git diff --exit-code -- fuzz/corpus fuzz/CORPUS_INDEX.json
+      - name: Run all fuzz targets against seeded corpora
         working-directory: fuzz
-        run: cargo fuzz run manifest corpus/manifest -- -max_total_time=60
-      - name: Fuzz GGUF parser
-        working-directory: fuzz
-        run: cargo fuzz run gguf corpus/gguf -- -max_total_time=60
-      - name: Fuzz heuristic engine
-        working-directory: fuzz
-        run: cargo fuzz run heuristics corpus/heuristics -- -max_total_time=60
-      - name: Fuzz Safetensors parser
-        working-directory: fuzz
-        run: cargo fuzz run safetensors -- -max_total_time=60
-
-      - name: Fuzz ONNX parser
-        working-directory: fuzz
-        run: cargo fuzz run onnx -- -max_total_time=60
-
-      - name: Fuzz TFLite parser
-        working-directory: fuzz
-        run: cargo fuzz run tflite -- -max_total_time=60
-
-      - name: Fuzz Keras archive parser
-        working-directory: fuzz
-        run: cargo fuzz run keras -- -max_total_time=60
-
-      - name: Fuzz package correlation
-        working-directory: fuzz
-        run: cargo fuzz run package -- -max_total_time=60
-      - name: Fuzz TensorFlow SavedModel scanner
-        working-directory: fuzz
-        run: cargo fuzz run tensorflow -- -max_total_time=60
-
-      - name: Fuzz binary object scanner
-        working-directory: fuzz
-        run: cargo fuzz run binary -- -max_total_time=60
+        shell: bash
+        run: |
+          set -euo pipefail
+          targets=(
+            manifest
+            gguf
+            heuristics
+            safetensors
+            safetensors_index
+            onnx
+            tflite
+            keras
+            package
+            tensorflow
+            tensorflow_checkpoint
+            binary
+            sources_hf_cache
+            sources_directory
+            lmstudio
+            ollama_store
+          )
+          for target in "${targets[@]}"; do
+            echo "::group::fuzz $target"
+            dict_args=()
+            if [[ -f "dictionaries/$target.dict" ]]; then
+              dict_args+=("-dict=dictionaries/$target.dict")
+            fi
+            cargo fuzz run "$target" "corpus/$target" -- \
+              -max_total_time=60 \
+              -max_len=2097152 \
+              -timeout=10 \
+              -rss_limit_mb=4096 \
+              -use_value_profile=1 \
+              "${dict_args[@]}" \
+              -print_final_stats=1
+            echo "::endgroup::"
+          done

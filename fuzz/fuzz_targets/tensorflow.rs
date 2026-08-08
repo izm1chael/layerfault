@@ -13,4 +13,10 @@ fuzz_target!(|data: &[u8]| {
         return;
     };
     let _ = layerfault::formats::tensorflow::inspect_saved_model(&file, data.len() as u64);
+    let _ = layerfault::formats::tensorflow::scan_saved_model(
+        &file,
+        data.len() as u64,
+        "sha256:fuzz",
+        "application/x-tensorflow-savedmodel",
+    );
 });

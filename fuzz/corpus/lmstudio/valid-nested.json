@@ -1,0 +1,1 @@
+{"models":[{"group":[{"architecture":"llama","modelKey":"org/model","path":"$MODEL","quantization":"Q4_K"},{"arch":"mistral","displayName":"Fuzz Model","filePath":"$MODEL","quantizationType":"Q8_0"}]},{"file_path":"$MODEL","identifier":"id"}],"other":{"child":{"modelPath":"$MODEL","name":"name"}}}

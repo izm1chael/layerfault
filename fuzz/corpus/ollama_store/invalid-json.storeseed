@@ -1,0 +1,5 @@
+{broken
+--LAYERFAULT-FUZZ-SECTION--
+data
+--LAYERFAULT-FUZZ-SECTION--
+fuzz:latest

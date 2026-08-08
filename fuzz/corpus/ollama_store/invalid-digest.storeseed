@@ -1,0 +1,5 @@
+{"layers":[{"digest":"sha256:nope","mediaType":"application/vnd.ollama.image.model","size":1}]}
+--LAYERFAULT-FUZZ-SECTION--
+data
+--LAYERFAULT-FUZZ-SECTION--
+fuzz:latest

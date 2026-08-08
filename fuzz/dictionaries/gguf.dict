@@ -1,0 +1,8 @@
+"GGUF"
+"general.alignment"
+"general.architecture"
+"general.description"
+"tokenizer.chat_template"
+"tokenizer.prompt_template"
+"llama"
+"Q4_0"

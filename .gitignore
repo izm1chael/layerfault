@@ -12,3 +12,5 @@
 /layerfault-*.sha256
 /AGENT.md
 /CLAUDE.md
+/fuzz/logs
+/fuzz/coverage-reports

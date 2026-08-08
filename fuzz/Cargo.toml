@@ -81,3 +81,45 @@ path = "fuzz_targets/binary.rs"
 test = false
 doc = false
 bench = false
+
+[[bin]]
+name = "safetensors_index"
+path = "fuzz_targets/safetensors_index.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "sources_hf_cache"
+path = "fuzz_targets/sources_hf_cache.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "ollama_store"
+path = "fuzz_targets/ollama_store.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "lmstudio"
+path = "fuzz_targets/lmstudio.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "tensorflow_checkpoint"
+path = "fuzz_targets/tensorflow_checkpoint.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "sources_directory"
+path = "fuzz_targets/sources_directory.rs"
+test = false
+doc = false
+bench = false

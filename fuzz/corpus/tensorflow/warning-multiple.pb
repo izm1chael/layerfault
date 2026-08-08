@@ -1,0 +1,1 @@
+SavedModel PyFunc ReadFile WriteFile XlaCallModule

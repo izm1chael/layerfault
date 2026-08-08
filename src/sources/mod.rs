@@ -84,15 +84,19 @@ pub fn discover_lmstudio() -> Result<Vec<SourceArtifact>> {
             String::from_utf8_lossy(&output.stderr).trim()
         ));
     }
-    let value: Value =
-        serde_json::from_slice(&output.stdout).context("lms ls did not return valid JSON")?;
+    let rows = parse_lmstudio_inventory_bytes(&output.stdout)?;
+    if rows.is_empty() {
+        return Err(anyhow!("LM Studio returned JSON but Layerfault could not identify any local model paths; use 'layerfault inspect <file>' for this LM Studio release"));
+    }
+    Ok(rows)
+}
+
+pub fn parse_lmstudio_inventory_bytes(bytes: &[u8]) -> Result<Vec<SourceArtifact>> {
+    let value: Value = serde_json::from_slice(bytes).context("lms ls did not return valid JSON")?;
     let mut rows = Vec::new();
     collect_lms_objects(&value, &mut rows);
     rows.sort_by(|a, b| a.identity.cmp(&b.identity));
     rows.dedup_by(|a, b| a.identity == b.identity && a.path == b.path);
-    if rows.is_empty() {
-        return Err(anyhow!("LM Studio returned JSON but Layerfault could not identify any local model paths; use 'layerfault inspect <file>' for this LM Studio release"));
-    }
     Ok(rows)
 }
 
@@ -596,5 +600,29 @@ mod tests {
             SourceKind::LmStudio
         );
         assert_eq!(SourceKind::parse("hf-cache").unwrap(), SourceKind::HfCache);
+    }
+
+    #[test]
+    fn lmstudio_inventory_bytes_use_the_same_parser_as_cli_discovery() -> Result<()> {
+        let root =
+            std::env::temp_dir().join(format!("layerfault-lmstudio-parser-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root)?;
+        let model = root.join("fixture.gguf");
+        std::fs::write(&model, b"GGUF\x03\0\0\0")?;
+        let payload = serde_json::json!({
+            "models": [{
+                "filePath": model,
+                "modelKey": "fixture/model",
+                "architecture": "llama",
+                "quantizationType": "Q4_K"
+            }]
+        });
+        let rows = parse_lmstudio_inventory_bytes(&serde_json::to_vec(&payload)?)?;
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].identity, "fixture/model");
+        assert_eq!(rows[0].format, ArtifactFormat::Gguf);
+        let _ = std::fs::remove_dir_all(&root);
+        Ok(())
     }
 }
