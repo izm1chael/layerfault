@@ -1,0 +1,10 @@
+{
+  "schema_version": 1,
+  "ratio_rules": [
+    {"group":"large","case":"44-qwen25-3b-base-sharded","cold":"fingerprint","warm":["inspect-package","scan-dir","review-quick"],"max_ratio":0.10},
+    {"group":"large","case":"45-qwen25-3b-q4-gguf","cold":"fingerprint","warm":["inspect-package","scan-dir","review-quick"],"max_ratio":0.10},
+    {"group":"large","case":"46-qwen25-3b-gptq-int4","cold":"fingerprint","warm":["inspect-package","scan-dir","review-quick"],"max_ratio":0.10},
+    {"group":"large","case":"47-qwen25-3b-awq","cold":"fingerprint","warm":["inspect-package","scan-dir","review-quick"],"max_ratio":0.10},
+    {"group":"large","case":"48-gemma2-9b-backdoor-research","cold":"fingerprint","warm":["inspect-package","scan-dir","review-quick"],"max_ratio":0.10}
+  ]
+}

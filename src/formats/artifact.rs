@@ -16,6 +16,15 @@ pub enum ArtifactScanMode {
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct ArtifactCacheInfo {
+    pub digest: String,
+    pub evidence: String,
+    pub digest_min_bytes: u64,
+    pub evidence_min_bytes: u64,
+    pub evidence_revision: String,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ArtifactReport {
     pub path: String,
     pub name: String,
@@ -24,6 +33,8 @@ pub struct ArtifactReport {
     pub sha256: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub compound_identity: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cache: Option<ArtifactCacheInfo>,
     pub results: Vec<LayerScanResult>,
 }
 
@@ -101,7 +112,7 @@ fn inspect_opened(
     // so compound ONNX admission deliberately revalidates them on every scan.
     let evidence_cache_safe = format != ArtifactFormat::Onnx;
     if evidence_cache_safe {
-        if let Some(report) = crate::hashcache::load_evidence::<ArtifactReport>(
+        if let Some(mut report) = crate::hashcache::load_evidence::<ArtifactReport>(
             "artifact-reports",
             path,
             &file,
@@ -111,6 +122,14 @@ fn inspect_opened(
                 .as_deref()
                 .is_none_or(|expected| report.sha256.as_deref() == Some(expected))
             {
+                let policy = crate::hashcache::cache_policy();
+                report.cache = Some(ArtifactCacheInfo {
+                    digest: "REUSED_BY_EVIDENCE".to_owned(),
+                    evidence: "HIT".to_owned(),
+                    digest_min_bytes: policy.digest_min_bytes,
+                    evidence_min_bytes: policy.evidence_min_bytes,
+                    evidence_revision: policy.evidence_revision.to_owned(),
+                });
                 return Ok(report);
             }
         }
@@ -131,15 +150,20 @@ fn inspect_opened(
         && matches!(format, ArtifactFormat::Gguf | ArtifactFormat::Safetensors)
         && precomputed_sha256.is_none();
     let mut fused_binary = None;
+    let mut digest_cache_state = "NOT_USED".to_owned();
     let sha256 = if mode == ArtifactScanMode::Full {
         match precomputed_sha256 {
-            Some(value) => Some(value),
+            Some(value) => {
+                digest_cache_state = "PRECOMPUTED".to_owned();
+                Some(value)
+            }
             None if fuse_binary => {
                 let mut stream = crate::scanner::binary::BinaryStreamScanner::new();
                 let (outcome, streamed) =
                     crate::hashcache::sha256_prefixed_with_observer(path, &file, |bytes| {
                         stream.observe(&file, size, bytes)
                     })?;
+                digest_cache_state = if outcome.cache_hit { "HIT" } else { "MISS" }.to_owned();
                 let identity = outcome.sha256.clone();
                 fused_binary = Some(if streamed {
                     stream.finish(&identity, media)
@@ -148,7 +172,11 @@ fn inspect_opened(
                 });
                 Some(identity)
             }
-            None => Some(crate::hashcache::sha256_prefixed(path, &file)?.sha256),
+            None => {
+                let outcome = crate::hashcache::sha256_prefixed(path, &file)?;
+                digest_cache_state = if outcome.cache_hit { "HIT" } else { "MISS" }.to_owned();
+                Some(outcome.sha256)
+            }
         }
     } else {
         None
@@ -222,6 +250,22 @@ fn inspect_opened(
         size,
         sha256,
         compound_identity,
+        cache: {
+            let policy = crate::hashcache::cache_policy();
+            Some(ArtifactCacheInfo {
+                digest: digest_cache_state,
+                evidence: if !evidence_cache_safe {
+                    "BYPASS_COMPOUND".to_owned()
+                } else if crate::hashcache::evidence_eligible(size) {
+                    "MISS".to_owned()
+                } else {
+                    "BYPASS_SMALL".to_owned()
+                },
+                digest_min_bytes: policy.digest_min_bytes,
+                evidence_min_bytes: policy.evidence_min_bytes,
+                evidence_revision: policy.evidence_revision.to_owned(),
+            })
+        },
         results,
     };
     if !crate::hashcache::identity_unchanged(path, &file, &before)? {

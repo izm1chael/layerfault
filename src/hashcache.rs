@@ -14,7 +14,8 @@ use std::path::{Path, PathBuf};
 const CACHE_SCHEMA_VERSION: u32 = 1;
 const DIGEST_CACHE_REVISION: &str = "sha256-v1";
 const EVIDENCE_CACHE_REVISION: &str = env!("LAYERFAULT_SCANNER_REVISION");
-const DEFAULT_MIN_CACHE_BYTES: u64 = 16 * 1024 * 1024;
+const DEFAULT_DIGEST_MIN_CACHE_BYTES: u64 = 16 * 1024 * 1024;
+const DEFAULT_EVIDENCE_MIN_CACHE_BYTES: u64 = 4 * 1024 * 1024;
 const MAX_RECORD_BYTES: u64 = 16 * 1024 * 1024;
 const GUARD_BYTES: usize = 4096;
 
@@ -73,7 +74,38 @@ pub fn enabled() -> bool {
 }
 
 pub fn eligible(size: u64) -> bool {
-    enabled() && size >= min_cache_bytes()
+    digest_eligible(size)
+}
+
+/// Whether a file is large enough for the persistent digest cache.
+pub fn digest_eligible(size: u64) -> bool {
+    enabled() && size >= digest_min_cache_bytes()
+}
+
+/// Whether a file is large/expensive enough for scanner-evidence reuse.
+/// Evidence has a lower default threshold than digests because structural
+/// parsing can be CPU-expensive even for files well below 16 MiB.
+pub fn evidence_eligible(size: u64) -> bool {
+    enabled() && size >= evidence_min_cache_bytes()
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct CachePolicy {
+    pub enabled: bool,
+    pub digest_min_bytes: u64,
+    pub evidence_min_bytes: u64,
+    pub digest_revision: &'static str,
+    pub evidence_revision: &'static str,
+}
+
+pub fn cache_policy() -> CachePolicy {
+    CachePolicy {
+        enabled: enabled(),
+        digest_min_bytes: digest_min_cache_bytes(),
+        evidence_min_bytes: evidence_min_cache_bytes(),
+        digest_revision: DIGEST_CACHE_REVISION,
+        evidence_revision: EVIDENCE_CACHE_REVISION,
+    }
 }
 
 pub fn sha256_prefixed(path: &Path, file: &File) -> Result<HashOutcome> {
@@ -268,7 +300,7 @@ where
     T: DeserializeOwned,
 {
     let current = capture_identity(path, file)?;
-    if !eligible(current.len) {
+    if !evidence_eligible(current.len) {
         return Ok(None);
     }
     let record_path = record_path(namespace, &current, discriminator)?;
@@ -302,7 +334,7 @@ where
     T: Serialize,
 {
     let current = capture_identity(path, file)?;
-    if current != *expected_identity || !eligible(current.len) {
+    if current != *expected_identity || !evidence_eligible(current.len) {
         return Ok(());
     }
     let guard_sha256 = guard_sha256(file, current.len)?;
@@ -370,11 +402,26 @@ fn system_time_parts(value: Option<std::time::SystemTime>) -> (Option<u64>, Opti
     (Some(duration.as_secs()), Some(duration.subsec_nanos()))
 }
 
-fn min_cache_bytes() -> u64 {
+fn digest_min_cache_bytes() -> u64 {
     std::env::var("LAYERFAULT_HASH_CACHE_MIN_BYTES")
         .ok()
         .and_then(|value| value.parse::<u64>().ok())
-        .unwrap_or(DEFAULT_MIN_CACHE_BYTES)
+        .unwrap_or(DEFAULT_DIGEST_MIN_CACHE_BYTES)
+}
+
+fn evidence_min_cache_bytes() -> u64 {
+    std::env::var("LAYERFAULT_EVIDENCE_CACHE_MIN_BYTES")
+        .ok()
+        .and_then(|value| value.parse::<u64>().ok())
+        // Backwards compatibility: an explicitly configured legacy hash-cache
+        // threshold continues to govern both cache classes unless the new
+        // evidence-specific setting is supplied.
+        .or_else(|| {
+            std::env::var("LAYERFAULT_HASH_CACHE_MIN_BYTES")
+                .ok()
+                .and_then(|value| value.parse::<u64>().ok())
+        })
+        .unwrap_or(DEFAULT_EVIDENCE_MIN_CACHE_BYTES)
 }
 
 fn cache_root() -> Result<PathBuf> {

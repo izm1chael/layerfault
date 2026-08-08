@@ -1,0 +1,594 @@
+{
+  "schema_version": 1,
+  "description": "High-confidence release contracts. Behaviour-dependent backdoors are gated separately and are not mislabeled as static PASS expectations.",
+  "expectations": [
+    {
+      "group": "core",
+      "case": "01-pytorchTest",
+      "operation": "inspect-package",
+      "decision": "BLOCK",
+      "exit_code": 3
+    },
+    {
+      "group": "core",
+      "case": "01-pytorchTest",
+      "operation": "pipeline",
+      "decision": "BLOCK",
+      "exit_code": 3
+    },
+    {
+      "group": "core",
+      "case": "01-pytorchTest",
+      "operation": "review-quick",
+      "decision": "BLOCK",
+      "exit_code": 3
+    },
+    {
+      "group": "core",
+      "case": "02-a-very-safe-m0del",
+      "operation": "inspect-package",
+      "decision": "BLOCK",
+      "exit_code": 3
+    },
+    {
+      "group": "core",
+      "case": "02-a-very-safe-m0del",
+      "operation": "pipeline",
+      "decision": "BLOCK",
+      "exit_code": 3
+    },
+    {
+      "group": "core",
+      "case": "02-a-very-safe-m0del",
+      "operation": "review-quick",
+      "decision": "BLOCK",
+      "exit_code": 3
+    },
+    {
+      "group": "core",
+      "case": "03-picklescan-bypass",
+      "operation": "inspect-package",
+      "decision": "BLOCK",
+      "exit_code": 3
+    },
+    {
+      "group": "core",
+      "case": "03-picklescan-bypass",
+      "operation": "pipeline",
+      "decision": "BLOCK",
+      "exit_code": 3
+    },
+    {
+      "group": "core",
+      "case": "03-picklescan-bypass",
+      "operation": "review-quick",
+      "decision": "BLOCK",
+      "exit_code": 3
+    },
+    {
+      "group": "core",
+      "case": "04-picklescan-bypass-alt",
+      "operation": "inspect-package",
+      "decision": "BLOCK",
+      "exit_code": 3
+    },
+    {
+      "group": "core",
+      "case": "04-picklescan-bypass-alt",
+      "operation": "pipeline",
+      "decision": "BLOCK",
+      "exit_code": 3
+    },
+    {
+      "group": "core",
+      "case": "04-picklescan-bypass-alt",
+      "operation": "review-quick",
+      "decision": "BLOCK",
+      "exit_code": 3
+    },
+    {
+      "group": "core",
+      "case": "08-gguf-integer-overflow",
+      "operation": "inspect-package",
+      "decision": "BLOCK",
+      "exit_code": 3
+    },
+    {
+      "group": "core",
+      "case": "08-gguf-integer-overflow",
+      "operation": "pipeline",
+      "decision": "BLOCK",
+      "exit_code": 3
+    },
+    {
+      "group": "core",
+      "case": "08-gguf-integer-overflow",
+      "operation": "review-quick",
+      "decision": "BLOCK",
+      "exit_code": 3
+    },
+    {
+      "group": "core",
+      "case": "09-gguf-invalid-kv-type",
+      "operation": "inspect-package",
+      "decision": "BLOCK",
+      "exit_code": 3
+    },
+    {
+      "group": "core",
+      "case": "09-gguf-invalid-kv-type",
+      "operation": "pipeline",
+      "decision": "BLOCK",
+      "exit_code": 3
+    },
+    {
+      "group": "core",
+      "case": "09-gguf-invalid-kv-type",
+      "operation": "review-quick",
+      "decision": "BLOCK",
+      "exit_code": 3
+    },
+    {
+      "group": "core",
+      "case": "10-gguf-stride-overflow",
+      "operation": "inspect-package",
+      "decision": "BLOCK",
+      "exit_code": 3
+    },
+    {
+      "group": "core",
+      "case": "10-gguf-stride-overflow",
+      "operation": "pipeline",
+      "decision": "BLOCK",
+      "exit_code": 3
+    },
+    {
+      "group": "core",
+      "case": "10-gguf-stride-overflow",
+      "operation": "review-quick",
+      "decision": "BLOCK",
+      "exit_code": 3
+    },
+    {
+      "group": "core",
+      "case": "11-gguf-scanner-bypass",
+      "operation": "inspect-package",
+      "decision": "BLOCK",
+      "exit_code": 3
+    },
+    {
+      "group": "core",
+      "case": "11-gguf-scanner-bypass",
+      "operation": "pipeline",
+      "decision": "BLOCK",
+      "exit_code": 3
+    },
+    {
+      "group": "core",
+      "case": "11-gguf-scanner-bypass",
+      "operation": "review-quick",
+      "decision": "BLOCK",
+      "exit_code": 3
+    },
+    {
+      "group": "core",
+      "case": "12-malicious-safetensors",
+      "operation": "inspect-package",
+      "decision": "BLOCK",
+      "exit_code": 3
+    },
+    {
+      "group": "core",
+      "case": "12-malicious-safetensors",
+      "operation": "pipeline",
+      "decision": "BLOCK",
+      "exit_code": 3
+    },
+    {
+      "group": "core",
+      "case": "12-malicious-safetensors",
+      "operation": "review-quick",
+      "decision": "BLOCK",
+      "exit_code": 3
+    },
+    {
+      "group": "core",
+      "case": "14-baller13",
+      "operation": "inspect-package",
+      "decision": "BLOCK",
+      "exit_code": 3
+    },
+    {
+      "group": "core",
+      "case": "14-baller13",
+      "operation": "pipeline",
+      "decision": "BLOCK",
+      "exit_code": 3
+    },
+    {
+      "group": "core",
+      "case": "14-baller13",
+      "operation": "review-quick",
+      "decision": "BLOCK",
+      "exit_code": 3
+    },
+    {
+      "group": "core",
+      "case": "05-modelscan-pytorch-bypass",
+      "operation": "inspect-package",
+      "decision": "WARN",
+      "exit_code": 1
+    },
+    {
+      "group": "core",
+      "case": "05-modelscan-pytorch-bypass",
+      "operation": "pipeline",
+      "decision": "WARN",
+      "exit_code": 1
+    },
+    {
+      "group": "core",
+      "case": "05-modelscan-pytorch-bypass",
+      "operation": "review-quick",
+      "decision": "WARN",
+      "exit_code": 1
+    },
+    {
+      "group": "core",
+      "case": "13-trust-remote-code",
+      "operation": "inspect-package",
+      "decision": "WARN",
+      "exit_code": 1
+    },
+    {
+      "group": "core",
+      "case": "13-trust-remote-code",
+      "operation": "pipeline",
+      "decision": "WARN",
+      "exit_code": 1
+    },
+    {
+      "group": "core",
+      "case": "13-trust-remote-code",
+      "operation": "review-quick",
+      "decision": "WARN",
+      "exit_code": 1
+    },
+    {
+      "group": "core",
+      "case": "15-clean-safetensors",
+      "operation": "inspect-package",
+      "decision": "PASS",
+      "exit_code": 0
+    },
+    {
+      "group": "core",
+      "case": "15-clean-safetensors",
+      "operation": "pipeline",
+      "decision": "PASS",
+      "exit_code": 0
+    },
+    {
+      "group": "core",
+      "case": "15-clean-safetensors",
+      "operation": "review-quick",
+      "decision": "PASS",
+      "exit_code": 0
+    },
+    {
+      "group": "extended",
+      "case": "16-gguf-chat-template-metadata-backdoor",
+      "operation": "inspect-package",
+      "decision": "BLOCK",
+      "exit_code": 3
+    },
+    {
+      "group": "extended",
+      "case": "16-gguf-chat-template-metadata-backdoor",
+      "operation": "pipeline",
+      "decision": "BLOCK",
+      "exit_code": 3
+    },
+    {
+      "group": "extended",
+      "case": "16-gguf-chat-template-metadata-backdoor",
+      "operation": "review-quick",
+      "decision": "BLOCK",
+      "exit_code": 3
+    },
+    {
+      "group": "extended",
+      "case": "17-gguf-security-divzero-stride",
+      "operation": "inspect-package",
+      "decision": "BLOCK",
+      "exit_code": 3
+    },
+    {
+      "group": "extended",
+      "case": "17-gguf-security-divzero-stride",
+      "operation": "pipeline",
+      "decision": "BLOCK",
+      "exit_code": 3
+    },
+    {
+      "group": "extended",
+      "case": "17-gguf-security-divzero-stride",
+      "operation": "review-quick",
+      "decision": "BLOCK",
+      "exit_code": 3
+    },
+    {
+      "group": "extended",
+      "case": "18-gguf-writer-pickle-bypass",
+      "operation": "inspect-package",
+      "decision": "BLOCK",
+      "exit_code": 3
+    },
+    {
+      "group": "extended",
+      "case": "18-gguf-writer-pickle-bypass",
+      "operation": "pipeline",
+      "decision": "BLOCK",
+      "exit_code": 3
+    },
+    {
+      "group": "extended",
+      "case": "18-gguf-writer-pickle-bypass",
+      "operation": "review-quick",
+      "decision": "BLOCK",
+      "exit_code": 3
+    },
+    {
+      "group": "extended",
+      "case": "19-modelscan-selfcontained-pickle-bypass",
+      "operation": "inspect-package",
+      "decision": "BLOCK",
+      "exit_code": 3
+    },
+    {
+      "group": "extended",
+      "case": "19-modelscan-selfcontained-pickle-bypass",
+      "operation": "pipeline",
+      "decision": "BLOCK",
+      "exit_code": 3
+    },
+    {
+      "group": "extended",
+      "case": "19-modelscan-selfcontained-pickle-bypass",
+      "operation": "review-quick",
+      "decision": "BLOCK",
+      "exit_code": 3
+    },
+    {
+      "group": "extended",
+      "case": "22-joblib-double-compression",
+      "operation": "inspect-package",
+      "decision": "BLOCK",
+      "exit_code": 3
+    },
+    {
+      "group": "extended",
+      "case": "22-joblib-double-compression",
+      "operation": "pipeline",
+      "decision": "BLOCK",
+      "exit_code": 3
+    },
+    {
+      "group": "extended",
+      "case": "22-joblib-double-compression",
+      "operation": "review-quick",
+      "decision": "BLOCK",
+      "exit_code": 3
+    },
+    {
+      "group": "extended",
+      "case": "23-tensorflow-savedmodel-bypass",
+      "operation": "inspect-package",
+      "decision": "BLOCK",
+      "exit_code": 3
+    },
+    {
+      "group": "extended",
+      "case": "23-tensorflow-savedmodel-bypass",
+      "operation": "pipeline",
+      "decision": "BLOCK",
+      "exit_code": 3
+    },
+    {
+      "group": "extended",
+      "case": "23-tensorflow-savedmodel-bypass",
+      "operation": "review-quick",
+      "decision": "BLOCK",
+      "exit_code": 3
+    },
+    {
+      "group": "extended",
+      "case": "24-onnx-external-data-hardlink",
+      "operation": "artifact-inspect__model_dir_hardlink_external.onnx",
+      "decision": "WARN",
+      "exit_code": 1
+    },
+    {
+      "group": "extended",
+      "case": "24-onnx-external-data-hardlink",
+      "operation": "artifact-inspect__model_dir_traversal_external.onnx",
+      "decision": "BLOCK",
+      "exit_code": 3
+    },
+    {
+      "group": "extended",
+      "case": "24-onnx-external-data-hardlink",
+      "operation": "artifact-inspect__model_dir_valid_external.onnx",
+      "decision": "PASS",
+      "exit_code": 0
+    },
+    {
+      "group": "extended",
+      "case": "27-smollm2-135m-base",
+      "operation": "inspect-package",
+      "decision": "PASS",
+      "exit_code": 0
+    },
+    {
+      "group": "extended",
+      "case": "27-smollm2-135m-base",
+      "operation": "pipeline",
+      "decision": "PASS",
+      "exit_code": 0
+    },
+    {
+      "group": "extended",
+      "case": "28-smollm2-135m-q4-derived",
+      "operation": "inspect-package",
+      "decision": "PASS",
+      "exit_code": 0
+    },
+    {
+      "group": "extended",
+      "case": "28-smollm2-135m-q4-derived",
+      "operation": "pipeline",
+      "decision": "PASS",
+      "exit_code": 0
+    },
+    {
+      "group": "extended",
+      "case": "30-qwen25-05b-q4-derived",
+      "operation": "inspect-package",
+      "decision": "PASS",
+      "exit_code": 0
+    },
+    {
+      "group": "extended",
+      "case": "30-qwen25-05b-q4-derived",
+      "operation": "pipeline",
+      "decision": "PASS",
+      "exit_code": 0
+    },
+    {
+      "group": "extended",
+      "case": "31-smollm2-360m-base",
+      "operation": "inspect-package",
+      "decision": "PASS",
+      "exit_code": 0
+    },
+    {
+      "group": "extended",
+      "case": "31-smollm2-360m-base",
+      "operation": "pipeline",
+      "decision": "PASS",
+      "exit_code": 0
+    },
+    {
+      "group": "extended",
+      "case": "32-smollm2-360m-quant-matrix",
+      "operation": "inspect-package",
+      "decision": "PASS",
+      "exit_code": 0
+    },
+    {
+      "group": "extended",
+      "case": "32-smollm2-360m-quant-matrix",
+      "operation": "pipeline",
+      "decision": "PASS",
+      "exit_code": 0
+    },
+    {
+      "group": "extended",
+      "case": "33-lora-clean-control",
+      "operation": "inspect-package",
+      "decision": "PASS",
+      "exit_code": 0
+    },
+    {
+      "group": "extended",
+      "case": "33-lora-clean-control",
+      "operation": "pipeline",
+      "decision": "PASS",
+      "exit_code": 0
+    },
+    {
+      "group": "extended",
+      "case": "33-lora-clean-control",
+      "operation": "review-quick",
+      "decision": "PASS",
+      "exit_code": 0
+    },
+    {
+      "group": "dataset",
+      "case": "39-alpaca-backdoor",
+      "operation": "dataset-poisoning-review",
+      "decision": "WARN",
+      "exit_code": 1
+    },
+    {
+      "group": "dataset",
+      "case": "40-pretraining-poisoning-100m",
+      "operation": "dataset-poisoning-review",
+      "decision": "WARN",
+      "exit_code": 1
+    },
+    {
+      "group": "dataset",
+      "case": "41-deployment-backdoor",
+      "operation": "dataset-poisoning-review",
+      "decision": "WARN",
+      "exit_code": 1
+    },
+    {
+      "group": "dataset",
+      "case": "42-chat-model-backdoor-data",
+      "operation": "dataset-poisoning-review",
+      "decision": "WARN",
+      "exit_code": 1
+    },
+    {
+      "group": "dataset",
+      "case": "43-alpaca-backdoored-controls",
+      "operation": "dataset-poisoning-review",
+      "decision": "WARN",
+      "exit_code": 1
+    },
+    {
+      "group": "comparison",
+      "case": "qwen25-05b-base-to-q4",
+      "operation": "compare-quantization",
+      "decision": "BLOCK",
+      "exit_code": 3
+    },
+    {
+      "group": "comparison",
+      "case": "qwen25-05b-base-to-q4",
+      "operation": "review-quick-quantization",
+      "decision": "BLOCK",
+      "exit_code": 3
+    },
+    {
+      "group": "comparison",
+      "case": "qwen25-3b-base-to-q4",
+      "operation": "compare-quantization",
+      "decision": "BLOCK",
+      "exit_code": 3
+    },
+    {
+      "group": "comparison",
+      "case": "qwen25-3b-base-to-q4",
+      "operation": "review-quick-quantization",
+      "decision": "BLOCK",
+      "exit_code": 3
+    },
+    {
+      "group": "comparison",
+      "case": "smollm2-360m-SmolLM2-360M-Instruct-Q2_K",
+      "operation": "compare-quantization",
+      "decision": "BLOCK",
+      "exit_code": 3
+    },
+    {
+      "group": "comparison",
+      "case": "smollm2-360m-SmolLM2-360M-Instruct-Q2_K",
+      "operation": "review-quick-quantization",
+      "decision": "BLOCK",
+      "exit_code": 3
+    }
+  ]
+}

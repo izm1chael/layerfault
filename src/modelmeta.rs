@@ -206,6 +206,16 @@ pub fn snapshot_artifact(path: &Path) -> Result<ModelSnapshot> {
 
 pub fn snapshot_package(path: &Path) -> Result<ModelSnapshot> {
     let report = crate::package::inspect(path)?;
+    snapshot_package_from_report(path, &report)
+}
+
+/// Build normalized package metadata from an admission report that has already
+/// hashed and security-scanned the package. Review orchestration uses this to
+/// avoid re-running package admission merely to construct its metadata view.
+pub fn snapshot_package_from_report(
+    path: &Path,
+    report: &crate::package::PackageReport,
+) -> Result<ModelSnapshot> {
     let canonical_root = PathBuf::from(&report.root);
     let mut members = Vec::with_capacity(report.files.len());
     let mut components = BTreeMap::<String, String>::new();
@@ -268,7 +278,7 @@ pub fn snapshot_package(path: &Path) -> Result<ModelSnapshot> {
             merge_architecture(&mut merged, child_arch);
             return finish_package_snapshot(
                 path,
-                report.fingerprint,
+                report.fingerprint.clone(),
                 format,
                 artifact_sha,
                 merged,
@@ -309,7 +319,7 @@ pub fn snapshot_package(path: &Path) -> Result<ModelSnapshot> {
 
     finish_package_snapshot(
         path,
-        report.fingerprint,
+        report.fingerprint.clone(),
         format,
         artifact_sha,
         architecture,

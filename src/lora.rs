@@ -50,6 +50,16 @@ pub struct LoraReport {
     pub tensors: Vec<LoraTensorAnalysis>,
     pub module_norm_variance: Option<f64>,
     pub extreme_module_concentration: Option<f64>,
+    pub scaling: Option<f64>,
+    pub mean_tensor_sparsity: Option<f64>,
+    pub norm_outlier_count: usize,
+    pub max_spectral_concentration: Option<f64>,
+    pub targeted_tensor_fraction: Option<f64>,
+    /// Advisory numerical/metadata observations. These are surfaced for review
+    /// but do not by themselves raise the model security decision: legitimate
+    /// adapters can naturally exhibit strong spectral concentration, uneven
+    /// norms, or modules_to_save.
+    pub observations: Vec<String>,
     pub findings: Vec<String>,
 }
 
@@ -85,10 +95,18 @@ pub fn inspect_adapter(
     let stats_map: BTreeMap<_, _> = stats.into_iter().map(|v| (v.tensor.clone(), v)).collect();
     let mut tensors = Vec::new();
     let mut norms = Vec::new();
+    let mut sparsities = Vec::new();
+    let mut targeted_tensors = 0_usize;
     for tensor in &inv.tensors {
         let stat = stats_map.get(&tensor.name).cloned();
         if let Some(stat) = &stat {
             norms.push(stat.frobenius);
+            sparsities.push(stat.sparsity);
+        }
+        if config.target_modules.iter().any(|target| {
+            tensor.name.ends_with(target) || tensor.name.contains(&format!(".{target}."))
+        }) {
+            targeted_tensors = targeted_tensors.saturating_add(1);
         }
         let spectral = if tensor.shape.len() == 2
             && tensor
@@ -123,6 +141,44 @@ pub fn inspect_adapter(
         let max = norms.iter().copied().fold(0.0_f64, f64::max);
         Some(if total > 0.0 { max / total } else { 0.0 })
     };
+    let scaling = match (config.lora_alpha, config.r) {
+        (Some(alpha), Some(rank)) if rank > 0 => Some(alpha / rank as f64),
+        _ => None,
+    };
+    let mean_tensor_sparsity = if sparsities.is_empty() {
+        None
+    } else {
+        Some(sparsities.iter().sum::<f64>() / sparsities.len() as f64)
+    };
+    let norm_outlier_count = if norms.len() < 4 {
+        0
+    } else {
+        let mut ordered = norms.clone();
+        ordered.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+        let median = ordered[ordered.len() / 2];
+        if median <= 0.0 {
+            0
+        } else {
+            norms
+                .iter()
+                .filter(|value| **value > median * 25.0 || **value < median / 25.0)
+                .count()
+        }
+    };
+    let max_spectral_concentration = tensors
+        .iter()
+        .filter_map(|tensor| {
+            tensor
+                .spectral
+                .as_ref()
+                .map(|value| value.spectral_concentration)
+        })
+        .max_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    let targeted_tensor_fraction = if tensors.is_empty() || config.target_modules.is_empty() {
+        None
+    } else {
+        Some(targeted_tensors as f64 / tensors.len() as f64)
+    };
     let mut findings = Vec::new();
     if base_compatible == Some(false) {
         findings.push("LF-ADAPTER-BASE-MISMATCH".to_owned());
@@ -133,6 +189,21 @@ pub fn inspect_adapter(
     if extreme_module_concentration.is_some_and(|v| v > 0.90 && norms.len() >= 4) {
         findings.push("LF-ADAPTER-WEIGHT-ANOMALY".to_owned());
     }
+    let mut observations = Vec::new();
+    if scaling.is_some_and(|value| !(1.0e-4..=128.0).contains(&value)) {
+        observations.push("LF-ADAPTER-SCALING-ANOMALY".to_owned());
+    }
+    if norm_outlier_count > 0 {
+        observations.push("LF-ADAPTER-NORM-OUTLIER".to_owned());
+    }
+    if max_spectral_concentration.is_some_and(|value| value > 0.995) {
+        observations.push("LF-ADAPTER-SPECTRAL-CONCENTRATION".to_owned());
+    }
+    if !config.modules_to_save.is_empty() {
+        observations.push("LF-ADAPTER-MODULES-TO-SAVE".to_owned());
+    }
+    observations.sort();
+    observations.dedup();
     findings.sort();
     findings.dedup();
     Ok(LoraReport {
@@ -144,6 +215,12 @@ pub fn inspect_adapter(
         tensors,
         module_norm_variance,
         extreme_module_concentration,
+        scaling,
+        mean_tensor_sparsity,
+        norm_outlier_count,
+        max_spectral_concentration,
+        targeted_tensor_fraction,
+        observations,
         findings,
     })
 }
@@ -207,7 +284,17 @@ pub fn parse_config(path: &Path) -> Result<LoraConfig> {
 fn find_adapter_file(root: &Path) -> Result<PathBuf> {
     for name in ["adapter_model.safetensors", "adapter.safetensors"] {
         let candidate = root.join(name);
-        if candidate.is_file() {
+        let Ok(metadata) = std::fs::symlink_metadata(&candidate) else {
+            continue;
+        };
+        if metadata.file_type().is_symlink() {
+            bail!(
+                "LoRA adapter weight '{}' may not be a symlink",
+                candidate.display()
+            );
+        }
+        if metadata.is_file() {
+            let _ = crate::safeio::open_readonly_nofollow(&candidate)?;
             return Ok(candidate);
         }
     }

@@ -11,6 +11,7 @@ pub mod behaviour;
 pub mod binding;
 pub mod certify;
 pub mod dataset;
+pub mod decision;
 pub mod discovery;
 pub mod doctor;
 pub mod embedded;

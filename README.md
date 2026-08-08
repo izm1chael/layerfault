@@ -397,3 +397,27 @@ If you believe you have found a vulnerability in Layerfault itself, please avoid
 ---
 
 **Layerfault's goal is simple:** know what local model artifact you are admitting, know whether it changed, know who attested to it, know whether your policy permits it, and block execution when those guarantees fail.
+
+### RC corpus hardening and diagnostics
+
+The complete RC hardening pass makes security decisions monotonic across composite review workflows. Static admission is evaluated before supplementary metadata, numeric, behavioural, judge, or drift domains; each supplementary domain is explicitly reported as `AVAILABLE`, `NOT_RUN`, `UNAVAILABLE`, or `FAILED`. A malformed model that has already blocked therefore remains `BLOCK` even if a later analysis cannot interpret its tensors.
+
+Package content inspection no longer has a 4 MiB security-text cliff. Text/config members are streamed through bounded package-risk inspection, while Hugging Face loader metadata is extracted with a streaming JSON visitor so ordinary multi-megabyte `tokenizer.json` files do not become warnings merely because they are large. Evidence retention remains bounded.
+
+Artifact JSON reports include cache diagnostics. Digest and scanner-evidence reuse use separate thresholds: `LAYERFAULT_HASH_CACHE_MIN_BYTES` controls digest caching (default 16 MiB) and `LAYERFAULT_EVIDENCE_CACHE_MIN_BYTES` controls scanner-evidence caching (default 4 MiB). `--no-cache` still disables persistent reuse for the invocation.
+
+Dataset commands accept `--jobs N`. Poisoning review reports exact bounded coverage and, when more than 250,000 records are available, deterministically samples across the complete record range rather than analysing only the dataset head. Results are merged deterministically so parallelism does not alter the semantic report.
+
+Package-directory and sharded Safetensors numerical review is profile-aware. `review --profile quick` and `standard` keep full structural/security admission but use deterministic model-identity-seeded samples distributed across the logical tensor set, with extra weight for LoRA/output/embedding/attention tensors and automatic full/extended escalation when sampled statistics are anomalous. `review --profile deep` performs exhaustive numerical traversal. Reports expose values/tensors available vs inspected and per-tensor coverage; sampled numerical analysis is never presented as exhaustive coverage.
+
+Release/corpus helpers:
+
+```bash
+python3 scripts/check-corpus-contract.py /path/to/harness-run
+python3 scripts/check-corpus-performance.py /path/to/harness-run
+bash scripts/behaviour-corpus-gate.sh tests/behaviour-corpus-template.tsv
+```
+
+`tests/corpus-expectations.json` distinguishes detection regressions, false-positive regressions, and JSON/process-exit semantic mismatches. `tests/corpus-performance.json` uses broad warm/cold ratios rather than fixed VPS milliseconds.
+
+Behavioural commands follow the same automation-safe decision contract: `behaviour` maps clean/suspicious/high-risk outcomes to `0`/`1`/`3`, while `compare-behaviour` returns `3` for security-regression, suspicious-trigger, or high-risk differential states. A behavioural JSON result that is security-blocking therefore cannot silently return process success.

@@ -46,3 +46,17 @@ The live-test hardening pass adds the following before final RC promotion:
 - fuzz targets for Safetensors, ONNX, TensorFlow SavedModel, TFLite, Keras, binary-object parsing, and package correlation in addition to the existing manifest/GGUF/heuristic targets.
 
 `number_prefix` remains present transitively in the embedded-inference dependency graph through legacy `indicatif` consumers; documentation now records that accurately instead of claiming the crate disappeared from `Cargo.lock`.
+
+## Complete RC hardening follow-up (post-corpus validation)
+
+The post-optimization master corpus run exposed a small set of correctness and residual performance gaps. This tree includes the complete follow-up rather than only the release-blocking subset:
+
+- `review` performs static admission first and represents supplementary domains as `AVAILABLE`, `NOT_RUN`, `UNAVAILABLE`, or `FAILED`; a supplementary parser/runtime failure cannot downgrade an already-established `BLOCK`, and signed review evidence can still be emitted for malformed blocked artifacts.
+- security decisions use the shared monotonic `SecurityDecision` type for review/comparison paths, and `compare` now returns process exit `0/1/3` consistently with its JSON `PASS/WARN/BLOCK` result.
+- package text/config security inspection streams the complete member with bounded overlap/evidence instead of stopping at 4 MiB. Large tokenizer/config JSON is not warned merely for its size; Hugging Face `auto_map` / `trust_remote_code` metadata is extracted with a streaming JSON visitor.
+- ONNX external tensor admission checks Unix hardlink count and raises `LF-ONNX-EXTERNAL-HARDLINK` when a sidecar has aliases that weaken the directory mutability boundary. Link count remains evidence rather than part of the portable compound content identity.
+- digest and scanner-evidence caches have independent size thresholds. Digest caching remains conservative at 16 MiB while expensive scanner evidence defaults to 4 MiB; JSON artifact reports expose cache hit/miss/bypass diagnostics.
+- package and sharded Safetensors can participate in profile-aware numerical weight statistics/differential analysis instead of reporting numeric analysis unavailable solely because the CLI target is a directory. `quick`/`standard` use identity-seeded per-tensor stratified sampling with security-relevant weighting and targeted escalation; `deep` performs exhaustive numeric traversal. Structural admission remains full-coverage in every profile, and reports state numeric coverage explicitly.
+- LoRA static review now reports scaling, mean sparsity, norm outliers, spectral concentration, target-module concentration and `modules_to_save` evidence, while retaining the explicit boundary that anomalous adapter weights do not prove malicious intent.
+- dataset fingerprint/review has a bounded parallel inventory, deterministic per-file quotas, streaming record visitors for line-oriented formats, linearized rare-trigger label correlation, exact coverage accounting, and deterministic stratified sampling across the whole record range when the 250k analysis ceiling is reached. `--jobs` is accepted on dataset inspect/fingerprint/compare/poisoning-review.
+- corpus release tooling now includes machine-readable expected verdicts, a semantic/exit-code consistency checker, broad cache/performance ratio guards, and a behaviour-corpus gate/template for clean/backdoored adapter and model comparisons.

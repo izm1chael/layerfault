@@ -302,3 +302,13 @@ This prevents a self-generated valid signature from being confused with organiza
 ## 20. Stable-release feature freeze
 
 The security architecture now intentionally freezes broad functionality for the initial stable release. Additional work should prioritize hostile corpus coverage, benign false-positive measurement, large-artifact resource limits, runtime/source compatibility, deterministic output, documentation and release reproducibility. New detectors or integrations should be accepted only when they close a demonstrated threat-model gap.
+
+## RC follow-up: composite review, package streaming, ONNX aliases and dataset bounds
+
+Composite `review` is fail-isolated but decision-monotonic. Static admission is performed before optional metadata, lineage, numeric, behavioural, judge, drift, and observation domains. Failure of a supplementary domain is preserved as structured coverage evidence and cannot lower an existing `WARN` or `BLOCK`. An unexpected supplementary `FAILED` state raises at least `WARN` when static admission was otherwise clean; an intentionally skipped profile domain is `NOT_RUN` and does not by itself raise severity.
+
+Direct package text/config security inspection streams the complete regular-file member in bounded chunks with overlap. The previous fixed 4 MiB package-content cutoff is retained only as a legacy explanation identifier for old evidence, not as a current coverage boundary. Large JSON DOM construction remains bounded where necessary, but security-sensitive Hugging Face loader metadata is extracted with a streaming visitor.
+
+ONNX external tensor files remain part of a compound identity and are opened without symlink traversal, containment/range checked, hashed, and revalidated. On Unix, a sidecar with `st_nlink > 1` raises `LF-ONNX-EXTERNAL-HARDLINK`: another pathname can mutate the same inode and therefore weakens the admitted-directory mutability boundary even though the exact bytes are integrity-bound at scan time.
+
+Dataset poisoning analysis is deliberately bounded. Reports expose records available/analyzed, record and token-key ceilings, opaque/unparsed member counts, and sampling strategy. When the record budget is exceeded, selection is deterministic and stratified across each member's complete record range, including head/middle/tail positions; it is not a first-N sample. Parallel per-file work is merged in deterministic source order and must not change security semantics between job counts. Opaque formats or members that cannot be semantically parsed remain explicit coverage warnings rather than being silently treated as clean.

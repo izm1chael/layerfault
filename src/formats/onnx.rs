@@ -69,8 +69,12 @@ pub fn scan(
                 None
             } else {
                 match bind_external_data(path, digest, &summary.external_data) {
-                    Ok((identity, bound)) => {
+                    Ok((identity, bound, hardlinked)) => {
                         matches.extend(bound);
+                        if hardlinked && status == crate::scanner::ScanStatus::Pass {
+                            status = crate::scanner::ScanStatus::Warn;
+                            class = crate::scanner::FindingClass::Integrity;
+                        }
                         Some(identity)
                     }
                     Err(error) => {
@@ -130,7 +134,7 @@ fn bind_external_data(
     model_path: &Path,
     model_digest: &str,
     external: &[OnnxExternalData],
-) -> Result<(String, Vec<String>)> {
+) -> Result<(String, Vec<String>, bool)> {
     let parent = model_path.parent().unwrap_or_else(|| Path::new("."));
     let parent = parent
         .canonicalize()
@@ -141,6 +145,7 @@ fn bind_external_data(
     hasher.update([0]);
     let mut matches = Vec::new();
     let mut sidecars = BTreeMap::<String, BoundSidecar>::new();
+    let mut hardlinked = false;
 
     for item in external {
         let relative = PathBuf::from(&item.relative_path);
@@ -167,7 +172,22 @@ fn bind_external_data(
         let cache_key = canonical.to_string_lossy().into_owned();
         if !sidecars.contains_key(&cache_key) {
             let sidecar = crate::safeio::open_readonly_nofollow(&canonical)?;
-            let sidecar_len = sidecar.metadata()?.len();
+            let opened_metadata = sidecar.metadata()?;
+            let sidecar_len = opened_metadata.len();
+            #[cfg(unix)]
+            let link_count = {
+                use std::os::unix::fs::MetadataExt;
+                opened_metadata.nlink()
+            };
+            #[cfg(not(unix))]
+            let link_count = 1_u64;
+            if link_count > 1 {
+                hardlinked = true;
+                matches.push(format!(
+                    "[LF-ONNX-EXTERNAL-HARDLINK] '{}' has link_count={}; an alias outside the admitted model directory may mutate the same inode",
+                    item.relative_path, link_count
+                ));
+            }
             let outcome = crate::hashcache::sha256_prefixed(&canonical, &sidecar)?;
             if !crate::hashcache::identity_unchanged(&canonical, &sidecar, &outcome.identity)? {
                 bail!(
@@ -218,6 +238,9 @@ fn bind_external_data(
         hasher.update([0]);
         hasher.update(sidecar_len.to_le_bytes());
         hasher.update(sidecar_digest.as_bytes());
+        // Link count is mutable filesystem state and therefore security evidence,
+        // not artifact identity. Compound identity remains portable across
+        // filesystems for the same model bytes and external-data layout.
         hasher.update(offset.to_le_bytes());
         hasher.update(item.length.unwrap_or(u64::MAX).to_le_bytes());
         hasher.update([0xff]);
@@ -244,6 +267,7 @@ fn bind_external_data(
     Ok((
         format!("lfonnx:sha256:{}", hex::encode(hasher.finalize())),
         matches,
+        hardlinked,
     ))
 }
 
@@ -864,6 +888,46 @@ mod tests {
             .as_deref()
             .is_some_and(|value| value.starts_with("lfonnx:sha256:")));
         let _ = fs::remove_dir_all(root);
+        Ok(())
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn hardlinked_external_sidecar_is_not_silent() -> Result<()> {
+        let root = std::env::temp_dir().join(format!(
+            "layerfault-onnx-hardlink-sidecar-{}",
+            std::process::id()
+        ));
+        let outside = std::env::temp_dir().join(format!(
+            "layerfault-onnx-hardlink-outside-{}",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&root);
+        let _ = fs::remove_file(&outside);
+        fs::create_dir_all(root.join("data"))?;
+        fs::write(&outside, b"tensor-bytes")?;
+        fs::hard_link(&outside, root.join("data/weights.bin"))?;
+        let model = model_with_external("data/weights.bin");
+        let model_path = root.join("model.onnx");
+        fs::write(&model_path, &model)?;
+        let file = File::open(&model_path)?;
+        let (finding, compound) = scan(
+            &model_path,
+            &file,
+            model.len() as u64,
+            "sha256:model",
+            "application/x-onnx",
+        )?;
+        assert_eq!(finding.status, crate::scanner::ScanStatus::Warn);
+        assert!(finding
+            .matches
+            .iter()
+            .any(|value| value.contains("LF-ONNX-EXTERNAL-HARDLINK")));
+        assert!(compound
+            .as_deref()
+            .is_some_and(|value| value.starts_with("lfonnx:sha256:")));
+        let _ = fs::remove_dir_all(root);
+        let _ = fs::remove_file(outside);
         Ok(())
     }
 

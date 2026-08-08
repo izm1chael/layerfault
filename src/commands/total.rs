@@ -10,13 +10,18 @@ pub(crate) fn run_dataset(args: DatasetArgs) -> Result<()> {
     match args.command {
         DatasetCommand::Inspect {
             dataset,
+            jobs,
             json: emit_json,
         }
         | DatasetCommand::Fingerprint {
             dataset,
+            jobs,
             json: emit_json,
         } => {
-            let report = layerfault::dataset::fingerprint(&dataset)?;
+            let report = layerfault::dataset::fingerprint_with_jobs(
+                &dataset,
+                jobs.unwrap_or_else(layerfault::app::default_jobs),
+            )?;
             if emit_json {
                 println!("{}", serde_json::to_string_pretty(&report)?);
             } else {
@@ -41,9 +46,14 @@ pub(crate) fn run_dataset(args: DatasetArgs) -> Result<()> {
         DatasetCommand::Compare {
             left,
             right,
+            jobs,
             json: emit_json,
         } => {
-            let report = layerfault::dataset::compare(&left, &right)?;
+            let report = layerfault::dataset::compare_with_jobs(
+                &left,
+                &right,
+                jobs.unwrap_or_else(layerfault::app::default_jobs),
+            )?;
             if emit_json {
                 println!("{}", serde_json::to_string_pretty(&report)?);
             } else {
@@ -58,9 +68,13 @@ pub(crate) fn run_dataset(args: DatasetArgs) -> Result<()> {
         }
         DatasetCommand::PoisoningReview {
             dataset,
+            jobs,
             json: emit_json,
         } => {
-            let report = layerfault::dataset::poisoning_review(&dataset)?;
+            let report = layerfault::dataset::poisoning_review_with_jobs(
+                &dataset,
+                jobs.unwrap_or_else(layerfault::app::default_jobs),
+            )?;
             if emit_json {
                 println!("{}", serde_json::to_string_pretty(&report)?);
             } else {

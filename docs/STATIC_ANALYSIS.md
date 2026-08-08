@@ -59,3 +59,11 @@ bash scripts/pre-push-security-gates.sh
 The script runs the Rust quality/security suite and, when installed, OSV-Scanner, cargo-audit, and Semgrep. Semgrep is run with `--config auto` and must report no **unsuppressed** blocking findings.
 
 The 18 current `nosemgrep` annotations are intentionally narrow and rule-specific. A gate checks this count so an accidental new suppression cannot silently expand the exception surface.
+
+## Cache and bounded-analysis review
+
+Digest reuse and scanner-evidence reuse intentionally have separate minimum-size controls. Scanner evidence can be expensive to derive even for artifacts smaller than the digest-cache threshold, so the default evidence threshold is lower. Reuse is still identity-guarded and scanner-contract-versioned; `--no-cache` bypasses both paths.
+
+Large package text/config members are no longer skipped by byte size. Security inspection is streamed with bounded overlap/evidence, and targeted Hugging Face loader metadata is parsed incrementally. This avoids treating a normal large tokenizer vocabulary as generic prompt text while still removing the old fixed-size coverage cliff.
+
+Dataset parallelism is bounded by an explicit Rayon pool and deterministic merge order. Security sampling uses deterministic indices derived from member record counts rather than scheduler order, so changing `--jobs` must not alter fingerprints, decisions, indicator counts, or selected evidence.

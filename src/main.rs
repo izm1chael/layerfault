@@ -640,22 +640,30 @@ struct DatasetArgs {
 enum DatasetCommand {
     Inspect {
         dataset: PathBuf,
+        #[arg(long, value_parser = parse_jobs)]
+        jobs: Option<usize>,
         #[arg(long, default_value_t = false)]
         json: bool,
     },
     Fingerprint {
         dataset: PathBuf,
+        #[arg(long, value_parser = parse_jobs)]
+        jobs: Option<usize>,
         #[arg(long, default_value_t = false)]
         json: bool,
     },
     Compare {
         left: PathBuf,
         right: PathBuf,
+        #[arg(long, value_parser = parse_jobs)]
+        jobs: Option<usize>,
         #[arg(long, default_value_t = false)]
         json: bool,
     },
     PoisoningReview {
         dataset: PathBuf,
+        #[arg(long, value_parser = parse_jobs)]
+        jobs: Option<usize>,
         #[arg(long, default_value_t = false)]
         json: bool,
     },

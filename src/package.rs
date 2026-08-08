@@ -1,14 +1,17 @@
 use crate::formats::{artifact, ArtifactFormat};
-use crate::safeio::{open_readonly_nofollow, read_all_from_file};
+use crate::safeio::open_readonly_nofollow;
 use crate::scanner::{CheckType, Confidence, FindingClass, LayerScanResult, ScanStatus};
 use anyhow::{anyhow, Context, Result};
+use serde::de::{DeserializeSeed, MapAccess, SeqAccess, Visitor};
 use sha2::{Digest, Sha256};
 use std::collections::BTreeSet;
-use std::io::{Read, Seek, SeekFrom};
+use std::fmt;
+use std::io::{BufRead, BufReader, Read, Seek, SeekFrom};
 use std::path::{Component, Path, PathBuf};
 use walkdir::WalkDir;
 
-const MAX_TEXT_SCAN_BYTES: u64 = 4 * 1024 * 1024;
+const TEXT_STREAM_CHUNK_BYTES: usize = 256 * 1024;
+const TEXT_STREAM_OVERLAP_BYTES: usize = 8 * 1024;
 const MAX_BINARY_PREFIX_BYTES: u64 = 2 * 1024 * 1024;
 
 #[derive(Debug, Clone, serde::Serialize)]
@@ -17,6 +20,8 @@ pub struct PackageEntry {
     pub kind: String,
     pub size: u64,
     pub sha256: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub digest_cache: Option<String>,
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
@@ -43,6 +48,7 @@ struct PackageMemberEvidence {
     remote_trust: bool,
     modules: BTreeSet<String>,
     module_scope_operation: Option<&'static str>,
+    json_parse_error: Option<String>,
 }
 
 impl PackageReport {
@@ -114,9 +120,19 @@ pub fn inspect(root: &Path) -> Result<PackageReport> {
             kind: kind.to_owned(),
             size,
             sha256: Some(digest.clone()),
+            digest_cache: Some(if hash.cache_hit {
+                "HIT".to_owned()
+            } else if crate::hashcache::digest_eligible(size) {
+                "MISS".to_owned()
+            } else {
+                "BYPASS_SMALL".to_owned()
+            }),
         });
-        findings.extend(scan_package_file(&path, &rel, &file, size, &digest)?);
-        member_evidence.push(capture_custom_code_evidence(&rel, &file, size)?);
+        let evidence = capture_custom_code_evidence(&rel, &file)?;
+        findings.extend(scan_package_file(
+            &path, &rel, &file, size, &digest, &evidence,
+        )?);
+        member_evidence.push(evidence);
         let changed = if crate::hashcache::eligible(size) {
             !crate::hashcache::identity_unchanged(&path, &file, &hash.identity)?
         } else {
@@ -210,6 +226,13 @@ pub fn fingerprint_report(root: &Path) -> Result<PackageFingerprintReport> {
             kind: classify(&path).to_owned(),
             size,
             sha256: Some(hash.sha256),
+            digest_cache: Some(if hash.cache_hit {
+                "HIT".to_owned()
+            } else if crate::hashcache::digest_eligible(size) {
+                "MISS".to_owned()
+            } else {
+                "BYPASS_SMALL".to_owned()
+            }),
         });
     }
     let fingerprint = package_fingerprint(&files);
@@ -227,7 +250,8 @@ pub fn inspect_member(display_path: &Path, content_path: &Path) -> Result<Vec<La
     let hash = crate::hashcache::sha256_prefixed(content_path, &file)?;
     let digest = hash.sha256.clone();
     let rel = display_path.display().to_string();
-    let mut findings = scan_package_file(display_path, &rel, &file, size, &digest)?;
+    let evidence = capture_custom_code_evidence(&rel, &file)?;
+    let mut findings = scan_package_file(display_path, &rel, &file, size, &digest, &evidence)?;
     let changed = if crate::hashcache::eligible(size) {
         !crate::hashcache::identity_unchanged(content_path, &file, &hash.identity)?
     } else {
@@ -272,6 +296,7 @@ fn scan_package_file(
     file: &std::fs::File,
     size: u64,
     digest: &str,
+    evidence: &PackageMemberEvidence,
 ) -> Result<Vec<LayerScanResult>> {
     let mut out = Vec::new();
     let format = ArtifactFormat::detect(path, &prefix(file, 8)?);
@@ -355,24 +380,15 @@ fn scan_package_file(
     }
 
     if is_text_candidate(&ext, &lower) {
-        if size > MAX_TEXT_SCAN_BYTES {
-            out.push(finding(
-                digest,
-                CheckType::PackageSecurity,
-                ScanStatus::Warn,
-                FindingClass::Compatibility,
-                Confidence::High,
-                "LF-PACKAGE-TEXT-LIMIT",
-                format!("Text/config file '{}' is {} bytes and exceeds Layerfault's {}-byte bounded content scan; the complete file is still hashed", rel, size, MAX_TEXT_SCAN_BYTES),
-            ));
-        } else {
-            let bytes = read_all_from_file(file, MAX_TEXT_SCAN_BYTES)?;
-            if let Ok(text) = std::str::from_utf8(&bytes) {
-                scan_text(rel, digest, text, &mut out);
-                if ext == "json" {
-                    scan_json(rel, digest, text, &mut out);
-                }
-            }
+        // Tokenizer/vocabulary payloads are large data dictionaries and can
+        // legitimately contain source-shaped tokens.  Their complete JSON is
+        // still streamed by `capture_custom_code_evidence`, but avoid a second
+        // full byte traversal that cannot produce generic code findings.
+        if !is_tokenizer_vocabulary_path(rel) {
+            scan_text_streaming(rel, digest, file, &mut out)?;
+        }
+        if ext == "json" {
+            scan_json_evidence(rel, digest, evidence, &mut out);
         }
     }
 
@@ -393,24 +409,47 @@ fn scan_package_file(
     Ok(out)
 }
 
-fn scan_json(rel: &str, digest: &str, text: &str, out: &mut Vec<LayerScanResult>) {
-    let Ok(value) = serde_json::from_str::<serde_json::Value>(text) else {
-        return;
-    };
-    let mut keys = BTreeSet::new();
-    collect_json_keys(&value, &mut keys);
-    if keys.contains("auto_map") {
+fn scan_json_evidence(
+    rel: &str,
+    digest: &str,
+    evidence: &PackageMemberEvidence,
+    out: &mut Vec<LayerScanResult>,
+) {
+    if evidence.auto_map {
         out.push(finding(digest, CheckType::PackageSecurity, ScanStatus::Warn, FindingClass::ContentIndicator, Confidence::High, "LF-CODE-AUTO-MAP", format!("'{}' contains Hugging Face auto_map metadata that can route loading through custom model code", rel)));
     }
-    if keys.contains("trust_remote_code") && json_contains_true_for_key(&value, "trust_remote_code")
-    {
+    if evidence.remote_trust {
         out.push(finding(digest, CheckType::PackageSecurity, ScanStatus::Warn, FindingClass::ContentIndicator, Confidence::High, "LF-CODE-REMOTE-TRUST", format!("'{}' explicitly enables trust_remote_code; custom code should be reviewed before loading", rel)));
+    }
+    if let Some(error) = evidence.json_parse_error.as_deref() {
+        out.push(finding(
+            digest,
+            CheckType::PackageSecurity,
+            ScanStatus::Warn,
+            FindingClass::Structural,
+            Confidence::High,
+            "LF-PACKAGE-JSON-INVALID",
+            format!(
+                "JSON/config '{}' could not be parsed completely: {}",
+                rel, error
+            ),
+        ));
     }
 }
 
-fn scan_text(rel: &str, digest: &str, text: &str, out: &mut Vec<LayerScanResult>) {
-    let lower = text.to_ascii_lowercase();
+fn scan_text_streaming(
+    rel: &str,
+    digest: &str,
+    file: &std::fs::File,
+    out: &mut Vec<LayerScanResult>,
+) -> Result<()> {
     let documentation = is_documentation_path(rel);
+    // Tokenizer/vocabulary payloads are data dictionaries, not executable
+    // source.  They can legitimately contain source-code-shaped tokens such as
+    // `exec(` or `os.system(`.  Continue streaming the entire file and run
+    // targeted JSON/HF metadata extraction, but do not promote vocabulary
+    // entries to custom-code findings.
+    let vocabulary_data = is_tokenizer_vocabulary_path(rel);
     let dangerous = [
         ("os.system(", "LF-CODE-OS-SYSTEM"),
         ("subprocess.popen", "LF-CODE-SUBPROCESS"),
@@ -423,11 +462,6 @@ fn scan_text(rel: &str, digest: &str, text: &str, out: &mut Vec<LayerScanResult>
         ("requests.post(", "LF-CODE-NETWORK"),
         ("urllib.request", "LF-CODE-NETWORK"),
     ];
-    for (needle, rule) in dangerous {
-        if !documentation && lower.contains(needle) {
-            out.push(finding(digest, CheckType::PackageSecurity, ScanStatus::Warn, FindingClass::ContentIndicator, Confidence::High, rule, format!("Custom code/config '{}' contains security-relevant primitive '{}'; review is required before enabling custom code", rel, needle)));
-        }
-    }
     let jinja = [
         "__class__",
         "__mro__",
@@ -436,11 +470,61 @@ fn scan_text(rel: &str, digest: &str, text: &str, out: &mut Vec<LayerScanResult>
         "cycler.__init__",
         "namespace.__init__",
     ];
-    if jinja.iter().any(|needle| lower.contains(needle))
-        && (rel.to_ascii_lowercase().contains("template") || lower.contains("{{"))
-    {
+    let mut found_rules = BTreeSet::<&'static str>::new();
+    let mut jinja_seen = false;
+    let mut template_marker_seen = rel.to_ascii_lowercase().contains("template");
+    let mut reader = file.try_clone()?;
+    reader.seek(SeekFrom::Start(0))?;
+    let mut chunk = vec![0_u8; TEXT_STREAM_CHUNK_BYTES];
+    let mut carry = Vec::<u8>::new();
+    loop {
+        let count = reader.read(&mut chunk)?;
+        if count == 0 {
+            break;
+        }
+        let mut window = Vec::with_capacity(carry.len() + count);
+        window.extend_from_slice(&carry);
+        window.extend_from_slice(&chunk[..count]);
+        let lower = String::from_utf8_lossy(&window).to_ascii_lowercase();
+        if !documentation && !vocabulary_data {
+            for (needle, rule) in dangerous {
+                if lower.contains(needle) {
+                    found_rules.insert(rule);
+                }
+            }
+        }
+        if !vocabulary_data {
+            jinja_seen |= jinja.iter().any(|needle| lower.contains(needle));
+            template_marker_seen |= lower.contains("{{");
+        }
+        let keep = window.len().min(TEXT_STREAM_OVERLAP_BYTES);
+        carry.clear();
+        carry.extend_from_slice(&window[window.len() - keep..]);
+    }
+    for rule in found_rules {
+        let primitive = match rule {
+            "LF-CODE-OS-SYSTEM" => "os.system",
+            "LF-CODE-SUBPROCESS" => "subprocess",
+            "LF-CODE-EVAL" => "eval",
+            "LF-CODE-EXEC" => "exec",
+            "LF-CODE-CTYPES" => "ctypes",
+            "LF-CODE-NETWORK" => "network access",
+            _ => "security-sensitive primitive",
+        };
+        out.push(finding(digest, CheckType::PackageSecurity, ScanStatus::Warn, FindingClass::ContentIndicator, Confidence::High, rule, format!("Custom code/config '{}' contains security-relevant primitive '{}'; the entire file was streamed and review is required before enabling custom code", rel, primitive)));
+    }
+    if jinja_seen && template_marker_seen {
         out.push(finding(digest, CheckType::PackageSecurity, ScanStatus::Warn, FindingClass::ContentIndicator, Confidence::High, "LF-TEMPLATE-INTROSPECTION", format!("Template/config '{}' contains Python/Jinja introspection primitives; review template execution context before use", rel)));
     }
+    Ok(())
+}
+
+fn is_tokenizer_vocabulary_path(rel: &str) -> bool {
+    let name = rel.rsplit('/').next().unwrap_or(rel).to_ascii_lowercase();
+    matches!(
+        name.as_str(),
+        "tokenizer.json" | "vocab.json" | "merges.txt" | "added_tokens.json"
+    ) || name.starts_with("vocab.")
 }
 
 fn is_documentation_path(rel: &str) -> bool {
@@ -454,36 +538,262 @@ fn is_documentation_path(rel: &str) -> bool {
             .is_some_and(|name| name.starts_with("readme"))
 }
 
-fn capture_custom_code_evidence(
-    rel: &str,
-    file: &std::fs::File,
-    size: u64,
-) -> Result<PackageMemberEvidence> {
+fn capture_custom_code_evidence(rel: &str, file: &std::fs::File) -> Result<PackageMemberEvidence> {
     let mut evidence = PackageMemberEvidence {
         relative_path: rel.to_owned(),
         ..PackageMemberEvidence::default()
     };
-    if size > MAX_TEXT_SCAN_BYTES {
-        return Ok(evidence);
-    }
     let lower = rel.to_ascii_lowercase();
-    if !lower.ends_with(".json") && !lower.ends_with(".py") {
-        return Ok(evidence);
-    }
-    let bytes = read_all_from_file(file, MAX_TEXT_SCAN_BYTES)?;
     if lower.ends_with(".json") {
-        if let Ok(value) = serde_json::from_slice::<serde_json::Value>(&bytes) {
-            collect_custom_loader_metadata(
-                &value,
-                &mut evidence.auto_map,
-                &mut evidence.remote_trust,
-                &mut evidence.modules,
-            );
+        if let Err(error) = stream_custom_loader_metadata(file, &mut evidence) {
+            evidence.json_parse_error = Some(error.to_string());
         }
-    } else if let Ok(text) = std::str::from_utf8(&bytes) {
-        evidence.module_scope_operation = module_scope_operation(text);
+    } else if lower.ends_with(".py") {
+        evidence.module_scope_operation = module_scope_operation_file(file)?;
     }
     Ok(evidence)
+}
+
+#[derive(Clone, Copy)]
+enum JsonMetadataContext {
+    Normal,
+    AutoMap,
+    RemoteTrust,
+}
+
+struct JsonMetadataSeed<'a> {
+    evidence: &'a mut PackageMemberEvidence,
+    context: JsonMetadataContext,
+}
+
+impl<'de> DeserializeSeed<'de> for JsonMetadataSeed<'_> {
+    type Value = ();
+
+    fn deserialize<D>(self, deserializer: D) -> std::result::Result<Self::Value, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        deserializer.deserialize_any(JsonMetadataVisitor {
+            evidence: self.evidence,
+            context: self.context,
+        })
+    }
+}
+
+struct JsonMetadataVisitor<'a> {
+    evidence: &'a mut PackageMemberEvidence,
+    context: JsonMetadataContext,
+}
+
+impl<'de> Visitor<'de> for JsonMetadataVisitor<'_> {
+    type Value = ();
+
+    fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("arbitrary JSON metadata")
+    }
+
+    fn visit_bool<E>(self, value: bool) -> std::result::Result<Self::Value, E> {
+        if matches!(self.context, JsonMetadataContext::RemoteTrust) && value {
+            self.evidence.remote_trust = true;
+        }
+        Ok(())
+    }
+
+    fn visit_str<E>(self, value: &str) -> std::result::Result<Self::Value, E> {
+        if matches!(self.context, JsonMetadataContext::AutoMap) {
+            collect_module_reference(value, &mut self.evidence.modules);
+        }
+        Ok(())
+    }
+
+    fn visit_string<E: serde::de::Error>(
+        self,
+        value: String,
+    ) -> std::result::Result<Self::Value, E> {
+        self.visit_str(&value)
+    }
+
+    fn visit_none<E>(self) -> std::result::Result<Self::Value, E> {
+        Ok(())
+    }
+    fn visit_unit<E>(self) -> std::result::Result<Self::Value, E> {
+        Ok(())
+    }
+    fn visit_i64<E>(self, _: i64) -> std::result::Result<Self::Value, E> {
+        Ok(())
+    }
+    fn visit_u64<E>(self, _: u64) -> std::result::Result<Self::Value, E> {
+        Ok(())
+    }
+    fn visit_f64<E>(self, _: f64) -> std::result::Result<Self::Value, E> {
+        Ok(())
+    }
+
+    fn visit_seq<A>(self, mut seq: A) -> std::result::Result<Self::Value, A::Error>
+    where
+        A: SeqAccess<'de>,
+    {
+        while seq
+            .next_element_seed(JsonMetadataSeed {
+                evidence: &mut *self.evidence,
+                context: self.context,
+            })?
+            .is_some()
+        {}
+        Ok(())
+    }
+
+    fn visit_map<A>(self, mut map: A) -> std::result::Result<Self::Value, A::Error>
+    where
+        A: MapAccess<'de>,
+    {
+        while let Some(key) = map.next_key::<String>()? {
+            let context = if key.eq_ignore_ascii_case("auto_map") {
+                self.evidence.auto_map = true;
+                JsonMetadataContext::AutoMap
+            } else if key.eq_ignore_ascii_case("trust_remote_code") {
+                JsonMetadataContext::RemoteTrust
+            } else {
+                self.context
+            };
+            map.next_value_seed(JsonMetadataSeed {
+                evidence: &mut *self.evidence,
+                context,
+            })?;
+        }
+        Ok(())
+    }
+}
+
+fn stream_custom_loader_metadata(
+    file: &std::fs::File,
+    evidence: &mut PackageMemberEvidence,
+) -> Result<()> {
+    let mut reader = file.try_clone()?;
+    reader.seek(SeekFrom::Start(0))?;
+    let mut de = serde_json::Deserializer::from_reader(BufReader::new(reader));
+    JsonMetadataSeed {
+        evidence,
+        context: JsonMetadataContext::Normal,
+    }
+    .deserialize(&mut de)
+    .map_err(|error| anyhow!(error))?;
+    de.end().map_err(|error| anyhow!(error))?;
+    Ok(())
+}
+
+fn collect_module_reference(value: &str, modules: &mut BTreeSet<String>) {
+    if let Some((module, _)) = value.rsplit_once('.') {
+        if module.len() <= 4096
+            && module.split('.').all(|part| {
+                !part.is_empty() && part.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+            })
+        {
+            modules.insert(module.to_owned());
+        }
+    }
+}
+
+fn module_scope_operation_file(file: &std::fs::File) -> Result<Option<&'static str>> {
+    #[derive(Clone, Copy)]
+    enum LineState {
+        Pending,
+        Eligible,
+        Ignored,
+    }
+
+    fn classify_prefix(prefix: &[u8]) -> Option<LineState> {
+        let first = prefix.first().copied()?;
+        if matches!(first, b' ' | b'\t' | b'#' | b'@') {
+            return Some(LineState::Ignored);
+        }
+        for declaration in [b"def ".as_slice(), b"class ".as_slice()] {
+            if declaration.starts_with(prefix) {
+                return if declaration == prefix {
+                    Some(LineState::Ignored)
+                } else {
+                    None
+                };
+            }
+        }
+        Some(LineState::Eligible)
+    }
+
+    fn push_operation_byte(tail: &mut Vec<u8>, byte: u8) -> Option<&'static str> {
+        const MAX_NEEDLE: usize = 32;
+        tail.push(byte.to_ascii_lowercase());
+        if tail.len() > MAX_NEEDLE {
+            let drop = tail.len() - MAX_NEEDLE;
+            tail.drain(..drop);
+        }
+        for (needle, operation) in [
+            (b"os.system(".as_slice(), "os.system"),
+            (b"subprocess.run(".as_slice(), "subprocess.run"),
+            (b"subprocess.popen(".as_slice(), "subprocess.Popen"),
+            (b"exec(".as_slice(), "exec"),
+            (b"eval(".as_slice(), "eval"),
+            (b"socket.socket(".as_slice(), "socket.socket"),
+            (b"requests.".as_slice(), "requests network access"),
+            (b"urllib.request".as_slice(), "urllib network access"),
+            (b"ctypes.".as_slice(), "ctypes native loading"),
+            (b".write_text(".as_slice(), "Path.write_text"),
+            (b".write_bytes(".as_slice(), "Path.write_bytes"),
+            (b".unlink(".as_slice(), "Path.unlink"),
+            (b".remove(".as_slice(), "remove"),
+            (b".rename(".as_slice(), "rename"),
+        ] {
+            if tail.ends_with(needle) {
+                return Some(operation);
+            }
+        }
+        None
+    }
+
+    let mut reader = BufReader::new(file.try_clone()?);
+    reader.seek(SeekFrom::Start(0))?;
+    let mut state = LineState::Pending;
+    let mut prefix = Vec::<u8>::with_capacity(8);
+    let mut tail = Vec::<u8>::with_capacity(32);
+    loop {
+        let buf = reader.fill_buf()?;
+        if buf.is_empty() {
+            break;
+        }
+        let consumed = buf.len();
+        for &byte in buf {
+            if byte == b'\n' || byte == b'\r' {
+                state = LineState::Pending;
+                prefix.clear();
+                tail.clear();
+                continue;
+            }
+            match state {
+                LineState::Ignored => {}
+                LineState::Eligible => {
+                    if let Some(operation) = push_operation_byte(&mut tail, byte) {
+                        return Ok(Some(operation));
+                    }
+                }
+                LineState::Pending => {
+                    if prefix.len() < 8 {
+                        prefix.push(byte);
+                    }
+                    if let Some(classified) = classify_prefix(&prefix) {
+                        state = classified;
+                        if matches!(state, LineState::Eligible) {
+                            for prior in prefix.drain(..) {
+                                if let Some(operation) = push_operation_byte(&mut tail, prior) {
+                                    return Ok(Some(operation));
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        reader.consume(consumed);
+    }
+    Ok(None)
 }
 
 fn correlate_custom_code(
@@ -537,132 +847,6 @@ fn correlate_custom_code(
                 entry.relative_path, operation, trust_context
             ),
         ));
-    }
-}
-
-fn collect_custom_loader_metadata(
-    value: &serde_json::Value,
-    auto_map: &mut bool,
-    remote_trust: &mut bool,
-    modules: &mut BTreeSet<String>,
-) {
-    match value {
-        serde_json::Value::Object(map) => {
-            for (key, value) in map {
-                if key.eq_ignore_ascii_case("auto_map") {
-                    *auto_map = true;
-                    collect_module_strings(value, modules);
-                }
-                if key.eq_ignore_ascii_case("trust_remote_code")
-                    && value == &serde_json::Value::Bool(true)
-                {
-                    *remote_trust = true;
-                }
-                collect_custom_loader_metadata(value, auto_map, remote_trust, modules);
-            }
-        }
-        serde_json::Value::Array(values) => {
-            for value in values {
-                collect_custom_loader_metadata(value, auto_map, remote_trust, modules);
-            }
-        }
-        _ => {}
-    }
-}
-
-fn collect_module_strings(value: &serde_json::Value, modules: &mut BTreeSet<String>) {
-    match value {
-        serde_json::Value::String(value) => {
-            if let Some((module, _)) = value.rsplit_once('.') {
-                if module.len() <= 4096
-                    && module.split('.').all(|part| {
-                        !part.is_empty()
-                            && part.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
-                    })
-                {
-                    modules.insert(module.to_owned());
-                }
-            }
-        }
-        serde_json::Value::Object(map) => {
-            for value in map.values() {
-                collect_module_strings(value, modules);
-            }
-        }
-        serde_json::Value::Array(values) => {
-            for value in values {
-                collect_module_strings(value, modules);
-            }
-        }
-        _ => {}
-    }
-}
-
-fn module_scope_operation(text: &str) -> Option<&'static str> {
-    for line in text.lines().take(100_000) {
-        let trimmed = line.trim_start();
-        if trimmed.is_empty()
-            || trimmed.starts_with('#')
-            || line.starts_with(' ')
-            || line.starts_with('\t')
-        {
-            continue;
-        }
-        if trimmed.starts_with("def ") || trimmed.starts_with("class ") || trimmed.starts_with('@')
-        {
-            continue;
-        }
-        for (needle, operation) in [
-            ("os.system(", "os.system"),
-            ("subprocess.run(", "subprocess.run"),
-            ("subprocess.popen(", "subprocess.Popen"),
-            ("exec(", "exec"),
-            ("eval(", "eval"),
-            ("socket.socket(", "socket.socket"),
-            ("requests.", "requests network access"),
-            ("urllib.request", "urllib network access"),
-            ("ctypes.", "ctypes native loading"),
-            (".write_text(", "Path.write_text"),
-            (".write_bytes(", "Path.write_bytes"),
-            (".unlink(", "Path.unlink"),
-            (".remove(", "remove"),
-            (".rename(", "rename"),
-        ] {
-            if trimmed.contains(needle) {
-                return Some(operation);
-            }
-        }
-    }
-    None
-}
-
-fn collect_json_keys(value: &serde_json::Value, keys: &mut BTreeSet<String>) {
-    match value {
-        serde_json::Value::Object(map) => {
-            for (key, value) in map {
-                keys.insert(key.to_ascii_lowercase());
-                collect_json_keys(value, keys);
-            }
-        }
-        serde_json::Value::Array(values) => {
-            for value in values {
-                collect_json_keys(value, keys);
-            }
-        }
-        _ => {}
-    }
-}
-
-fn json_contains_true_for_key(value: &serde_json::Value, key: &str) -> bool {
-    match value {
-        serde_json::Value::Object(map) => map.iter().any(|(candidate, value)| {
-            (candidate.eq_ignore_ascii_case(key) && value == &serde_json::Value::Bool(true))
-                || json_contains_true_for_key(value, key)
-        }),
-        serde_json::Value::Array(values) => values
-            .iter()
-            .any(|value| json_contains_true_for_key(value, key)),
-        _ => false,
     }
 }
 
@@ -1022,23 +1206,117 @@ mod tests {
     }
 
     #[test]
-    fn oversized_json_does_not_abort_package_admission() -> Result<()> {
+    fn large_json_is_fully_streamed_without_size_warning() -> Result<()> {
         let root = std::env::temp_dir().join(format!(
             "layerfault-package-large-json-{}",
             std::process::id()
         ));
         let _ = fs::remove_dir_all(&root);
         fs::create_dir_all(&root)?;
-        let mut body = vec![b' '; (MAX_TEXT_SCAN_BYTES + 1024) as usize];
-        body[0] = b'{';
-        let last = body.len() - 1;
-        body[last] = b'}';
-        fs::write(root.join("tokenizer.json"), body)?;
+        let padding = "a".repeat(6 * 1024 * 1024);
+        fs::write(
+            root.join("tokenizer.json"),
+            serde_json::to_vec(&serde_json::json!({"padding": padding}))?,
+        )?;
         let report = inspect(&root)?;
-        assert!(report.findings.iter().any(|finding| finding
+        assert!(!report.findings.iter().any(|finding| finding
             .matches
             .iter()
             .any(|value| value.contains("LF-PACKAGE-TEXT-LIMIT"))));
+        assert!(!report.blocking());
+        let _ = fs::remove_dir_all(root);
+        Ok(())
+    }
+
+    #[test]
+    fn tokenizer_vocabulary_code_tokens_do_not_become_custom_code_findings() -> Result<()> {
+        let root = std::env::temp_dir().join(format!(
+            "layerfault-package-tokenizer-vocab-{}",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(&root)?;
+        fs::write(
+            root.join("tokenizer.json"),
+            serde_json::to_vec(&serde_json::json!({
+                "model": {
+                    "vocab": {
+                        "os.system(": 1,
+                        "exec(": 2,
+                        "__class__": 3,
+                        "{{": 4
+                    }
+                }
+            }))?,
+        )?;
+        let report = inspect(&root)?;
+        assert!(!report.findings.iter().any(|finding| {
+            finding.matches.iter().any(|value| {
+                value.contains("LF-CODE-OS-SYSTEM")
+                    || value.contains("LF-CODE-EXEC")
+                    || value.contains("LF-TEMPLATE-INTROSPECTION")
+            })
+        }));
+        let _ = fs::remove_dir_all(root);
+        Ok(())
+    }
+
+    #[test]
+    fn auto_map_late_in_large_json_still_correlates_custom_code() -> Result<()> {
+        let root = std::env::temp_dir().join(format!(
+            "layerfault-package-large-json-automap-{}",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(&root)?;
+        let padding = "a".repeat(6 * 1024 * 1024);
+        fs::write(
+            root.join("config.json"),
+            serde_json::to_vec(&serde_json::json!({
+                "padding": padding,
+                "auto_map": {"AutoModel": "modeling_late.Example"}
+            }))?,
+        )?;
+        fs::write(
+            root.join("modeling_late.py"),
+            b"os.system('echo imported')\n",
+        )?;
+        let report = inspect(&root)?;
+        assert!(report.findings.iter().any(|finding| {
+            finding.status == ScanStatus::Fail
+                && finding
+                    .matches
+                    .iter()
+                    .any(|value| value.contains("LF-CODE-IMPORT-SIDE-EFFECT"))
+        }));
+        let _ = fs::remove_dir_all(root);
+        Ok(())
+    }
+
+    #[test]
+    fn module_scope_side_effect_after_old_four_mib_boundary_still_blocks() -> Result<()> {
+        let root = std::env::temp_dir().join(format!(
+            "layerfault-package-large-python-{}",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(&root)?;
+        fs::write(
+            root.join("config.json"),
+            br#"{"auto_map":{"AutoModel":"modeling_large.Example"}}"#,
+        )?;
+        let mut source = String::from("payload = '");
+        source.push_str(&"a".repeat(5 * 1024 * 1024));
+        source.push_str("'; os.system('echo imported')\n");
+        fs::write(root.join("modeling_large.py"), source)?;
+        let report = inspect(&root)?;
+        assert!(report.findings.iter().any(|finding| {
+            finding.status == ScanStatus::Fail
+                && finding
+                    .matches
+                    .iter()
+                    .any(|value| value.contains("LF-CODE-IMPORT-SIDE-EFFECT"))
+        }));
         let _ = fs::remove_dir_all(root);
         Ok(())
     }
