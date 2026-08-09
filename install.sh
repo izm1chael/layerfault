@@ -85,7 +85,8 @@ verify_download() {
 }
 
 download_asset() {
-  local name="$1" dest="$TMP/$name"
+  local name="$1"
+  local dest="$TMP/$name"
   curl -fL "${download_base}/${name}" -o "$dest"
   verify_download "$dest"
   printf '%s\n' "$dest"
