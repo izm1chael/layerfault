@@ -1,12 +1,12 @@
 # Layerfault
 
-**Offline-first security and admission control for local AI models.**
+**Offline-first static admission and sandboxed behavioural security for local AI models.**
 
-Layerfault validates model artifacts and local model runtimes **before inference**. It combines structural validation, package inspection, integrity checking, provenance, trust, policy, runtime advisory checks, execution binding, inventory, drift detection, quarantine, and signed evidence in one local CLI.
+Layerfault validates model artifacts, packages and local runtimes **before inference**, then can optionally exercise supported models inside a locked-down Linux sandbox to look for runtime side effects and suspicious behavioural divergence. It combines structural validation, package inspection, integrity checking, provenance, trust, policy, runtime advisory checks, execution binding, behavioural probes, inventory, drift detection, quarantine, and signed evidence in one local CLI.
 
-> **Status:** `1.0.0-rc.1` — feature frozen and under release-candidate certification.
+> **Status:** `1.0.0-rc.1` — active hardening and distribution work is still underway. GitHub release publication remains deliberately gated while the RC is tested.
 
-Layerfault does **not** claim that static inspection can prove opaque neural weights are free from learned backdoors or malicious learned behaviour. Its job is to establish whether the model package you are about to use is structurally valid, intact where integrity data exists, sufficiently trusted, policy-compliant, and safe for the local runtime to admit.
+Static inspection is the primary admission boundary and is enough to BLOCK many dangerous model packages: malformed formats, unsafe serialization, custom loader code, executable payloads, traversal/sidecar abuse, suspicious templates, integrity/provenance failures and policy violations. Static inspection does **not** prove opaque learned weights are behaviourally benign. Active analysis adds evidence by actually exercising supported models in an isolated environment and observing response divergence, attempted process/network/file activity and trigger-like behaviour.
 
 ## Why Layerfault?
 
@@ -38,11 +38,36 @@ Model artifact / local store
           ▼
    PASS / WARN / BLOCK
           │
-          ▼
-       Inference
+          ├──────────────► normal inference / CI decision
+          │
+          └── optional active analysis (Linux)
+                     │
+                     ▼
+             Bubblewrap + resource limits
+                     │
+                     ▼
+          GGUF / Transformers / PEFT probes
+                     │
+                     ▼
+       response + process/file/network telemetry
 ```
 
 Everything is designed to work **offline-first**. Layerfault does not upload your models or require a hosted service.
+
+### Static vs active detection
+
+Static and active analysis answer different questions and are deliberately kept separate:
+
+| Question | Static admission | Active sandbox |
+| --- | --- | --- |
+| Is the artifact malformed, truncated, overlapping or parser-hostile? | **Strong** | Not required |
+| Does the package contain Pickle/custom code/scripts/native executables? | **Strong** | Can observe what code attempts to do |
+| Are `auto_map`, templates, sidecars, traversal, integrity or provenance suspicious? | **Strong** | Adds runtime evidence |
+| Does loading try to spawn a process, touch synthetic secrets, write protected paths or reach the network? | Can often identify capability/intent | **Direct evidence** |
+| Does a learned trigger cause a response/backdoor that is encoded only in weights? | Limited | **Primary detection path** |
+| Can either mode prove a model has no hidden backdoor? | No | No |
+
+A static `BLOCK` is already enough to say **do not trust or execute this package**. Active analysis is most valuable when static evidence is inconclusive, when learned-weight behaviour is the concern, or when you deliberately want to observe what suspicious loader/runtime code attempts inside the sandbox.
 
 ## Supported artifacts and sources
 
@@ -166,41 +191,63 @@ Evidence records bind the artifact/package identity, Layerfault build ID, detect
 
 ## Install Layerfault
 
-### Release binaries
+Normal users should not need the repository or a Rust toolchain. The distribution pipeline prepares native packages and portable archives; during RC development those assets are built by a **manual dry-run workflow** and GitHub Release publication stays disabled unless explicitly enabled by the maintainer.
 
-For normal use, prefer the official binaries attached to the [GitHub Release](https://github.com/izm1chael/layerfault/releases). Each release provides:
+### One-line core install
 
-- Linux x86_64: `layerfault-linux-x86_64`
-- Linux x86_64 static/musl: `layerfault-linux-x86_64-musl`
-- Linux aarch64: `layerfault-linux-aarch64`
-- Windows x86_64: `layerfault-windows-x86_64.exe`
-- macOS universal: `layerfault-macos-universal`
-
-Release artifacts are accompanied by SHA-256 checksums, a CycloneDX SBOM, and GitHub build provenance attestations. After placing the binary on your `PATH`, verify the installation:
+Once a release is approved and published:
 
 ```bash
-layerfault --version
-layerfault selftest
+curl -fsSL https://github.com/izm1chael/layerfault/releases/latest/download/install.sh | sudo bash
 ```
+
+The installer selects the native package where possible:
+
+- Debian/Ubuntu: `.deb`
+- Fedora/RHEL/Rocky/Alma: `.rpm`
+- Alpine: `.apk`
+- Arch Linux x86_64: `.pkg.tar.zst`
+- other Linux / Linux ARM64 fallback: portable musl `.tar.gz`
+- macOS: universal tarball; unsigned `.pkg` is built only as a signing/packaging validation artifact until GA
+- Windows: `install.ps1`, ZIP and prepared MSIX packaging
+
+For security-sensitive hosts, download `install.sh` and `SHA256SUMS` from the release, verify the checksum first, then execute the script locally. Release builds also carry SBOM/provenance artifacts.
+
+### Active-analysis install
+
+Linux users who want sandboxed execution can install the active runtime separately:
+
+```bash
+curl -fsSL https://github.com/izm1chael/layerfault/releases/latest/download/install.sh | sudo bash -s -- --active --device cpu
+
+layerfault capabilities
+layerfault doctor
+```
+
+For the broadest CPU-only Linux setup (including a distro-managed `llama-cli` where available):
+
+```bash
+curl -fsSL https://github.com/izm1chael/layerfault/releases/latest/download/install.sh | sudo bash -s -- --full --device cpu
+```
+
+The active bootstrap installs Bubblewrap, `strace`, `prlimit`, Python/venv support and (on supported glibc Linux hosts) an isolated, version-pinned CPU Transformers/PEFT runtime under `/opt/layerfault/runtimes/python`. Use `--full` to also try the distribution's packaged `llama.cpp`/`llama-cli` when available; Layerfault does not silently download a moving, unverified upstream runtime. Alpine/musl receives the core scanner and sandbox prerequisites but does not pretend standard PyTorch wheels are portable there. CUDA/ROCm remain optional acceleration paths, never requirements for static analysis.
+
+Layerfault derives an active memory budget from the host rather than assuming a large machine. On an 8 GiB CPU-only host it will run small models/appropriate quantized GGUFs where practical and skip models whose estimated runtime footprint exceeds safe headroom. An unavailable active run is reported as unavailable; it is never converted into a security PASS.
+
+See [`docs/INSTALL.md`](docs/INSTALL.md) for complete installation and low-memory guidance.
 
 ### Build from source
 
-Source builds require [rustup](https://rustup.rs/). On Ubuntu or Debian, use the official rustup installation method rather than installing `cargo` or `rustc` from `apt`; the distribution toolchain may be too old for the committed lockfile.
+Source builds require the rustup-managed toolchain selected by `rust-toolchain.toml`:
 
 ```bash
-curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
-# Start a new shell after rustup updates your PATH.
 git clone https://github.com/izm1chael/layerfault.git
 cd layerfault
-rustc --version
-cargo --version
 cargo build --release --locked
 ./target/release/layerfault selftest
 ```
 
-The repository's `rust-toolchain.toml` automatically selects the Layerfault-tested Rust toolchain when using rustup. Normal operation should use an unprivileged account; `sudo` is normally only needed for a system-wide installation such as copying the binary into `/usr/local/bin`.
-
-If Cargo reports that `Cargo.lock` uses an unsupported lockfile version, your Rust/Cargo installation is too old. Upgrade/install the rustup-managed toolchain. Do not delete `Cargo.lock`.
+The small `vendor/candelabra` patch is intentional: it keeps Candelabra's HTTP dependencies on the Rustls path instead of reintroducing native OpenSSL build requirements. It should be removed only when the upstream crate provides an equivalent dependency configuration.
 
 ### Quick start
 
@@ -221,7 +268,7 @@ Layerfault can assess artifact structure, package contents, integrity, provenanc
 For manual RC certification against a local, already-acquired corpus, use the offline runner. It never downloads or executes samples and retains each command's security exit code:
 
 ```bash
-scripts/adversarial-corpus-gate.sh /lab/samples /lab/results
+scripts/corpus/adversarial-gate.sh /lab/samples /lab/results
 ```
 
 The output directory contains `summary.tsv`, `summary.json`, `SHA256SUMS`, per-command output, and the Layerfault version used for the run.
@@ -229,7 +276,7 @@ The output directory contains `summary.tsv`, `summary.json`, `SHA256SUMS`, per-c
 Before publishing or cutting a release, run the consolidated local gate:
 
 ```bash
-bash scripts/pre-push-security-gates.sh
+bash scripts/security/pre-push.sh
 ```
 
 The binary will be available at:
@@ -245,8 +292,8 @@ cargo fmt --all -- --check
 cargo check --locked --all-targets
 cargo test --locked --all-targets
 cargo clippy --locked --all-targets --all-features -- -D warnings
-bash scripts/security-gates.sh
-python3 scripts/schema-gates.py --binary target/debug/layerfault
+bash scripts/security/gates.sh
+python3 scripts/security/schema-gates.py --binary target/debug/layerfault
 ```
 
 The main security gate uses synthetic local fixtures and does not download models.
@@ -385,7 +432,7 @@ The release candidate is expected to pass:
 ```bash
 layerfault selftest
 layerfault certify
-bash scripts/security-gates.sh
+bash scripts/security/gates.sh
 ```
 
 along with the Rust formatting, build, test, Clippy and schema gates above.
@@ -413,9 +460,9 @@ Package-directory and sharded Safetensors numerical review is profile-aware. `re
 Release/corpus helpers:
 
 ```bash
-python3 scripts/check-corpus-contract.py /path/to/harness-run
-python3 scripts/check-corpus-performance.py /path/to/harness-run
-bash scripts/behaviour-corpus-gate.sh tests/behaviour-corpus-template.tsv
+python3 scripts/corpus/check-contract.py /path/to/harness-run
+python3 scripts/corpus/check-performance.py /path/to/harness-run
+bash scripts/corpus/behaviour-gate.sh tests/behaviour-corpus-template.tsv
 ```
 
 `tests/corpus-expectations.json` distinguishes detection regressions, false-positive regressions, and JSON/process-exit semantic mismatches. `tests/corpus-performance.json` uses broad warm/cold ratios rather than fixed VPS milliseconds.
@@ -459,7 +506,7 @@ layerfault behaviour ./suspect-package \
   --profile quick --json
 ```
 
-External active execution uses Bubblewrap namespaces, a private synthetic HOME/workspace, a read-only model/base mount, no host network, dropped capabilities, a private PID/IPC/UTS view, and no normal `/bin`/`/usr/bin` tool tree. When `strace` is available Layerfault records network attempts, unexpected process execution, synthetic credential access and sensitive-path attempts. Writable-workspace mutations are compared against a pre-execution baseline. `prlimit` is mandatory for external active execution and bounds CPU, file size, process/file-descriptor counts, core dumps, and address space; the address-space ceiling defaults to 24 GiB and can be changed with `LAYERFAULT_BEHAVIOUR_MEMORY_MB` for an appropriately isolated lab host.
+External active execution uses Bubblewrap namespaces, a private synthetic HOME/workspace, a read-only model/base mount, no host network, dropped capabilities, a private PID/IPC/UTS view, and no normal `/bin`/`/usr/bin` tool tree. When `strace` is available Layerfault records network attempts, unexpected process execution, synthetic credential access and sensitive-path attempts. Writable-workspace mutations are compared against a pre-execution baseline. `prlimit` is mandatory for external active execution and bounds CPU, file size, process/file-descriptor counts, core dumps, and address space. Layerfault now derives the active memory ceiling from host RAM/availability, reserves operating-system headroom, and performs a conservative model/base footprint preflight before launch. `LAYERFAULT_BEHAVIOUR_MEMORY_MB` remains an explicit administrator override.
 
 Executing statically blocked content or `trust_remote_code=True` is a higher-risk research mode and therefore **requires** all three of `bwrap`, `strace`, and `prlimit`; Layerfault refuses to silently degrade that boundary. Synthetic secrets are used for canary detection; real host credentials are never intentionally mounted into the sandbox.
 
@@ -469,14 +516,14 @@ A dedicated Python virtualenv is supported via `--runtime-path /path/to/venv/bin
 Useful lab helpers:
 
 ```bash
-bash scripts/prepare-lab-active-fixtures.sh
-bash scripts/active-sandbox-corpus-gate.sh tests/active-sandbox-corpus-template.tsv
+bash scripts/lab/prepare-active-fixtures.sh
+bash scripts/corpus/active-sandbox-gate.sh tests/active-sandbox-corpus-template.tsv
 ```
 
 For real ONNX hardlink testing, recreate the inode alias after downloading the corpus:
 
 ```bash
-bash scripts/prepare-lab-active-fixtures.sh \
+bash scripts/lab/prepare-active-fixtures.sh \
   --onnx-model /lab/path/model_dir_hardlink_external.onnx \
   --onnx-sidecar /lab/path/data/weights.bin
 ```

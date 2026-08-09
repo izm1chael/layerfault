@@ -1,0 +1,5 @@
+# Direct active-analysis runtime versions validated for this RC distribution.
+# Torch is installed separately from the compute-platform-specific PyTorch index.
+transformers==5.14.1
+peft==0.19.1
+safetensors==0.8.0

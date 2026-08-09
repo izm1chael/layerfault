@@ -1,0 +1,36 @@
+name: layerfault
+arch: ${LAYERFAULT_PACKAGE_ARCH}
+platform: windows
+version: ${LAYERFAULT_PACKAGE_VERSION}
+version_schema: semver
+maintainer: izm1chael
+vendor: Layerfault
+homepage: https://github.com/izm1chael/layerfault
+license: MIT
+description: Offline-first local AI model admission and security scanner
+contents:
+  - src: ${LAYERFAULT_PACKAGE_BINARY}
+    dst: /app/layerfault.exe
+    expand: true
+  - src: packaging/windows/Assets/StoreLogo.png
+    dst: /Assets/StoreLogo.png
+  - src: packaging/windows/Assets/Square44x44Logo.png
+    dst: /Assets/Square44x44Logo.png
+  - src: packaging/windows/Assets/Square150x150Logo.png
+    dst: /Assets/Square150x150Logo.png
+msix:
+  publisher: "CN=Layerfault"
+  properties:
+    display_name: "Layerfault"
+    publisher_display_name: "Layerfault"
+    logo: "Assets/StoreLogo.png"
+  applications:
+    - id: LayerfaultCLI
+      executable: app/layerfault.exe
+      entry_point: Windows.FullTrustApplication
+      visual_elements:
+        display_name: "Layerfault"
+        description: "Layerfault model security CLI"
+        background_color: transparent
+        square150x150_logo: "Assets/Square150x150Logo.png"
+        square44x44_logo: "Assets/Square44x44Logo.png"

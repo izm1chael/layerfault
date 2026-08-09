@@ -85,6 +85,8 @@ enum Command {
     Gc(GcArgs),
     /// Report installed runtime integrations and local model-store health.
     Doctor(OutputArgs),
+    /// Report host capabilities for static and active analysis.
+    Capabilities(OutputArgs),
     /// List available local model sources/runtimes.
     Sources(OutputArgs),
     /// Explain a stable Layerfault detector/rule identifier.
@@ -1227,6 +1229,7 @@ fn main() -> Result<()> {
         Some(Command::Policy(args)) => commands::operator::run_policy(args),
         Some(Command::Gc(args)) => commands::stores::run_gc(args),
         Some(Command::Doctor(args)) => commands::operator::run_doctor(args),
+        Some(Command::Capabilities(args)) => commands::operator::run_capabilities(args),
         Some(Command::Sources(args)) => commands::operator::run_sources(args),
         Some(Command::Explain(args)) => commands::operator::run_explain(args),
         Some(Command::Diff(args)) => commands::operator::run_diff(args),

@@ -716,7 +716,7 @@ pub(crate) fn run_review(args: ReviewArgs) -> Result<()> {
             }
             Err(error) => {
                 decision.raise(SecurityDecision::Warn);
-                (None, domain_failed(error.to_string()))
+                (None, behaviour_error_domain(&error))
             }
         }
     };
@@ -793,7 +793,7 @@ pub(crate) fn run_review(args: ReviewArgs) -> Result<()> {
                     }
                     Err(error) => {
                         decision.raise(SecurityDecision::Warn);
-                        (None, domain_failed(error.to_string()))
+                        (None, behaviour_error_domain(&error))
                     }
                 }
             }
@@ -978,6 +978,22 @@ fn domain_unavailable(reason: impl Into<String>) -> Value {
 
 fn domain_failed(reason: impl Into<String>) -> Value {
     json!({"state":"FAILED","report":Value::Null,"reason":reason.into()})
+}
+
+fn behaviour_error_domain(error: &anyhow::Error) -> Value {
+    let reason = error.to_string();
+    let unavailable = reason.starts_with("active analysis skipped:")
+        || reason.contains("sandbox is unavailable")
+        || reason.contains("requires bubblewrap")
+        || reason.contains("requires prlimit")
+        || reason.contains("runtime was not found")
+        || reason.contains("runtime is unavailable")
+        || (reason.contains("llama-cli") && reason.contains("not found"));
+    if unavailable {
+        domain_unavailable(reason)
+    } else {
+        domain_failed(reason)
+    }
 }
 
 fn domain_state(value: &Value) -> Option<&str> {

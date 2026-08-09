@@ -6,9 +6,9 @@ use std::path::{Path, PathBuf};
 const MAX_SNAPSHOT_FILES: usize = 4096;
 const MAX_TRACE_BYTES: u64 = 32 * 1024 * 1024;
 const MAX_TELEMETRY_ROWS: usize = 128;
-const DEFAULT_ADDRESS_SPACE_LIMIT_MB: u64 = 24 * 1024;
 const MIN_ADDRESS_SPACE_LIMIT_MB: u64 = 512;
 const MAX_ADDRESS_SPACE_LIMIT_MB: u64 = 256 * 1024;
+const ACTIVE_MODEL_ENTRY_LIMIT: usize = 100_000;
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(default)]
@@ -241,13 +241,103 @@ pub fn require_high_risk_observation_stack() -> Result<()> {
     Ok(())
 }
 
+fn configured_memory_budget_bytes() -> u64 {
+    crate::doctor::recommended_active_memory_budget_bytes()
+        .unwrap_or(4 * 1024 * 1024 * 1024)
+        .clamp(
+            MIN_ADDRESS_SPACE_LIMIT_MB * 1024 * 1024,
+            MAX_ADDRESS_SPACE_LIMIT_MB * 1024 * 1024,
+        )
+}
+
 fn configured_address_space_limit_bytes() -> u64 {
-    let mb = std::env::var("LAYERFAULT_BEHAVIOUR_MEMORY_MB")
-        .ok()
-        .and_then(|value| value.parse::<u64>().ok())
-        .unwrap_or(DEFAULT_ADDRESS_SPACE_LIMIT_MB)
-        .clamp(MIN_ADDRESS_SPACE_LIMIT_MB, MAX_ADDRESS_SPACE_LIMIT_MB);
-    mb.saturating_mul(1024 * 1024)
+    if let Ok(value) = std::env::var("LAYERFAULT_BEHAVIOUR_ADDRESS_SPACE_MB") {
+        if let Ok(mb) = value.parse::<u64>() {
+            return mb
+                .clamp(MIN_ADDRESS_SPACE_LIMIT_MB, MAX_ADDRESS_SPACE_LIMIT_MB)
+                .saturating_mul(1024 * 1024);
+        }
+    }
+    let budget = configured_memory_budget_bytes();
+    // RLIMIT_AS constrains virtual address space, not resident memory. Keep it
+    // above the conservative physical-memory admission budget so runtimes such
+    // as PyTorch can map shared libraries/arenas without being rejected purely
+    // because of virtual mappings, while still bounding runaway allocation.
+    let expanded = (budget.saturating_mul(3) / 2).saturating_add(512 * 1024 * 1024);
+    expanded.clamp(
+        MIN_ADDRESS_SPACE_LIMIT_MB * 1024 * 1024,
+        MAX_ADDRESS_SPACE_LIMIT_MB * 1024 * 1024,
+    )
+}
+
+fn active_target_bytes(path: &Path) -> Result<u64> {
+    let metadata = std::fs::symlink_metadata(path)
+        .with_context(|| format!("unable to inspect active target '{}'", path.display()))?;
+    if metadata.file_type().is_symlink() {
+        bail!("active target may not be a symlink");
+    }
+    if metadata.is_file() {
+        return Ok(metadata.len());
+    }
+    if !metadata.is_dir() {
+        bail!("active target must be a regular file or directory");
+    }
+    let mut total = 0_u64;
+    let mut entries = 0_usize;
+    for entry in walkdir::WalkDir::new(path).follow_links(false) {
+        let entry = entry.with_context(|| format!("unable to enumerate '{}'", path.display()))?;
+        entries = entries.saturating_add(1);
+        if entries > ACTIVE_MODEL_ENTRY_LIMIT {
+            bail!(
+                "active target contains too many filesystem entries for bounded memory preflight"
+            );
+        }
+        if entry.file_type().is_symlink() {
+            continue;
+        }
+        let metadata = entry.metadata()?;
+        if metadata.is_file() {
+            total = total.saturating_add(metadata.len());
+        }
+    }
+    Ok(total)
+}
+
+fn estimated_runtime_memory_bytes(
+    runtime: &Path,
+    model: &Path,
+    base: Option<&Path>,
+) -> Result<u64> {
+    let model_bytes = active_target_bytes(model)?;
+    let base_bytes = base.map(active_target_bytes).transpose()?.unwrap_or(0);
+    let weights = model_bytes.saturating_add(base_bytes);
+    let runtime_name = runtime
+        .file_name()
+        .and_then(|value| value.to_str())
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    let (numerator, denominator, overhead) = if runtime_name.contains("python") {
+        // Transformers frequently materializes weights plus allocator/runtime
+        // state beyond the serialized file size. Stay conservative on small
+        // CPU-only hosts: a skipped active run is safer than host OOM.
+        (2_u64, 1_u64, 1024_u64 * 1024 * 1024)
+    } else {
+        (5_u64, 4_u64, 768_u64 * 1024 * 1024)
+    };
+    Ok((weights.saturating_mul(numerator) / denominator).saturating_add(overhead))
+}
+
+fn ensure_active_target_fits(runtime: &Path, model: &Path, base: Option<&Path>) -> Result<()> {
+    let budget = configured_memory_budget_bytes();
+    let estimate = estimated_runtime_memory_bytes(runtime, model, base)?;
+    if estimate > budget {
+        bail!(
+            "active analysis skipped: estimated runtime memory {:.1} GiB exceeds safe host budget {:.1} GiB; static analysis remains available (override with LAYERFAULT_BEHAVIOUR_MEMORY_MB only when the host can safely support it)",
+            estimate as f64 / 1073741824.0,
+            budget as f64 / 1073741824.0
+        );
+    }
+    Ok(())
 }
 
 pub struct SandboxedCommand {
@@ -277,6 +367,7 @@ pub fn command_for(
 
     let canonical_runtime = std::fs::canonicalize(runtime)
         .with_context(|| format!("unable to canonicalize runtime '{}'", runtime.display()))?;
+    ensure_active_target_fits(&canonical_runtime, model, base)?;
     let canonical_model = std::fs::canonicalize(model)
         .with_context(|| format!("unable to canonicalize model '{}'", model.display()))?;
     let canonical_base = base

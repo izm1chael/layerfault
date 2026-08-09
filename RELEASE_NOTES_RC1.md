@@ -69,7 +69,7 @@ The post-optimization master corpus run exposed a small set of correctness and r
 - Behavioural telemetry now records network attempts, unexpected child-process execution, synthetic credential/sensitive-path access, and unexpected writable-workspace mutations. Loader/runtime failures preserve telemetry and produce `LF-BEHAV-RUNTIME-FAILURE`.
 - Differential behaviour now compares actual deterministic response evidence as well as risk labels. Localized response outliers are advisory (`LF-DIFF-LOCALIZED-DIVERGENCE`); trigger-localized divergence/output collapse can escalate with `LF-DIFF-SUSPICIOUS-TRIGGER`.
 - Safetensors quick/standard numeric sampling retains the same logical model-identity-seeded coordinates but batches them in physical file-offset order and coalesces nearby reads, removing the GPTQ/AWQ random-seek penalty without reducing tensor/sample coverage.
-- Added `scripts/active-sandbox-corpus-gate.sh`, an active corpus manifest template, and a lab fixture helper that can recreate real ONNX hardlinks after archive/Hub transport.
+- Added the active corpus gate, an active corpus manifest template, and a lab fixture helper that can recreate real ONNX hardlinks after archive/Hub transport.
 ## Active sandbox and dynamic-analysis follow-up
 
 The latest live-test overlay extends the static admission layer with bounded active execution and preserves the large-model performance work:
@@ -81,3 +81,18 @@ The latest live-test overlay extends the static admission layer with bounded act
 - The Transformers backend uses tokenizer chat templates when available and supports dedicated virtualenvs by mounting only read-only `site-packages`, not the virtualenv tool directory.
 - Quick/standard Safetensors numerical sample coordinates are physically sorted/coalesced into bounded reads without changing the logical sample set, preserving every-tensor representation/adaptive escalation while reducing random-seek cost on GPTQ/AWQ-style layouts.
 - Lab helpers provide an active sandbox corpus contract and recreation of the ONNX hardlink fixture that archive/Hub transport cannot preserve.
+
+## Distribution-foundation follow-up
+
+The RC distribution pass productises installation and package validation without enabling automatic public releases:
+
+- Added a one-line `install.sh` with native DEB/RPM/APK/Arch package selection and a portable musl Linux fallback, plus a checksum-verifying Windows PowerShell installer.
+- Added `--core`, `--active`, and `--full` installation modes. Active mode installs the Linux sandbox prerequisites and a managed, pinned CPU Transformers/PEFT runtime where the host libc/Python are supported; full mode also attempts a distribution-managed llama.cpp runtime.
+- Added `layerfault capabilities` and strengthened `layerfault doctor` with a real Bubblewrap namespace/network/read-only-filesystem self-test, managed-runtime import validation, CPU/GPU discovery and low-memory notes.
+- Active execution now derives a conservative physical-memory admission budget from the host and estimates the target/base runtime footprint before launch. A model that will not fit is reported `UNAVAILABLE` rather than being launched into an OOM/swap event; `RLIMIT_AS` remains a separate virtual-address-space runaway guard.
+- Added common nFPM packaging metadata plus Linux GNU/musl release builders for DEB, RPM, APK, Arch and portable tarballs, a macOS universal tar/unsigned-PKG validation path, Windows ZIP/unsigned-MSIX validation packaging, Homebrew formula generation, SBOM/checksum generation and package smoke tests.
+- Reworked the GitHub Actions release workflow into an explicit `workflow_dispatch` distribution dry run. Public GitHub Release creation is disabled unless both the manual `publish=true` input and repository variable `LAYERFAULT_RELEASE_PUBLISH_ENABLED=true` are present.
+- Linux release artifacts are built against appropriate libc families rather than repackaging one Ubuntu binary for incompatible distributions. Package smoke tests exercise Ubuntu, Debian, AlmaLinux, Alpine and Arch where supported.
+- The README, SECURITY guide, man page, completions and new `docs/INSTALL.md` / `docs/DISTRIBUTION.md` now document static-vs-active detection, package installation, active runtime setup, low-memory behaviour and the intentionally gated release process.
+
+The small `vendor/candelabra` fork remains intentional in this RC because it preserves Layerfault's Rustls-only dependency posture. It should be removed once upstream provides an equivalent feature/dependency configuration rather than by reintroducing native OpenSSL merely to shrink the repository.

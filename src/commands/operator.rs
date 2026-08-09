@@ -81,6 +81,78 @@ pub(crate) fn run_doctor(args: OutputArgs) -> Result<()> {
     Ok(())
 }
 
+pub(crate) fn run_capabilities(args: OutputArgs) -> Result<()> {
+    let report = doctor::capabilities();
+    if args.json {
+        println!("{}", serde_json::to_string_pretty(&report)?);
+    } else {
+        println!("OS/arch              {}/{}", report.os, report.architecture);
+        println!(
+            "Static analysis      {}",
+            if report.static_analysis {
+                "READY"
+            } else {
+                "UNAVAILABLE"
+            }
+        );
+        println!(
+            "Active sandbox       {}",
+            if report.active_sandbox {
+                "READY"
+            } else {
+                "UNAVAILABLE"
+            }
+        );
+        println!(
+            "Custom-code sandbox  {}",
+            if report.custom_code_sandbox {
+                "READY"
+            } else {
+                "UNAVAILABLE"
+            }
+        );
+        println!(
+            "GGUF active          {}",
+            if report.llama_active_analysis {
+                "READY"
+            } else {
+                "UNAVAILABLE"
+            }
+        );
+        println!(
+            "Transformers active  {}",
+            if report.transformers_active_analysis {
+                "READY"
+            } else {
+                "UNAVAILABLE"
+            }
+        );
+        println!("Accelerator          {}", report.accelerator);
+        if let Some(total) = report.physical_memory_bytes {
+            println!(
+                "Physical RAM         {:.1} GiB",
+                total as f64 / 1073741824.0
+            );
+        }
+        if let Some(available) = report.available_memory_bytes {
+            println!(
+                "Available RAM        {:.1} GiB",
+                available as f64 / 1073741824.0
+            );
+        }
+        if let Some(limit) = report.recommended_active_memory_budget_bytes {
+            println!(
+                "Active RAM budget    {:.1} GiB",
+                limit as f64 / 1073741824.0
+            );
+        }
+        for note in &report.notes {
+            println!("NOTE                 {note}");
+        }
+    }
+    Ok(())
+}
+
 pub(crate) fn run_sources(args: OutputArgs) -> Result<()> {
     let checks = doctor::run()
         .into_iter()
@@ -178,7 +250,7 @@ pub(crate) fn run_version(args: VersionArgs) -> Result<()> {
                 "report_schema":"1.0", "policy_schema":1, "baseline_schema":1,
                 "supported_formats":["gguf","safetensors","safetensors-index","model-package"],
                 "sources":["ollama","lmstudio","llama-cpp","hf-cache","file","directory"],
-                "capabilities":["package-fingerprint","package-security","runtime-advisories","execution-binding","signed-evidence"]
+                "capabilities":["package-fingerprint","package-security","runtime-advisories","execution-binding","signed-evidence","behavioural-analysis","differential-behaviour","sandbox-telemetry","host-capabilities"]
             }))?
         );
     } else {
