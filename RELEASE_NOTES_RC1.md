@@ -60,3 +60,24 @@ The post-optimization master corpus run exposed a small set of correctness and r
 - LoRA static review now reports scaling, mean sparsity, norm outliers, spectral concentration, target-module concentration and `modules_to_save` evidence, while retaining the explicit boundary that anomalous adapter weights do not prove malicious intent.
 - dataset fingerprint/review has a bounded parallel inventory, deterministic per-file quotas, streaming record visitors for line-oriented formats, linearized rare-trigger label correlation, exact coverage accounting, and deterministic stratified sampling across the whole record range when the 250k analysis ceiling is reached. `--jobs` is accepted on dataset inspect/fingerprint/compare/poisoning-review.
 - corpus release tooling now includes machine-readable expected verdicts, a semantic/exit-code consistency checker, broad cache/performance ratio guards, and a behaviour-corpus gate/template for clean/backdoored adapter and model comparisons.
+
+### Active sandbox / dynamic model analysis follow-up
+
+- Added a strong external behavioural sandbox shared by llama.cpp and a new local Transformers/PEFT backend: isolated network/PID/IPC/UTS/filesystem view, dropped capabilities, synthetic HOME/workspace credentials, bounded syscall telemetry, and resource limits.
+- Statically blocked models can be exercised only with explicit `--allow-static-blocked`; custom Hugging Face loaders require the separate `--execute-custom-code` opt-in. Those high-risk modes fail closed unless `bwrap`, `strace`, and `prlimit` are all present.
+- Added local-only Transformers and PEFT/LoRA execution with persistent model loading across a bounded probe session and tokenizer chat-template rendering when available. Network downloads remain disabled.
+- Behavioural telemetry now records network attempts, unexpected child-process execution, synthetic credential/sensitive-path access, and unexpected writable-workspace mutations. Loader/runtime failures preserve telemetry and produce `LF-BEHAV-RUNTIME-FAILURE`.
+- Differential behaviour now compares actual deterministic response evidence as well as risk labels. Localized response outliers are advisory (`LF-DIFF-LOCALIZED-DIVERGENCE`); trigger-localized divergence/output collapse can escalate with `LF-DIFF-SUSPICIOUS-TRIGGER`.
+- Safetensors quick/standard numeric sampling retains the same logical model-identity-seeded coordinates but batches them in physical file-offset order and coalesces nearby reads, removing the GPTQ/AWQ random-seek penalty without reducing tensor/sample coverage.
+- Added `scripts/active-sandbox-corpus-gate.sh`, an active corpus manifest template, and a lab fixture helper that can recreate real ONNX hardlinks after archive/Hub transport.
+## Active sandbox and dynamic-analysis follow-up
+
+The latest live-test overlay extends the static admission layer with bounded active execution and preserves the large-model performance work:
+
+- GGUF can be exercised with a local llama.cpp runtime and Hugging Face/Safetensors/PEFT packages with a local Transformers Python runtime; model/runtime downloads remain disabled.
+- Every external active run requires Bubblewrap namespace/network/filesystem isolation plus `prlimit` CPU/address-space/process/file limits. Executing statically blocked content or Hugging Face custom loaders additionally requires `strace` telemetry and explicit operator opt-in.
+- Dynamic evidence records attempted network activity, child execution, synthetic-canary/sensitive-path access, protected read-only filesystem write attempts, writable-workspace mutation, runtime failures, and bounded-trace truncation.
+- Base/derived behavioural comparison now evaluates the actual bounded responses as well as rule/risk labels, with localized trigger divergence and output-collapse evidence; review reuses the already-produced derived report instead of loading the target twice.
+- The Transformers backend uses tokenizer chat templates when available and supports dedicated virtualenvs by mounting only read-only `site-packages`, not the virtualenv tool directory.
+- Quick/standard Safetensors numerical sample coordinates are physically sorted/coalesced into bounded reads without changing the logical sample set, preserving every-tensor representation/adaptive escalation while reducing random-seek cost on GPTQ/AWQ-style layouts.
+- Lab helpers provide an active sandbox corpus contract and recreation of the ONNX hardlink fixture that archive/Hub transport cannot preserve.

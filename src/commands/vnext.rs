@@ -290,15 +290,37 @@ pub(crate) fn run_behaviour(args: BehaviourArgs) -> Result<()> {
         args.max_mutations.unwrap_or(usize::MAX),
         args.repeat_count.unwrap_or(usize::MAX),
     );
+    let active = layerfault::behaviour::ActiveExecutionOptions {
+        allow_static_blocked: args.allow_static_blocked,
+        execute_custom_code: args.execute_custom_code,
+    };
     let mut report = match args.runtime.as_str() {
-        "llama-cpp" => layerfault::behaviour::run_external_llama(
+        "llama-cpp" => {
+            if args.execute_custom_code {
+                bail!("--execute-custom-code is only supported by --runtime transformers");
+            }
+            layerfault::behaviour::run_external_llama_active(
+                &args.model,
+                args.runtime_path.as_deref(),
+                args.probe_suite.as_deref(),
+                args.seed,
+                limits,
+                active,
+            )?
+        }
+        "transformers" | "transformers-python" => layerfault::behaviour::python::run_transformers(
             &args.model,
+            args.base.as_deref(),
             args.runtime_path.as_deref(),
             args.probe_suite.as_deref(),
             args.seed,
             limits,
+            active,
         )?,
         "embedded" => {
+            if args.allow_static_blocked || args.execute_custom_code {
+                bail!("--allow-static-blocked/--execute-custom-code require an external strong-sandbox runtime, not --runtime embedded");
+            }
             let tokenizer = args.tokenizer.as_deref().ok_or_else(|| {
                 anyhow!("--runtime embedded requires --tokenizer /path/to/tokenizer.json")
             })?;
@@ -311,7 +333,7 @@ pub(crate) fn run_behaviour(args: BehaviourArgs) -> Result<()> {
             )?
         }
         other => {
-            bail!("unsupported behaviour runtime '{other}'; supported values: llama-cpp, embedded")
+            bail!("unsupported behaviour runtime '{other}'; supported values: llama-cpp, transformers, embedded")
         }
     };
     apply_watch_strings(&mut report, &args.watch_string);
@@ -335,16 +357,40 @@ pub(crate) fn run_compare_behaviour(args: CompareBehaviourArgs) -> Result<()> {
         usize::MAX,
         usize::MAX,
     );
+    let active = layerfault::behaviour::ActiveExecutionOptions {
+        allow_static_blocked: args.allow_static_blocked,
+        execute_custom_code: args.execute_custom_code,
+    };
     let report = match args.runtime.as_str() {
-        "llama-cpp" => layerfault::behaviour::compare_external_llama(
-            &args.base,
-            &args.derived,
-            args.runtime_path.as_deref(),
-            args.probe_suite.as_deref(),
-            args.seed,
-            limits,
-        )?,
+        "llama-cpp" => {
+            if args.execute_custom_code {
+                bail!("--execute-custom-code is only supported by --runtime transformers");
+            }
+            layerfault::behaviour::compare_external_llama_active(
+                &args.base,
+                &args.derived,
+                args.runtime_path.as_deref(),
+                args.probe_suite.as_deref(),
+                args.seed,
+                limits,
+                active,
+            )?
+        }
+        "transformers" | "transformers-python" => {
+            layerfault::behaviour::python::compare_transformers(
+                &args.base,
+                &args.derived,
+                args.runtime_path.as_deref(),
+                args.probe_suite.as_deref(),
+                args.seed,
+                limits,
+                active,
+            )?
+        }
         "embedded" => {
+            if args.allow_static_blocked || args.execute_custom_code {
+                bail!("--allow-static-blocked/--execute-custom-code require an external strong-sandbox runtime, not --runtime embedded");
+            }
             let tokenizer = args.tokenizer.as_deref().ok_or_else(|| {
                 anyhow!("--runtime embedded requires --tokenizer /path/to/tokenizer.json")
             })?;
@@ -358,7 +404,7 @@ pub(crate) fn run_compare_behaviour(args: CompareBehaviourArgs) -> Result<()> {
             )?
         }
         other => {
-            bail!("unsupported behaviour runtime '{other}'; supported values: llama-cpp, embedded")
+            bail!("unsupported behaviour runtime '{other}'; supported values: llama-cpp, transformers, embedded")
         }
     };
     if args.json {
@@ -610,22 +656,45 @@ pub(crate) fn run_review(args: ReviewArgs) -> Result<()> {
         )
     };
 
-    let (behavior, behaviour_domain) =
-        if static_block {
-            (None, domain_not_run("static admission blocked the model"))
-        } else if args.profile.eq_ignore_ascii_case("quick") {
-            (None, domain_not_run("quick profile does not run inference"))
-        } else {
-            let result = layerfault::behaviour::BehaviourLimits::for_profile(&args.profile)
+    let active_execution = layerfault::behaviour::ActiveExecutionOptions {
+        allow_static_blocked: args.allow_static_blocked,
+        execute_custom_code: args.execute_custom_code,
+    };
+    let (behavior, behaviour_domain) = if static_block && !args.allow_static_blocked {
+        (None, domain_not_run("static admission blocked the model"))
+    } else if args.profile.eq_ignore_ascii_case("quick") {
+        (None, domain_not_run("quick profile does not run inference"))
+    } else {
+        let result = layerfault::behaviour::BehaviourLimits::for_profile(&args.profile)
                 .and_then(|limits| match args.runtime.as_str() {
-                    "llama-cpp" => layerfault::behaviour::run_external_llama(
+                    "llama-cpp" => {
+                        if args.execute_custom_code {
+                            Err(anyhow!("--execute-custom-code is only supported by --runtime transformers"))
+                        } else {
+                            layerfault::behaviour::run_external_llama_active(
                         &args.model,
                         args.runtime_path.as_deref(),
                         args.probe_suite.as_deref(),
                         0,
                         limits,
+                        active_execution,
+                    )
+                        }
+                    },
+                    "transformers" | "transformers-python" => layerfault::behaviour::python::run_transformers(
+                        &args.model,
+                        args.base.as_deref(),
+                        args.runtime_path.as_deref(),
+                        args.probe_suite.as_deref(),
+                        0,
+                        limits,
+                        active_execution,
                     ),
-                    "embedded" => match args.tokenizer.as_deref() {
+                    "embedded" => {
+                        if args.allow_static_blocked || args.execute_custom_code {
+                            Err(anyhow!("--allow-static-blocked/--execute-custom-code require an external strong-sandbox runtime"))
+                        } else {
+                            match args.tokenizer.as_deref() {
                         Some(tokenizer) => layerfault::behaviour::run_embedded(
                             &args.model,
                             tokenizer,
@@ -634,67 +703,104 @@ pub(crate) fn run_review(args: ReviewArgs) -> Result<()> {
                             limits,
                         ),
                         None => Err(anyhow!("--runtime embedded requires --tokenizer")),
+                            }
+                        }
                     },
-                    other => Err(anyhow!("unsupported behaviour runtime '{other}'")),
+                    other => Err(anyhow!("unsupported behaviour runtime '{other}'; supported: llama-cpp, transformers, embedded")),
                 });
-            match result {
-                Ok(report) => {
-                    decision.raise(SecurityDecision::from_behaviour_state(report.state));
-                    let domain = domain_available(&report);
-                    (Some(report), domain)
-                }
-                Err(error) => {
-                    decision.raise(SecurityDecision::Warn);
-                    (None, domain_failed(error.to_string()))
-                }
+        match result {
+            Ok(report) => {
+                decision.raise(SecurityDecision::from_behaviour_state(report.state));
+                let domain = domain_available(&report);
+                (Some(report), domain)
             }
-        };
+            Err(error) => {
+                decision.raise(SecurityDecision::Warn);
+                (None, domain_failed(error.to_string()))
+            }
+        }
+    };
 
-    let (_differential, differential_domain) =
-        if static_block {
-            (None, domain_not_run("static admission blocked the model"))
-        } else if args.profile.eq_ignore_ascii_case("quick") {
-            (None, domain_not_run("quick profile does not run inference"))
-        } else if let Some(base) = args.base.as_deref() {
-            let result = layerfault::behaviour::BehaviourLimits::for_profile(&args.profile)
-                .and_then(|limits| match args.runtime.as_str() {
-                    "llama-cpp" => layerfault::behaviour::compare_external_llama(
-                        base,
-                        &args.model,
-                        args.runtime_path.as_deref(),
-                        args.probe_suite.as_deref(),
-                        0,
-                        limits,
-                    ),
-                    "embedded" => match args.tokenizer.as_deref() {
-                        Some(tokenizer) => layerfault::behaviour::compare_embedded(
-                            base,
-                            &args.model,
-                            tokenizer,
-                            args.probe_suite.as_deref(),
-                            0,
-                            limits,
-                        ),
-                        None => Err(anyhow!("--runtime embedded requires --tokenizer")),
-                    },
-                    other => Err(anyhow!("unsupported behaviour runtime '{other}'")),
-                });
-            match result {
-                Ok(report) => {
-                    decision.raise(SecurityDecision::from_differential_behaviour_state(
-                        report.state,
-                    ));
-                    let domain = domain_available(&report);
-                    (Some(report), domain)
-                }
-                Err(error) => {
-                    decision.raise(SecurityDecision::Warn);
-                    (None, domain_failed(error.to_string()))
+    let (_differential, differential_domain) = if static_block && !args.allow_static_blocked {
+        (None, domain_not_run("static admission blocked the model"))
+    } else if args.profile.eq_ignore_ascii_case("quick") {
+        (None, domain_not_run("quick profile does not run inference"))
+    } else if let Some(base) = args.base.as_deref() {
+        match behavior.as_ref().cloned() {
+            None => (
+                None,
+                domain_not_run(
+                    "target behavioural report unavailable, so differential behaviour was not run",
+                ),
+            ),
+            Some(derived_report) => {
+                let result = layerfault::behaviour::BehaviourLimits::for_profile(&args.profile)
+                        .and_then(|limits| {
+                            let base_report = match args.runtime.as_str() {
+                                "llama-cpp" => {
+                                    if args.execute_custom_code {
+                                        return Err(anyhow!("--execute-custom-code is only supported by --runtime transformers"));
+                                    }
+                                    layerfault::behaviour::run_external_llama_active(
+                                        base,
+                                        args.runtime_path.as_deref(),
+                                        args.probe_suite.as_deref(),
+                                        0,
+                                        limits,
+                                        active_execution,
+                                    )?
+                                }
+                                "transformers" | "transformers-python" => {
+                                    layerfault::behaviour::python::run_transformers(
+                                        base,
+                                        None,
+                                        args.runtime_path.as_deref(),
+                                        args.probe_suite.as_deref(),
+                                        0,
+                                        limits,
+                                        active_execution,
+                                    )?
+                                }
+                                "embedded" => {
+                                    if args.allow_static_blocked || args.execute_custom_code {
+                                        return Err(anyhow!("--allow-static-blocked/--execute-custom-code require an external strong-sandbox runtime"));
+                                    }
+                                    let tokenizer = args
+                                        .tokenizer
+                                        .as_deref()
+                                        .ok_or_else(|| anyhow!("--runtime embedded requires --tokenizer"))?;
+                                    layerfault::behaviour::run_embedded(
+                                        base,
+                                        tokenizer,
+                                        args.probe_suite.as_deref(),
+                                        0,
+                                        limits,
+                                    )?
+                                }
+                                other => {
+                                    return Err(anyhow!("unsupported behaviour runtime '{other}'; supported: llama-cpp, transformers, embedded"));
+                                }
+                            };
+                            layerfault::behaviour::compare_reports(base_report, derived_report)
+                        });
+                match result {
+                    Ok(report) => {
+                        decision.raise(SecurityDecision::from_differential_behaviour_state(
+                            report.state,
+                        ));
+                        let domain = domain_available(&report);
+                        (Some(report), domain)
+                    }
+                    Err(error) => {
+                        decision.raise(SecurityDecision::Warn);
+                        (None, domain_failed(error.to_string()))
+                    }
                 }
             }
-        } else {
-            (None, domain_not_run("no base model supplied"))
-        };
+        }
+    } else {
+        (None, domain_not_run("no base model supplied"))
+    };
 
     let (_judge_result, judge_domain) = if args.judge == "disabled" {
         (None, domain_not_run("advisory judge disabled"))
@@ -1065,6 +1171,17 @@ fn emit_behaviour(
         for f in &report.findings {
             println!("{f}");
         }
+        let dynamic = &report.dynamic_observations;
+        println!(
+            "\nDYNAMIC TELEMETRY\nnetwork={} exec={} sensitive_path={} canary={} protected_write_attempt={} unexpected_fs={} trace={}",
+            dynamic.network_attempts,
+            dynamic.process_exec_attempts,
+            dynamic.sensitive_path_accesses,
+            dynamic.canary_accesses,
+            dynamic.filesystem_write_attempts,
+            dynamic.unexpected_filesystem_mutations,
+            if dynamic.trace_available { "AVAILABLE" } else { "UNAVAILABLE" }
+        );
         println!("\n{}", report.boundary);
     }
     let decision = SecurityDecision::from_behaviour_state(report.state);

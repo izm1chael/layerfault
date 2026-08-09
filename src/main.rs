@@ -934,9 +934,12 @@ struct CompareArgs {
 #[derive(clap::Args, Debug)]
 struct BehaviourArgs {
     model: PathBuf,
+    /// Optional local base model package for PEFT/LoRA adapter execution.
+    #[arg(long)]
+    base: Option<PathBuf>,
     #[arg(long, default_value = "llama-cpp")]
     runtime: String,
-    /// Absolute/local external runtime path when using llama-cpp.
+    /// Absolute/local external runtime path for llama.cpp or the Python executable for Transformers.
     #[arg(long)]
     runtime_path: Option<PathBuf>,
     /// Local tokenizer.json required by the embedded backend.
@@ -966,6 +969,14 @@ struct BehaviourArgs {
     repeat_count: Option<usize>,
     #[arg(long)]
     watch_string: Vec<String>,
+    /// Permit execution of a model/package that static admission BLOCKed. This
+    /// is accepted only by external runtimes that enforce the strong sandbox.
+    #[arg(long, default_value_t = false)]
+    allow_static_blocked: bool,
+    /// Permit Hugging Face custom loader Python (`trust_remote_code=True`) in
+    /// the isolated Transformers backend. No network or host credentials are exposed.
+    #[arg(long, default_value_t = false)]
+    execute_custom_code: bool,
     #[arg(long, default_value_t = false)]
     json: bool,
 }
@@ -995,6 +1006,10 @@ struct CompareBehaviourArgs {
     #[arg(long)]
     timeout_seconds: Option<u64>,
     #[arg(long, default_value_t = false)]
+    allow_static_blocked: bool,
+    #[arg(long, default_value_t = false)]
+    execute_custom_code: bool,
+    #[arg(long, default_value_t = false)]
     json: bool,
 }
 
@@ -1020,6 +1035,12 @@ struct ReviewArgs {
     tokenizer: Option<PathBuf>,
     #[arg(long)]
     probe_suite: Option<PathBuf>,
+    /// Permit blocked content to be exercised only inside the external strong sandbox.
+    #[arg(long, default_value_t = false)]
+    allow_static_blocked: bool,
+    /// Permit custom Hugging Face Python loader execution in the sandboxed Transformers backend.
+    #[arg(long, default_value_t = false)]
+    execute_custom_code: bool,
     #[arg(long)]
     evidence_out: Option<PathBuf>,
     #[arg(long)]

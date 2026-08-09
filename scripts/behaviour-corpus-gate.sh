@@ -10,7 +10,7 @@ PROFILE="${LAYERFAULT_BEHAVIOUR_PROFILE:-standard}"
 fail=0
 while IFS=$'\t' read -r name base derived tokenizer expected_exit notes; do
   [[ -z "${name:-}" || "$name" == \#* ]] && continue
-  [[ -f "$base" && -f "$derived" ]] || { echo "FAIL $name: base/derived missing" >&2; fail=1; continue; }
+  [[ -e "$base" && -e "$derived" ]] || { echo "FAIL $name: base/derived missing" >&2; fail=1; continue; }
   echo "==> $name${notes:+ — $notes}"
   set +e
   "$BIN" compare-behaviour "$base" "$derived" \

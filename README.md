@@ -421,3 +421,64 @@ bash scripts/behaviour-corpus-gate.sh tests/behaviour-corpus-template.tsv
 `tests/corpus-expectations.json` distinguishes detection regressions, false-positive regressions, and JSON/process-exit semantic mismatches. `tests/corpus-performance.json` uses broad warm/cold ratios rather than fixed VPS milliseconds.
 
 Behavioural commands follow the same automation-safe decision contract: `behaviour` maps clean/suspicious/high-risk outcomes to `0`/`1`/`3`, while `compare-behaviour` returns `3` for security-regression, suspicious-trigger, or high-risk differential states. A behavioural JSON result that is security-blocking therefore cannot silently return process success.
+
+### Active sandboxed behavioural analysis
+
+Layerfault can now complement static admission with **active local execution**. Active analysis is deliberately offline and bounded: it does not turn a static PASS into proof that a model has no hidden triggers, but it can reproduce response regressions and observe loader/runtime side effects that static inspection cannot see.
+
+Supported active backends are:
+
+- `llama-cpp` for local GGUF artifacts;
+- `transformers` / `transformers-python` for local Hugging Face model-package directories;
+- PEFT/LoRA adapters through the Transformers backend when `--base` points at the local base package;
+- `embedded` remains available for admitted GGUF execution, but high-risk blocked/custom-code execution is intentionally restricted to the external strong sandbox.
+
+Examples:
+
+```bash
+# Admitted GGUF under llama.cpp in the strong sandbox.
+layerfault behaviour ./model.gguf \
+  --runtime llama-cpp --runtime-path /opt/llama/llama-cli \
+  --profile standard --json
+
+# Local Hugging Face/Safetensors package. No network download is permitted.
+layerfault behaviour ./hf-model \
+  --runtime transformers --runtime-path /usr/bin/python3 \
+  --profile standard --json
+
+# Base-versus-LoRA differential behavioural review.
+layerfault compare-behaviour ./base-model ./adapter-model \
+  --runtime transformers --runtime-path /usr/bin/python3 \
+  --profile standard --json
+
+# Deliberately investigate a statically blocked custom-code package. This mode
+# fails closed unless bwrap + strace + prlimit are all available.
+layerfault behaviour ./suspect-package \
+  --runtime transformers --runtime-path /usr/bin/python3 \
+  --allow-static-blocked --execute-custom-code \
+  --profile quick --json
+```
+
+External active execution uses Bubblewrap namespaces, a private synthetic HOME/workspace, a read-only model/base mount, no host network, dropped capabilities, a private PID/IPC/UTS view, and no normal `/bin`/`/usr/bin` tool tree. When `strace` is available Layerfault records network attempts, unexpected process execution, synthetic credential access and sensitive-path attempts. Writable-workspace mutations are compared against a pre-execution baseline. `prlimit` is mandatory for external active execution and bounds CPU, file size, process/file-descriptor counts, core dumps, and address space; the address-space ceiling defaults to 24 GiB and can be changed with `LAYERFAULT_BEHAVIOUR_MEMORY_MB` for an appropriately isolated lab host.
+
+Executing statically blocked content or `trust_remote_code=True` is a higher-risk research mode and therefore **requires** all three of `bwrap`, `strace`, and `prlimit`; Layerfault refuses to silently degrade that boundary. Synthetic secrets are used for canary detection; real host credentials are never intentionally mounted into the sandbox.
+
+The Transformers runner keeps the model loaded for the bounded probe session, uses a local tokenizer chat template when available, forces offline loading, and never downloads model/runtime dependencies. Differential reports now include deterministic response similarity/repetition evidence. Broad expected fine-tune drift remains advisory, while isolated trigger-category divergence or derived output collapse can escalate to `SUSPICIOUS_TRIGGER`.
+A dedicated Python virtualenv is supported via `--runtime-path /path/to/venv/bin/python`: Layerfault exposes only that environment's read-only `site-packages` directories inside the sandbox through `PYTHONPATH`; it does not mount the virtualenv `bin/` tool directory. This keeps Torch/Transformers/PEFT dependencies available without expanding the subprocess/tool surface.
+
+Useful lab helpers:
+
+```bash
+bash scripts/prepare-lab-active-fixtures.sh
+bash scripts/active-sandbox-corpus-gate.sh tests/active-sandbox-corpus-template.tsv
+```
+
+For real ONNX hardlink testing, recreate the inode alias after downloading the corpus:
+
+```bash
+bash scripts/prepare-lab-active-fixtures.sh \
+  --onnx-model /lab/path/model_dir_hardlink_external.onnx \
+  --onnx-sidecar /lab/path/data/weights.bin
+```
+
+Active corpus automation can set `LAYERFAULT_ACTIVE_PROBE_SUITE=/path/to/suite.json` to run a lab-specific deterministic trigger suite without modifying the manifest. Telemetry includes denied write/mutation attempts against protected read-only mounts as well as successful mutations inside the synthetic workspace.

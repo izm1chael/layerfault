@@ -10,6 +10,8 @@
 /core
 /core.*
 /layerfault-*.sha256
+/layerfault-active-sandbox-overlay.zip
+/.layerfault-overlay-backups
 /AGENT.md
 /CLAUDE.md
 /fuzz/logs

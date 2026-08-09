@@ -8,6 +8,8 @@ use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 
 const CHUNK_BYTES: usize = 4 * 1024 * 1024;
+const SAMPLE_COALESCE_GAP_BYTES: u64 = 64 * 1024;
+const SAMPLE_COALESCE_MAX_SPAN_BYTES: u64 = 4 * 1024 * 1024;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TensorStatistics {
@@ -459,22 +461,26 @@ pub fn safetensors_statistics_for_target_with_options(
     let mut tensors_fully_analyzed = 0_usize;
     let mut tensors_escalated = 0_usize;
     let mut tensors_extended = 0_usize;
+    // Generate the exact same logical sample coordinates as before, then read
+    // them in physical shard/offset order. This preserves detection coverage
+    // while avoiding thousands of backwards/random seeks on large GPTQ/AWQ
+    // Safetensors files. Nearby windows are coalesced with a tightly bounded
+    // read-ahead span.
+    let initial_reports =
+        stat_weight_set_windows_batched(&set, &candidates, &quotas, &options.seed_material)?;
 
-    for ((name, shard_index, tensor_index, total_elements), quota) in candidates.iter().zip(quotas)
+    for (((name, shard_index, tensor_index, total_elements), quota), initial_report) in candidates
+        .iter()
+        .zip(quotas.iter().copied())
+        .zip(initial_reports)
     {
         if quota == 0 {
             continue;
         }
         let shard = &set.shards[*shard_index];
         let tensor = &shard.inventory.tensors[*tensor_index];
-        let windows = sample_windows_seeded(*total_elements, quota, &options.seed_material, name);
-        let mut report = stat_tensor_windows(
-            &shard.file,
-            shard.inventory.data_start,
-            tensor,
-            &windows,
-            "SAMPLED",
-        )?;
+        let mut report = initial_report
+            .ok_or_else(|| anyhow!("missing batched numerical sample for tensor '{name}'"))?;
 
         if report.elements == *total_elements {
             report.coverage = "EXHAUSTIVE".to_owned();
@@ -1027,6 +1033,131 @@ fn tensor_delta_requires_escalation(report: &TensorDeltaStatistics) -> bool {
         || report.cosine_similarity.is_some_and(|value| value < 0.80)
 }
 
+#[derive(Debug, Clone)]
+struct SampleReadTask {
+    candidate_index: usize,
+    shard_index: usize,
+    byte_offset: u64,
+    byte_len: usize,
+}
+
+fn stat_weight_set_windows_batched(
+    set: &OpenWeightSet,
+    candidates: &[(String, usize, usize, u64)],
+    quotas: &[usize],
+    seed_material: &str,
+) -> Result<Vec<Option<TensorStatistics>>> {
+    if candidates.len() != quotas.len() {
+        bail!("internal numerical sample quota length mismatch");
+    }
+    let mut tasks = Vec::<SampleReadTask>::new();
+    let mut stats: Vec<RunningStats> = (0..candidates.len())
+        .map(|_| RunningStats::default())
+        .collect();
+    for (candidate_index, ((name, shard_index, tensor_index, elements), quota)) in
+        candidates.iter().zip(quotas.iter().copied()).enumerate()
+    {
+        if quota == 0 {
+            continue;
+        }
+        let shard = &set.shards[*shard_index];
+        let tensor = &shard.inventory.tensors[*tensor_index];
+        let step = element_bytes(&tensor.dtype)
+            .ok_or_else(|| anyhow!("unsupported numeric dtype '{}'", tensor.dtype))?;
+        let absolute = shard
+            .inventory
+            .data_start
+            .checked_add(tensor.start)
+            .ok_or_else(|| anyhow!("tensor sample base offset overflow"))?;
+        for (start_element, count) in sample_windows_seeded(*elements, quota, seed_material, name) {
+            let relative = start_element
+                .checked_mul(step as u64)
+                .ok_or_else(|| anyhow!("tensor sample relative offset overflow"))?;
+            let byte_offset = absolute
+                .checked_add(relative)
+                .ok_or_else(|| anyhow!("tensor sample offset overflow"))?;
+            let byte_len = count
+                .checked_mul(step)
+                .ok_or_else(|| anyhow!("tensor sample byte length overflow"))?;
+            tasks.push(SampleReadTask {
+                candidate_index,
+                shard_index: *shard_index,
+                byte_offset,
+                byte_len,
+            });
+        }
+    }
+    tasks.sort_by(|a, b| {
+        a.shard_index
+            .cmp(&b.shard_index)
+            .then_with(|| a.byte_offset.cmp(&b.byte_offset))
+            .then_with(|| a.candidate_index.cmp(&b.candidate_index))
+    });
+
+    let mut index = 0_usize;
+    while index < tasks.len() {
+        let shard_index = tasks[index].shard_index;
+        let start = tasks[index].byte_offset;
+        let mut end = start.saturating_add(tasks[index].byte_len as u64);
+        let mut group_end = index + 1;
+        while group_end < tasks.len() && tasks[group_end].shard_index == shard_index {
+            let next = &tasks[group_end];
+            let next_end = next.byte_offset.saturating_add(next.byte_len as u64);
+            let gap = next.byte_offset.saturating_sub(end);
+            let combined_end = end.max(next_end);
+            let span = combined_end.saturating_sub(start);
+            if gap > SAMPLE_COALESCE_GAP_BYTES || span > SAMPLE_COALESCE_MAX_SPAN_BYTES {
+                break;
+            }
+            end = combined_end;
+            group_end += 1;
+        }
+        let span = end.saturating_sub(start);
+        let span_usize = usize::try_from(span).context("sample read span does not fit usize")?;
+        let shard = &set.shards[shard_index];
+        let mut reader = shard.file.try_clone()?;
+        reader.seek(SeekFrom::Start(start))?;
+        let mut bytes = vec![0_u8; span_usize];
+        reader.read_exact(&mut bytes)?;
+
+        for task in &tasks[index..group_end] {
+            let offset = usize::try_from(task.byte_offset.saturating_sub(start))
+                .context("sample slice offset does not fit usize")?;
+            let slice_end = offset
+                .checked_add(task.byte_len)
+                .ok_or_else(|| anyhow!("sample slice length overflow"))?;
+            if slice_end > bytes.len() {
+                bail!("batched sample slice exceeds coalesced read buffer");
+            }
+            let (_, shard_index, tensor_index, _) = &candidates[task.candidate_index];
+            let tensor = &set.shards[*shard_index].inventory.tensors[*tensor_index];
+            for value in decode_chunk(&tensor.dtype, &bytes[offset..slice_end])? {
+                stats[task.candidate_index].push(value);
+            }
+        }
+        index = group_end;
+    }
+
+    let mut out = Vec::with_capacity(candidates.len());
+    for (candidate_index, (name, shard_index, tensor_index, total_elements)) in
+        candidates.iter().enumerate()
+    {
+        if quotas[candidate_index] == 0 {
+            out.push(None);
+            continue;
+        }
+        let tensor = &set.shards[*shard_index].inventory.tensors[*tensor_index];
+        let running = std::mem::take(&mut stats[candidate_index]);
+        out.push(Some(running.finish(
+            name,
+            &tensor.dtype,
+            *total_elements,
+            "SAMPLED",
+        )?));
+    }
+    Ok(out)
+}
+
 fn stat_tensor_windows(
     file: &File,
     data_start: u64,
@@ -1534,6 +1665,15 @@ mod tests {
         assert_eq!(stats.tensors_analyzed, 4);
         assert_eq!(stats.values_sampled, 32);
         assert!(stats.tensors.iter().all(|tensor| tensor.elements > 0));
+        let means: std::collections::BTreeMap<_, _> = stats
+            .tensors
+            .iter()
+            .map(|tensor| (tensor.tensor.as_str(), tensor.mean))
+            .collect();
+        assert_eq!(means.get("layer.a"), Some(&1.0));
+        assert_eq!(means.get("layer.b"), Some(&2.0));
+        assert_eq!(means.get("lm_head"), Some(&3.0));
+        assert_eq!(means.get("layer.d"), Some(&4.0));
         assert_eq!(stats.coverage, "SAMPLED");
         assert!(stats.sampling_strategy.contains("PSEUDORANDOM"));
         let _ = std::fs::remove_dir_all(root);

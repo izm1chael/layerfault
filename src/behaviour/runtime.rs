@@ -13,6 +13,7 @@ pub struct RuntimeResult {
     pub exit_code: Option<i32>,
     pub timed_out: bool,
     pub duration_ms: u64,
+    pub telemetry: super::sandbox::SandboxTelemetry,
 }
 
 pub struct RuntimeAdapter {
@@ -22,17 +23,16 @@ pub struct RuntimeAdapter {
 }
 impl RuntimeAdapter {
     pub fn new(executable: PathBuf, limits: &super::BehaviourLimits) -> Result<Self> {
-        let metadata = std::fs::symlink_metadata(&executable)
+        let executable = std::fs::canonicalize(&executable).with_context(|| {
+            format!("unable to canonicalize runtime '{}'", executable.display())
+        })?;
+        let metadata = std::fs::metadata(&executable)
             .with_context(|| format!("unable to inspect runtime '{}'", executable.display()))?;
-        if metadata.file_type().is_symlink() || !metadata.is_file() {
-            bail!("runtime must be a regular non-symlink file");
+        if !metadata.is_file() {
+            bail!("runtime must resolve to a regular file");
         }
+        super::sandbox::require_external_execution_stack()?;
         let wrapper = super::sandbox::detect_network_wrapper();
-        // Standard/deep/research behavioural security requires an enforceable no-network boundary on Linux.
-        #[cfg(target_os = "linux")]
-        if wrapper.is_none() {
-            bail!("no supported network-isolation mechanism (bwrap/unshare) is available; behaviour NOT_RUN rather than silently weakening the sandbox");
-        }
         Ok(Self {
             executable,
             limits: limits.clone(),
@@ -56,20 +56,37 @@ impl RuntimeAdapter {
         prompt: &str,
         seed: u64,
         max_tokens: u64,
+        canaries: &[&str],
     ) -> Result<RuntimeResult> {
-        let workspace = super::sandbox::Workspace::create()?;
+        let workspace = super::sandbox::Workspace::create(canaries)?;
         let sandboxed = super::sandbox::command_for(
             &self.executable,
             model,
+            None,
+            &[],
             &workspace,
             self.wrapper.as_ref(),
+            self.limits.timeout_seconds,
         )?;
-        let model_argument = sandboxed.model_argument;
-        let mut command = sandboxed.command;
+        let super::sandbox::SandboxedCommand {
+            mut command,
+            model_argument,
+            base_argument: _,
+            runtime_support_arguments: _,
+            trace_enabled,
+        } = sandboxed;
         command
             .env_clear()
             .env("HOME", &workspace.home)
             .env("TMPDIR", &workspace.root)
+            .env(
+                "LAYERFAULT_SYNTHETIC_SECRET_A",
+                canaries.first().copied().unwrap_or("LF_CANARY_A_UNSET"),
+            )
+            .env(
+                "LAYERFAULT_SYNTHETIC_SECRET_B",
+                canaries.get(1).copied().unwrap_or("LF_CANARY_B_UNSET"),
+            )
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
@@ -134,12 +151,14 @@ impl RuntimeAdapter {
                 }
             }
         }
+        let telemetry = workspace.collect_telemetry(trace_enabled)?;
         Ok(RuntimeResult {
             stdout: out,
             stderr: err,
             exit_code: status.code(),
             timed_out,
             duration_ms: u64::try_from(start.elapsed().as_millis()).unwrap_or(u64::MAX),
+            telemetry,
         })
     }
 }
