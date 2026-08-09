@@ -131,7 +131,7 @@ fn run_tool(
     quantization: &str,
     timeout: u64,
 ) -> Result<()> {
-    let mut child = std::process::Command::new(exe)
+    let mut child = crate::safeio::command_for_executable(exe)?
         .env_clear()
         .env("HOME", std::env::temp_dir())
         .stdin(Stdio::null())
@@ -212,7 +212,8 @@ fn hash_path(path: &Path) -> Result<String> {
     Ok(hex::encode(h.finalize()))
 }
 fn bounded_version(path: &Path) -> Option<String> {
-    let mut child = std::process::Command::new(path)
+    let mut child = crate::safeio::command_for_executable(path)
+        .ok()?
         .arg("--version")
         .env_clear()
         .stdout(Stdio::piped())

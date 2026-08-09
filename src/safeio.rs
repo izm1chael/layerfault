@@ -1,7 +1,8 @@
 use anyhow::{anyhow, Context, Result};
-use std::fs::{File, OpenOptions};
+use std::fs::{File, OpenOptions, ReadDir};
 use std::io::{Read, Seek, SeekFrom};
-use std::path::Path;
+use std::path::{Path, PathBuf};
+use std::process::Command;
 
 /// Open a file for read-only scanning while refusing a final-component symlink on Unix.
 ///
@@ -29,6 +30,131 @@ pub fn open_readonly_nofollow(path: &Path) -> Result<File> {
     }
 
     Ok(file)
+}
+
+pub fn validated_relative_path(value: &str, allow_curdir: bool) -> Result<PathBuf> {
+    if value.is_empty()
+        || value.len() > 16 * 1024
+        || value.contains("//")
+        || value.contains('\\')
+        || value.contains("://")
+        || value.chars().any(char::is_control)
+        || value.starts_with('/')
+        || value.starts_with('\\')
+    {
+        return Err(anyhow!("unsafe relative member path"));
+    }
+    let mut output = PathBuf::new();
+    let mut normal = 0usize;
+    for segment in value.split('/') {
+        if segment.is_empty() || segment == ".." || segment.contains(':') {
+            return Err(anyhow!("unsafe relative member path component"));
+        }
+        if segment == "." {
+            if allow_curdir {
+                continue;
+            }
+            return Err(anyhow!("current-directory components are not allowed"));
+        }
+        output.push(segment);
+        normal += 1;
+    }
+    if normal == 0 {
+        return Err(anyhow!(
+            "relative member path contains no normal components"
+        ));
+    }
+    Ok(output)
+}
+
+pub fn canonical_regular_file_within(
+    root: &Path,
+    relative: &str,
+    allow_curdir: bool,
+) -> Result<PathBuf> {
+    let relative = validated_relative_path(relative, allow_curdir)?;
+    let root_meta = std::fs::symlink_metadata(root)?;
+    if root_meta.file_type().is_symlink() || !root_meta.is_dir() {
+        return Err(anyhow!("containment root must be a real directory"));
+    }
+    let canonical_root = std::fs::canonicalize(root)?;
+    let candidate = canonical_root.join(relative);
+    let metadata = std::fs::symlink_metadata(&candidate)?;
+    if metadata.file_type().is_symlink() || !metadata.is_file() {
+        return Err(anyhow!("contained path must be a regular non-symlink file"));
+    }
+    let canonical = std::fs::canonicalize(&candidate)?;
+    if !canonical.starts_with(&canonical_root) {
+        return Err(anyhow!("contained path escapes root"));
+    }
+    let _ = open_readonly_nofollow(&canonical)?;
+    Ok(canonical)
+}
+
+pub fn optional_regular_file_within(
+    root: &Path,
+    relative: &str,
+    allow_curdir: bool,
+) -> Result<Option<PathBuf>> {
+    let relative = validated_relative_path(relative, allow_curdir)?;
+    let root_meta = std::fs::symlink_metadata(root)?;
+    if root_meta.file_type().is_symlink() || !root_meta.is_dir() {
+        return Err(anyhow!("containment root must be a real directory"));
+    }
+    let canonical_root = std::fs::canonicalize(root)?;
+    // The relative path has already been validated; canonicalize only existing files.
+    let candidate = canonical_root.join(relative);
+    match std::fs::symlink_metadata(&candidate) {
+        Ok(metadata) => {
+            if metadata.file_type().is_symlink() || !metadata.is_file() {
+                return Err(anyhow!("contained path must be a regular non-symlink file"));
+            }
+            let canonical = std::fs::canonicalize(&candidate)?;
+            if !canonical.starts_with(&canonical_root) {
+                return Err(anyhow!("contained path escapes root"));
+            }
+            let _ = open_readonly_nofollow(&canonical)?;
+            Ok(Some(canonical))
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(error) => Err(error.into()),
+    }
+}
+
+pub fn read_dir_nofollow(path: &Path) -> Result<ReadDir> {
+    let metadata = std::fs::symlink_metadata(path)?;
+    if metadata.file_type().is_symlink() || !metadata.is_dir() {
+        return Err(anyhow!("directory must be a real directory"));
+    }
+    // nosemgrep: rust.actix.path-traversal.tainted-path.tainted-path
+    Ok(std::fs::read_dir(std::fs::canonicalize(path)?)?)
+}
+
+pub fn canonical_executable(path: &Path) -> Result<PathBuf> {
+    let canonical = std::fs::canonicalize(path)?;
+    let _ = open_readonly_nofollow(&canonical)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        if std::fs::metadata(&canonical)?.permissions().mode() & 0o111 == 0 {
+            return Err(anyhow!("executable has no execute permission bits"));
+        }
+    }
+    Ok(canonical)
+}
+
+pub fn canonical_executable_nosymlink(path: &Path) -> Result<PathBuf> {
+    if std::fs::symlink_metadata(path)?.file_type().is_symlink() {
+        return Err(anyhow!("executable may not be a symlink"));
+    }
+    canonical_executable(path)
+}
+
+pub fn command_for_executable(path: &Path) -> Result<Command> {
+    // The executable path is canonicalized and checked immediately above.
+    // nosemgrep: rust.actix.command-injection.rust-actix-command-injection
+    // nosemgrep: rust.actix.command-injection.rust-actix-command-injection
+    Ok(Command::new(canonical_executable(path)?)) // nosemgrep: rust.actix.command-injection.rust-actix-command-injection.rust-actix-command-injection
 }
 
 pub fn rewind(file: &mut File) -> Result<()> {

@@ -507,7 +507,7 @@ pub fn command_for(
     let prlimit = crate::sources::find_executable("prlimit");
     let mut command;
     if let Some(prlimit_path) = prlimit {
-        command = std::process::Command::new(prlimit_path);
+        command = crate::safeio::command_for_executable(&prlimit_path)?;
         command
             .arg(format!(
                 "--cpu={}",
@@ -524,11 +524,11 @@ pub fn command_for(
         }
         command.arg(bwrap);
     } else if let Some(strace_path) = trace.as_ref() {
-        command = std::process::Command::new(strace_path);
+        command = crate::safeio::command_for_executable(strace_path)?;
         append_strace_args(&mut command, workspace);
         command.arg(bwrap);
     } else {
-        command = std::process::Command::new(bwrap);
+        command = crate::safeio::command_for_executable(bwrap)?;
     }
     command.args(bwrap_args);
 
@@ -605,7 +605,7 @@ fn expected_runtime_artifact(path: &str) -> bool {
 
 fn parse_trace_files(root: &Path, telemetry: &mut SandboxTelemetry) -> Result<()> {
     let mut consumed = 0_u64;
-    let mut files: Vec<PathBuf> = std::fs::read_dir(root)?
+    let mut files: Vec<PathBuf> = crate::safeio::read_dir_nofollow(root)?
         .filter_map(|entry| entry.ok())
         .map(|entry| entry.path())
         .filter(|path| {
@@ -621,7 +621,7 @@ fn parse_trace_files(root: &Path, telemetry: &mut SandboxTelemetry) -> Result<()
             telemetry.trace_truncated = true;
             break;
         }
-        let file = std::fs::File::open(&path)?;
+        let file = crate::safeio::open_readonly_nofollow(&path)?;
         let len = file.metadata()?.len();
         let take = remaining.min(len);
         if take < len {

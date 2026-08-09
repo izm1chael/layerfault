@@ -2,7 +2,6 @@ use crate::sources;
 use serde::Serialize;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 #[derive(Debug, Clone, Serialize)]
 pub struct DoctorCheck {
@@ -315,7 +314,9 @@ if touch "$marker" >/dev/null 2>&1; then
 fi
 awk -F: 'NR > 2 { gsub(/[[:space:]]/, "", $1); if ($1 != "lo") exit 42 }' /proc/net/dev
 "#;
-        let output = Command::new(path)
+        let mut command = crate::safeio::command_for_executable(path)
+            .map_err(|error| format!("invalid bubblewrap executable: {error}"))?;
+        let output = command
             .args([
                 "--unshare-net",
                 "--unshare-pid",
@@ -374,7 +375,11 @@ fn managed_python_runtime() -> Option<PathBuf> {
 }
 
 fn python_ml_runtime_ready(path: &Path) -> bool {
-    Command::new(path)
+    let mut command = match crate::safeio::command_for_executable(path) {
+        Ok(command) => command,
+        Err(_) => return false,
+    };
+    command
         .args([
             "-c",
             "import torch, transformers, peft, safetensors; print('ok')",

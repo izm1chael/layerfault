@@ -216,6 +216,7 @@ pub fn snapshot_package_from_report(
     path: &Path,
     report: &crate::package::PackageReport,
 ) -> Result<ModelSnapshot> {
+    // nosemgrep: rust.actix.path-traversal.tainted-path.tainted-path
     let canonical_root = PathBuf::from(&report.root);
     let mut members = Vec::with_capacity(report.files.len());
     let mut components = BTreeMap::<String, String>::new();
@@ -233,12 +234,12 @@ pub fn snapshot_package_from_report(
     }
     members.sort_by(|a, b| a.relative_path.cmp(&b.relative_path));
 
-    let config = read_optional_json(&canonical_root.join("config.json"))?;
-    let generation_json = read_optional_json(&canonical_root.join("generation_config.json"))?;
-    let tokenizer_json = read_optional_json(&canonical_root.join("tokenizer.json"))?;
-    let tokenizer_cfg = read_optional_json(&canonical_root.join("tokenizer_config.json"))?;
-    let special_tokens = read_optional_json(&canonical_root.join("special_tokens_map.json"))?;
-    let adapter_cfg = read_optional_json(&canonical_root.join("adapter_config.json"))?;
+    let config = read_optional_json_within(&canonical_root, "config.json")?;
+    let generation_json = read_optional_json_within(&canonical_root, "generation_config.json")?;
+    let tokenizer_json = read_optional_json_within(&canonical_root, "tokenizer.json")?;
+    let tokenizer_cfg = read_optional_json_within(&canonical_root, "tokenizer_config.json")?;
+    let special_tokens = read_optional_json_within(&canonical_root, "special_tokens_map.json")?;
+    let adapter_cfg = read_optional_json_within(&canonical_root, "adapter_config.json")?;
 
     let architecture = architecture_from_config(config.as_ref());
     let tokenizer = tokenizer_from_package(
@@ -266,7 +267,8 @@ pub fn snapshot_package_from_report(
         .map(|entry| entry.relative_path.clone())
         .collect();
     if model_files.len() == 1 {
-        let model_path = canonical_root.join(&model_files[0]);
+        let model_path =
+            crate::safeio::canonical_regular_file_within(&canonical_root, &model_files[0], false)?;
         let mut child = snapshot_artifact(&model_path)?;
         format = child.format;
         artifact_sha = child.identity.artifact_sha256.take();
@@ -294,7 +296,8 @@ pub fn snapshot_package_from_report(
     } else {
         // Aggregate all standalone safetensors shard inventories by name.
         for rel in &model_files {
-            let model_path = canonical_root.join(rel);
+            let model_path =
+                crate::safeio::canonical_regular_file_within(&canonical_root, rel, false)?;
             if model_path
                 .extension()
                 .and_then(|v| v.to_str())
@@ -693,6 +696,13 @@ fn read_optional_json(path: &Path) -> Result<Option<Value>> {
     let value = serde_json::from_slice(&bytes)
         .with_context(|| format!("invalid JSON in '{}'", path.display()))?;
     Ok(Some(value))
+}
+
+fn read_optional_json_within(root: &Path, relative: &str) -> Result<Option<Value>> {
+    let Some(path) = crate::safeio::optional_regular_file_within(root, relative, false)? else {
+        return Ok(None);
+    };
+    read_optional_json(&path)
 }
 
 fn read_bounded(path: &Path, cap: u64) -> Result<Vec<u8>> {

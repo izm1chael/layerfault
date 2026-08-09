@@ -257,18 +257,13 @@ pub fn discover_safetensors_weight_set(path: &Path) -> Result<Option<WeightSetDe
         }
         let mut files = Vec::with_capacity(names.len());
         for name in names {
-            let candidate = root.join(&name);
+            let candidate = crate::safeio::canonical_regular_file_within(&root, &name, false)?;
             let metadata = std::fs::symlink_metadata(&candidate)
                 .with_context(|| format!("Safetensors shard '{name}' is missing"))?;
             if metadata.file_type().is_symlink() || !metadata.is_file() {
                 bail!("Safetensors shard '{name}' is not an ordinary regular file");
             }
-            let canonical = candidate.canonicalize()?;
-            if !canonical.starts_with(&root) {
-                bail!("Safetensors shard '{name}' resolves outside the package directory");
-            }
-            let _ = crate::safeio::open_readonly_nofollow(&candidate)?;
-            files.push(canonical);
+            files.push(candidate);
         }
         return Ok(Some(WeightSetDescriptor {
             layout: "SHARDED_SAFETENSORS".to_owned(),
@@ -281,36 +276,21 @@ pub fn discover_safetensors_weight_set(path: &Path) -> Result<Option<WeightSetDe
         "adapter_model.safetensors",
         "adapter.safetensors",
     ] {
-        let candidate = root.join(name);
+        let candidate = crate::safeio::canonical_regular_file_within(&root, name, false)?;
         if candidate.exists() {
-            let metadata = std::fs::symlink_metadata(&candidate)?;
-            if metadata.file_type().is_symlink() || !metadata.is_file() {
-                bail!(
-                    "Safetensors member '{}' is not an ordinary regular file",
-                    candidate.display()
-                );
-            }
-            let canonical = candidate.canonicalize()?;
-            if !canonical.starts_with(&root) {
-                bail!(
-                    "Safetensors member '{}' escapes the package directory",
-                    candidate.display()
-                );
-            }
-            let _ = crate::safeio::open_readonly_nofollow(&candidate)?;
             return Ok(Some(WeightSetDescriptor {
                 layout: if name.starts_with("adapter") {
                     "LORA_ADAPTER_SAFETENSORS".to_owned()
                 } else {
                     "PACKAGE_SAFETENSORS".to_owned()
                 },
-                files: vec![canonical],
+                files: vec![candidate],
             }));
         }
     }
 
     let mut files = Vec::new();
-    for entry in std::fs::read_dir(&root)? {
+    for entry in crate::safeio::read_dir_nofollow(&root)? {
         let entry = entry?;
         let file_type = entry.file_type()?;
         let candidate = entry.path();

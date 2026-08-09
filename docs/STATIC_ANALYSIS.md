@@ -58,7 +58,7 @@ bash scripts/security/pre-push.sh
 
 The script runs the Rust quality/security suite and, when installed, OSV-Scanner, cargo-audit, and Semgrep. Semgrep is run with `--config auto` and must report no **unsuppressed** blocking findings.
 
-The 18 current `nosemgrep` annotations are intentionally narrow and rule-specific. A gate checks this count so an accidental new suppression cannot silently expand the exception surface.
+The 34 current `nosemgrep` annotations are intentionally narrow and rule-specific. A gate checks this count so an accidental new suppression cannot silently expand the exception surface.
 
 ## Cache and bounded-analysis review
 

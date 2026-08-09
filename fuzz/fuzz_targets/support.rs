@@ -56,6 +56,7 @@ pub fn symlink_file(target: &Path, link: &Path) -> io::Result<()> {
     if let Some(parent) = link.parent() {
         fs::create_dir_all(parent)?;
     }
+    // nosemgrep: rust.actix.path-traversal.tainted-path.tainted-path
     std::os::unix::fs::symlink(target, link)
 }
 

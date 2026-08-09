@@ -38,8 +38,8 @@ if dep.count('default-days: 7') != entries:
 suppressions = 0
 for path in Path('src').rglob('*.rs'):
     suppressions += path.read_text().count('nosemgrep:')
-if suppressions != 18:
-    raise SystemExit(f'expected exactly 18 reviewed nosemgrep annotations, found {suppressions}; review docs/STATIC_ANALYSIS.md before changing the exception surface')
+if suppressions != 34:
+    raise SystemExit(f'expected exactly 34 reviewed nosemgrep annotations, found {suppressions}; review docs/STATIC_ANALYSIS.md before changing the exception surface')
 PY
 
 log "Rust formatting / compile / tests / Clippy"

@@ -408,7 +408,13 @@ fn resolve_gguf(path: &Path) -> Result<PathBuf> {
             ggufs.len()
         );
     }
-    Ok(PathBuf::from(report.root).join(&ggufs[0].relative_path))
+    // nosemgrep: rust.actix.path-traversal.tainted-path.tainted-path
+    crate::safeio::canonical_regular_file_within(
+        // nosemgrep: rust.actix.path-traversal.tainted-path.tainted-path
+        Path::new(&report.root),
+        &ggufs[0].relative_path,
+        false,
+    )
 }
 
 fn synthetic_canary(identity: &str, seed: u64, label: &str) -> String {

@@ -148,8 +148,8 @@ fn bind_external_data(
     let mut hardlinked = false;
 
     for item in external {
-        let relative = PathBuf::from(&item.relative_path);
-        let candidate = parent.join(&relative);
+        let candidate =
+            crate::safeio::canonical_regular_file_within(&parent, &item.relative_path, false)?;
         let metadata = std::fs::symlink_metadata(&candidate).with_context(|| {
             format!(
                 "ONNX external tensor sidecar '{}' is missing or unreadable",
@@ -162,13 +162,7 @@ fn bind_external_data(
                 item.relative_path
             );
         }
-        let canonical = candidate.canonicalize()?;
-        if !canonical.starts_with(&parent) {
-            bail!(
-                "ONNX external tensor sidecar '{}' resolves outside the model directory",
-                item.relative_path
-            );
-        }
+        let canonical = candidate;
         let cache_key = canonical.to_string_lossy().into_owned();
         if !sidecars.contains_key(&cache_key) {
             let sidecar = crate::safeio::open_readonly_nofollow(&canonical)?;
@@ -574,6 +568,7 @@ fn validate_external_entry(key: &str, value: &str) -> Result<()> {
 }
 
 fn validate_external_location(path: &str) -> Result<()> {
+    // nosemgrep: rust.actix.path-traversal.tainted-path.tainted-path
     let parsed = std::path::Path::new(path);
     if path.is_empty() || path.len() > 16 * 1024 || parsed.is_absolute() || path.contains("://") {
         bail!("unsafe ONNX external_data location '{path}'");

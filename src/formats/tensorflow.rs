@@ -89,7 +89,7 @@ pub fn inspect_checkpoint(path: &Path, _file: &File, len: u64) -> Result<TensorF
 
     let prefix = format!("{stem}.data-");
     let mut shards = 0usize;
-    for entry in std::fs::read_dir(parent)? {
+    for entry in crate::safeio::read_dir_nofollow(parent)? {
         let entry = entry?;
         let meta = entry.file_type()?;
         if meta.is_symlink() {

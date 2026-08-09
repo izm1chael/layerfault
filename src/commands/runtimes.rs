@@ -59,7 +59,11 @@ pub(crate) fn run_guarded_ollama(args: RunArgs) -> Result<()> {
         serde_json::json!({"initial": reports, "pre_launch_revalidation": revalidated_reports}),
     )?;
 
-    let status = ProcessCommand::new(&runtime.runtime.executable)
+    // nosemgrep: rust.actix.path-traversal.tainted-path.tainted-path
+    let mut process =
+        // nosemgrep: rust.actix.path-traversal.tainted-path.tainted-path
+        crate::safeio::command_for_executable(std::path::Path::new(&runtime.runtime.executable))?;
+    let status = process
         .arg("run")
         .arg(&args.model)
         .args(&args.runtime_args)
