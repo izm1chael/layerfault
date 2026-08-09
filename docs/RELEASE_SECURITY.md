@@ -7,8 +7,8 @@ cargo fmt --all -- --check
 cargo check --locked --all-targets
 cargo test --locked --all-targets
 cargo clippy --locked --all-targets --all-features -- -D warnings
-bash scripts/security-gates.sh
-python3 scripts/schema-gates.py --binary target/debug/layerfault
+bash scripts/security/gates.sh
+python3 scripts/security/schema-gates.py --binary target/debug/layerfault
 ```
 
 CI additionally runs a pinned `cargo-audit` release against the current RustSec advisory database.
@@ -30,7 +30,7 @@ The workflow does not label a single-host-architecture macOS executable as unive
 - External GitHub Actions are referenced by immutable commit IDs with the human release version in a comment.
 - Release builds use `Cargo.lock`.
 - Each binary is accompanied by SHA-256 checksums.
-- `scripts/cargo-sbom.py` creates a local CycloneDX 1.7 dependency SBOM from `Cargo.lock` without installing an extra generator.
+- `scripts/build/sbom.py` creates a local CycloneDX 1.7 dependency SBOM from `Cargo.lock` without installing an extra generator.
 - GitHub artifact attestations provide build provenance for generated binaries.
 - Layerfault's model attestations and GitHub's build attestations are separate trust domains.
 

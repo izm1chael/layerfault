@@ -1,14 +1,14 @@
 .TH LAYERFAULT 1
 .SH NAME
-layerfault \- offline-first local AI model admission and supply-chain security
+layerfault \- offline-first local AI model admission and behavioural security
 .SH SYNOPSIS
 .B layerfault
 <command> [options]
 .SH DESCRIPTION
-Layerfault validates local model artifact structure, model-store integrity, provenance, trust and operator policy before admission or execution. Supported local artifact formats include GGUF and Safetensors. Ollama is the deepest runtime integration; LM Studio, llama.cpp and the local Hugging Face cache are supported through narrow adapters.
+Layerfault validates local AI model artifacts, packages, datasets, provenance, trust, runtime advisories and operator policy before admission or execution. On Linux, supported models can optionally be exercised inside a Bubblewrap sandbox for behavioural and runtime-side-effect evidence. Static scanning does not require an ML runtime.
 .SH COMMANDS
-scan, inspect, verify-file, scan-dir, verify, run, import, serve, trust, attest, audit, baseline, quarantine, policy, gc, doctor, sources, explain, diff, selftest, certify, version.
+scan, inspect, verify-file, scan-dir, fingerprint, verify-package, pipeline, verify, run, import, serve, trust, attest, audit, baseline, quarantine, policy, gc, doctor, capabilities, sources, explain, diff, compare, behaviour, compare-behaviour, review, models, drift, lineage, dataset, research, hub, platform, selftest, certify, advisories, evidence, version.
 .SH SECURITY
-Integrity, structural, scanner-error and invalid/revoked provenance failures are not operator-overridable. See THREATS.md and docs/.
+Integrity, malformed-structure, scanner-error and invalid/revoked provenance failures are not operator-overridable. Active analysis is a hostile-code lab feature, not a proof of benign behaviour; run layerfault doctor and layerfault capabilities before active execution. See THREATS.md, SECURITY.md and docs/.
 .SH COMPLETIONS
-Shell completion files are shipped under completions/. Regenerate them and this page after CLI changes with scripts/generate-cli-assets.sh.
+Shell completion files are shipped under completions/. Regenerate them and this page after CLI changes with scripts/build/cli-assets.sh.

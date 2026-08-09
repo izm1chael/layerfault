@@ -53,7 +53,7 @@ The transactional cleanup installer updates `Cargo.lock` to those resolved versi
 Run:
 
 ```bash
-bash scripts/pre-push-security-gates.sh
+bash scripts/security/pre-push.sh
 ```
 
 The script runs the Rust quality/security suite and, when installed, OSV-Scanner, cargo-audit, and Semgrep. Semgrep is run with `--config auto` and must report no **unsuppressed** blocking findings.

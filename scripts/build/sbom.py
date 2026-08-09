@@ -6,7 +6,7 @@ try:
     import tomllib
 except ImportError as exc:
     raise SystemExit("Python 3.11+ is required for tomllib") from exc
-root=pathlib.Path(__file__).resolve().parents[1]
+root=pathlib.Path(__file__).resolve().parents[2]
 lock=tomllib.loads((root/"Cargo.lock").read_text())
 manifest=tomllib.loads((root/"Cargo.toml").read_text())
 pkg=manifest["package"]

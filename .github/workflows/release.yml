@@ -1,190 +1,265 @@
-name: Release provenance
+name: Distribution dry run
 
 on:
-  push:
-    tags:
-      - "v*"
   workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to build (for example 1.0.0-rc.2)"
+        required: true
+        default: "1.0.0-rc.1"
+        type: string
+      publish:
+        description: "Publish a GitHub Release (also requires LAYERFAULT_RELEASE_PUBLISH_ENABLED=true)"
+        required: true
+        default: false
+        type: boolean
 
 permissions:
   contents: read
   id-token: write
   attestations: write
 
+concurrency:
+  group: distribution-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  NFPM_VERSION: v2.47.0
+  RELEASE_VERSION: ${{ inputs.version }}
+
 jobs:
   gate:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: Toolchain
+      - name: Verify requested version matches Cargo.toml
         run: |
-          rustup show active-toolchain
-      - name: Release security gate
+          python3 - <<'PY2'
+          import os, tomllib
+          with open("Cargo.toml", "rb") as handle:
+              cargo = tomllib.load(handle)["package"]["version"]
+          requested = os.environ["RELEASE_VERSION"].removeprefix("v")
+          if cargo != requested:
+              raise SystemExit(f"requested release version {requested} does not match Cargo.toml {cargo}")
+          PY2
+      - name: Full release gate
+        run: bash scripts/security/pre-push.sh
+      - name: Installer/config syntax
         run: |
-          cargo fmt --all -- --check
-          cargo check --locked --all-targets
-          cargo test --locked --all-targets
-          cargo clippy --locked --all-targets --all-features -- -D warnings
-          bash scripts/security-gates.sh
-          python3 scripts/schema-gates.py --binary target/debug/layerfault
+          bash -n install.sh
+          bash -n scripts/install/active-runtime.sh
+          bash -n scripts/install/uninstall.sh
+          bash -n scripts/package/release.sh
+          bash -n scripts/package/smoke.sh
+          bash -n scripts/build/linux-release.sh
+          bash -n scripts/package/distribution-dry-run.sh
+          python3 -m py_compile scripts/package/generate-homebrew-formula.py
 
-  native:
+  linux:
     needs: gate
     strategy:
       fail-fast: false
       matrix:
         include:
-          - os: ubuntu-latest
-            artifact: layerfault-linux-x86_64
-            source: target/release/layerfault
-          - os: ubuntu-24.04-arm
-            artifact: layerfault-linux-aarch64
-            source: target/release/layerfault
-          - os: windows-latest
-            artifact: layerfault-windows-x86_64.exe
-            source: target/release/layerfault.exe
-    runs-on: ${{ matrix.os }}
+          - runner: ubuntu-latest
+            arch: amd64
+          - runner: ubuntu-24.04-arm
+            arch: arm64
+    runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: Toolchain
-        shell: bash
+      - name: Build GNU and musl release binaries
         run: |
-          rustup show active-toolchain
-      - name: Build
-        run: cargo build --release --locked
-      - name: Stage artifact, checksum and SBOM
-        shell: bash
+          mkdir -p dist/build
+          bash scripts/build/linux-release.sh gnu "$(pwd)/dist/build/layerfault-gnu"
+          bash scripts/build/linux-release.sh musl "$(pwd)/dist/build/layerfault-musl"
+          dist/build/layerfault-gnu --version
+          docker run --rm -v "$PWD/dist/build:/dist:ro" almalinux:9 /dist/layerfault-gnu selftest --json >/dev/null
+          docker run --rm -v "$PWD/dist/build:/dist:ro" alpine:3.21 /dist/layerfault-musl selftest --json >/dev/null
+      - name: Install nFPM
         run: |
-          mkdir -p dist
-          cp "${{ matrix.source }}" "dist/${{ matrix.artifact }}"
-          python3 scripts/cargo-sbom.py "dist/${{ matrix.artifact }}.sbom.cdx.json"
-          if command -v sha256sum >/dev/null 2>&1; then
-            (cd dist && sha256sum "${{ matrix.artifact }}" "${{ matrix.artifact }}.sbom.cdx.json" > "${{ matrix.artifact }}.sha256")
-          else
-            (cd dist && shasum -a 256 "${{ matrix.artifact }}" "${{ matrix.artifact }}.sbom.cdx.json" > "${{ matrix.artifact }}.sha256")
+          mkdir -p "$RUNNER_TEMP/bin"
+          echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
+          GOBIN="$RUNNER_TEMP/bin" go install github.com/goreleaser/nfpm/v2/cmd/nfpm@${NFPM_VERSION}
+      - name: Build native Linux packages
+        run: |
+          bash scripts/build/cli-assets.sh "$(pwd)" "$(pwd)/dist/build/layerfault-gnu"
+          mkdir -p dist/root-gnu dist/root-musl
+          cp dist/build/layerfault-gnu dist/root-gnu/layerfault
+          cp dist/build/layerfault-musl dist/root-musl/layerfault
+          gnu_formats="deb rpm"
+          if [[ "${{ matrix.arch }}" == "amd64" ]]; then gnu_formats="$gnu_formats archlinux"; fi
+          LAYERFAULT_PACKAGE_FORMATS="$gnu_formats" bash scripts/package/release.sh "${RELEASE_VERSION}" "${{ matrix.arch }}" "$(pwd)/dist/root-gnu/layerfault" dist
+          LAYERFAULT_PACKAGE_FORMATS="apk" bash scripts/package/release.sh "${RELEASE_VERSION}" "${{ matrix.arch }}" "$(pwd)/dist/root-musl/layerfault" dist
+          tar -C dist/root-musl -czf "dist/layerfault-linux-${{ matrix.arch }}.tar.gz" layerfault
+          python3 scripts/build/sbom.py "dist/layerfault-linux-${{ matrix.arch }}.sbom.cdx.json"
+      - name: Smoke native packages on supported baselines
+        run: |
+          set -euo pipefail
+          docker run --rm -v "$PWD/dist:/dist:ro" ubuntu:22.04 bash -lc 'apt-get update >/dev/null && apt-get install -y /dist/layerfault-linux-${{ matrix.arch }}.deb >/dev/null && layerfault --version && layerfault selftest --json >/dev/null'
+          docker run --rm -v "$PWD/dist:/dist:ro" debian:12 bash -lc 'apt-get update >/dev/null && apt-get install -y /dist/layerfault-linux-${{ matrix.arch }}.deb >/dev/null && layerfault --version && layerfault selftest --json >/dev/null'
+          docker run --rm -v "$PWD/dist:/dist:ro" almalinux:9 bash -lc 'dnf install -y /dist/layerfault-linux-${{ matrix.arch }}.rpm >/dev/null && layerfault --version && layerfault selftest --json >/dev/null'
+          docker run --rm -v "$PWD/dist:/dist:ro" alpine:3.21 sh -lc 'apk add --allow-untrusted /dist/layerfault-linux-${{ matrix.arch }}.apk >/dev/null && layerfault --version && layerfault selftest --json >/dev/null'
+          if [[ "${{ matrix.arch }}" == "amd64" ]]; then
+            docker run --rm -v "$PWD/dist:/dist:ro" archlinux:latest bash -lc 'pacman -Sy --noconfirm >/dev/null && pacman -U --noconfirm /dist/layerfault-linux-amd64.pkg.tar.zst >/dev/null && layerfault --version && layerfault selftest --json >/dev/null'
           fi
-      - name: Attest build provenance
+          docker run --rm -v "$PWD/dist/root-musl:/portable:ro" alpine:3.21 /portable/layerfault selftest --json >/dev/null
+          docker run --rm -v "$PWD/dist/root-musl:/portable:ro" ubuntu:22.04 /portable/layerfault selftest --json >/dev/null
+      - name: Checksums
+        run: (cd dist && sha256sum layerfault-linux-${{ matrix.arch }}* > SHA256SUMS-linux-${{ matrix.arch }})
+      - name: Attest Linux artifacts
         uses: actions/attest@508db95dd578ae2727ebd6217d5ba78e4fbda05d # v4.2.1
         with:
-          subject-path: dist/${{ matrix.artifact }}
+          subject-path: dist/layerfault-linux-${{ matrix.arch }}.*
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: ${{ matrix.artifact }}
-          path: dist/
+          name: linux-${{ matrix.arch }}
+          path: dist/layerfault-linux-${{ matrix.arch }}*
 
-  linux-static:
-    needs: gate
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: Toolchain and musl
-        run: |
-          rustup show active-toolchain
-          rustup target add x86_64-unknown-linux-musl
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends musl-tools
-      - name: Build static Linux binary
-        run: cargo build --release --locked --target x86_64-unknown-linux-musl
-      - name: Stage
-        run: |
-          mkdir -p dist
-          cp target/x86_64-unknown-linux-musl/release/layerfault dist/layerfault-linux-x86_64-musl
-          python3 scripts/cargo-sbom.py dist/layerfault-linux-x86_64-musl.sbom.cdx.json
-          (cd dist && sha256sum layerfault-linux-x86_64-musl layerfault-linux-x86_64-musl.sbom.cdx.json > layerfault-linux-x86_64-musl.sha256)
-      - uses: actions/attest@508db95dd578ae2727ebd6217d5ba78e4fbda05d # v4.2.1
-        with:
-          subject-path: dist/layerfault-linux-x86_64-musl
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: layerfault-linux-x86_64-musl
-          path: dist/
-
-  macos-universal:
+  macos:
     needs: gate
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: Toolchain
+      - name: Build universal binary
         run: |
-          rustup show active-toolchain
           rustup target add aarch64-apple-darwin x86_64-apple-darwin
-      - name: Build both macOS architectures
-        run: |
           cargo build --release --locked --target aarch64-apple-darwin
           cargo build --release --locked --target x86_64-apple-darwin
-          mkdir -p dist
-          lipo -create \
-            target/aarch64-apple-darwin/release/layerfault \
-            target/x86_64-apple-darwin/release/layerfault \
-            -output dist/layerfault-macos-universal
-          lipo -info dist/layerfault-macos-universal
-          python3 scripts/cargo-sbom.py dist/layerfault-macos-universal.sbom.cdx.json
-          (cd dist && shasum -a 256 layerfault-macos-universal layerfault-macos-universal.sbom.cdx.json > layerfault-macos-universal.sha256)
+          mkdir -p dist/root/usr/local/bin dist/pkgroot/usr/local/bin
+          lipo -create target/aarch64-apple-darwin/release/layerfault target/x86_64-apple-darwin/release/layerfault -output dist/root/usr/local/bin/layerfault
+          cp dist/root/usr/local/bin/layerfault dist/pkgroot/usr/local/bin/layerfault
+          tar -C dist/root/usr/local/bin -czf dist/layerfault-macos-universal.tar.gz layerfault
+          pkgbuild --root dist/pkgroot --identifier com.layerfault.cli --version "${RELEASE_VERSION}" --install-location / dist/layerfault-macos-universal.unsigned.pkg
+          python3 scripts/build/sbom.py dist/layerfault-macos-universal.sbom.cdx.json
+          dist/root/usr/local/bin/layerfault --version
+          dist/root/usr/local/bin/layerfault selftest --json >/dev/null
+          (cd dist && shasum -a 256 layerfault-macos-universal* > SHA256SUMS-macos)
       - uses: actions/attest@508db95dd578ae2727ebd6217d5ba78e4fbda05d # v4.2.1
         with:
-          subject-path: dist/layerfault-macos-universal
+          subject-path: |
+            dist/layerfault-macos-universal.tar.gz
+            dist/layerfault-macos-universal.unsigned.pkg
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: layerfault-macos-universal
-          path: dist/
+          name: macos-universal
+          path: |
+            dist/layerfault-macos-universal*
+            dist/SHA256SUMS-macos
 
+  windows:
+    needs: gate
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: windows-latest
+            target: x86_64-pc-windows-msvc
+            arch: amd64
+          - runner: windows-11-arm
+            target: aarch64-pc-windows-msvc
+            arch: arm64
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Build
+        shell: bash
+        run: |
+          rustup target add "${{ matrix.target }}"
+          cargo build --release --locked --target "${{ matrix.target }}"
+          mkdir -p dist/root
+          cp "target/${{ matrix.target }}/release/layerfault.exe" dist/root/layerfault.exe
+      - name: ZIP
+        shell: pwsh
+        run: Compress-Archive -Path dist/root/layerfault.exe -DestinationPath dist/layerfault-windows-${{ matrix.arch }}.zip -Force
+      - name: Smoke native binary
+        shell: pwsh
+        run: |
+          ./dist/root/layerfault.exe --version
+          ./dist/root/layerfault.exe selftest --json | Out-Null
+      - name: Install nFPM and prepare unsigned MSIX
+        shell: bash
+        run: |
+          mkdir -p "$RUNNER_TEMP/bin"
+          export GOBIN="$RUNNER_TEMP/bin"
+          export PATH="$GOBIN:$PATH"
+          go install github.com/goreleaser/nfpm/v2/cmd/nfpm@${NFPM_VERSION}
+          export LAYERFAULT_PACKAGE_VERSION="${RELEASE_VERSION}"
+          export LAYERFAULT_PACKAGE_ARCH="${{ matrix.arch }}"
+          export LAYERFAULT_PACKAGE_BINARY="$(pwd)/dist/root/layerfault.exe"
+          nfpm package -f packaging/windows/nfpm-msix.yaml -p msix -t "dist/layerfault-windows-${{ matrix.arch }}.unsigned.msix"
+      - name: Checksums
+        shell: pwsh
+        run: |
+          Get-ChildItem dist/layerfault-windows-${{ matrix.arch }}* | Get-FileHash -Algorithm SHA256 | ForEach-Object { "$($_.Hash.ToLower())  $([IO.Path]::GetFileName($_.Path))" } | Set-Content dist/SHA256SUMS-windows-${{ matrix.arch }}
+      - uses: actions/attest@508db95dd578ae2727ebd6217d5ba78e4fbda05d # v4.2.1
+        with:
+          subject-path: dist/layerfault-windows-${{ matrix.arch }}*
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: windows-${{ matrix.arch }}
+          path: |
+            dist/layerfault-windows-${{ matrix.arch }}*
+            dist/SHA256SUMS-windows-${{ matrix.arch }}
 
-  publish-release:
-    if: startsWith(github.ref, 'refs/tags/v')
-    needs: [native, linux-static, macos-universal]
+  assemble:
+    needs: [linux, macos, windows]
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Download built artifacts
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p downloaded release-assets
+          gh run download "$GITHUB_RUN_ID" --dir downloaded
+          find downloaded -type f -print0 | while IFS= read -r -d '' file; do
+            name="$(basename "$file")"
+            [[ "$name" == SHA256SUMS-* ]] && continue
+            if [[ -e "release-assets/$name" ]]; then
+              echo "Duplicate asset name: $name" >&2
+              exit 1
+            fi
+            cp "$file" "release-assets/$name"
+          done
+          cp install.sh install.ps1 scripts/install/active-runtime.sh release-assets/
+          cp packaging/active-requirements.txt release-assets/
+          (cd release-assets && sha256sum * > SHA256SUMS)
+      - name: Generate Homebrew formula artifact
+        run: |
+          sha="$(sha256sum release-assets/layerfault-macos-universal.tar.gz | awk '{print $1}')"
+          url="https://github.com/${GITHUB_REPOSITORY}/releases/download/v${RELEASE_VERSION}/layerfault-macos-universal.tar.gz"
+          python3 scripts/package/generate-homebrew-formula.py --version "${RELEASE_VERSION}" --arm-url "$url" --arm-sha256 "$sha" --intel-url "$url" --intel-sha256 "$sha" --output release-assets/layerfault.rb
+          sha256sum release-assets/layerfault.rb >> release-assets/SHA256SUMS
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-candidate-assets
+          path: release-assets/
+
+  publish:
+    if: ${{ inputs.publish && vars.LAYERFAULT_RELEASE_PUBLISH_ENABLED == 'true' }}
+    needs: assemble
     runs-on: ubuntu-latest
     permissions:
       actions: read
       contents: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: Download artifacts from this workflow run
+      - name: Download exact tested asset bundle
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p release-assets
+          gh run download "$GITHUB_RUN_ID" --name release-candidate-assets --dir release-assets
+      - name: Publish manually approved release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          rm -rf release-download release-assets
-          mkdir -p release-download release-assets
-          gh run download "$GITHUB_RUN_ID" --dir release-download
-          find release-download -type f -print0 | while IFS= read -r -d '' file; do
-            name="$(basename "$file")"
-            if [[ -e "release-assets/$name" ]]; then
-              echo "Duplicate release asset name: $name" >&2
-              exit 1
-            fi
-            cp "$file" "release-assets/$name"
-          done
-          test -n "$(find release-assets -type f -print -quit)"
-      - name: Create GitHub release and attach verified build outputs
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          tag="$GITHUB_REF_NAME"
-          mapfile -d '' assets < <(find release-assets -maxdepth 1 -type f -print0 | sort -z)
-          if [[ ${#assets[@]} -eq 0 ]]; then
-            echo "No release assets were assembled" >&2
-            exit 1
-          fi
-
+          tag="v${RELEASE_VERSION#v}"
           prerelease=()
-          if [[ "$tag" == *-* ]]; then
-            prerelease+=(--prerelease)
-          fi
-
-          notes=()
-          if [[ "$tag" == *rc* && -f RELEASE_NOTES_RC1.md ]]; then
-            notes+=(--notes-file RELEASE_NOTES_RC1.md)
-          else
-            notes+=(--generate-notes)
-          fi
-
-          if gh release view "$tag" >/dev/null 2>&1; then
-            gh release upload "$tag" "${assets[@]}" --clobber
-          else
-            gh release create "$tag" "${assets[@]}" \
-              --verify-tag \
-              --title "Layerfault $tag" \
-              "${prerelease[@]}" \
-              "${notes[@]}"
-          fi
+          [[ "$tag" == *-* ]] && prerelease+=(--prerelease)
+          gh release create "$tag" release-assets/* --target "$GITHUB_SHA" --title "Layerfault $tag" "${prerelease[@]}" --generate-notes

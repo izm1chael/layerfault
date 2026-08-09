@@ -126,7 +126,7 @@ cargo fmt --all -- --check
 cargo check --locked --all-targets
 cargo test --locked --all-targets
 cargo clippy --locked --all-targets --all-features -- -D warnings
-bash scripts/core-security-gates.sh
+bash scripts/security/core-gates.sh
 ```
 
 The synthetic security gate requires no model downloads. It uses a temporary Ollama-format store and a fake `ollama` executable.

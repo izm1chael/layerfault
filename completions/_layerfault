@@ -1,2 +1,2 @@
 #compdef layerfault
-_arguments '1:command:(scan inspect verify-file scan-dir verify run import serve trust attest audit baseline quarantine policy gc doctor sources explain diff selftest certify version)' '*:argument:_files'
+_arguments '1:command:(scan inspect verify-file scan-dir fingerprint verify-package pipeline verify run import serve trust attest audit baseline quarantine policy gc doctor capabilities sources explain diff compare behaviour compare-behaviour review models drift lineage dataset research hub platform selftest certify advisories evidence version)' '*:argument:_files'

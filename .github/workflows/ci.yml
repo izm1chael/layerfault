@@ -39,13 +39,13 @@ jobs:
       - name: Shell/static contracts
         run: |
           bash -n create_poisoned_model.sh
-          bash -n scripts/security-gates.sh
-          bash -n scripts/adversarial-corpus-gate.sh
-          python3 scripts/schema-gates.py
-          python3 scripts/cargo-sbom.py /tmp/layerfault-sbom.cdx.json
+          bash -n scripts/security/gates.sh
+          bash -n scripts/corpus/adversarial-gate.sh
+          python3 scripts/security/schema-gates.py
+          python3 scripts/build/sbom.py /tmp/layerfault-sbom.cdx.json
           python3 -m json.tool /tmp/layerfault-sbom.cdx.json >/dev/null
       - name: Synthetic admission/security gate
-        run: bash scripts/security-gates.sh
+        run: bash scripts/security/gates.sh
 
   dependency-advisories:
     runs-on: ubuntu-latest

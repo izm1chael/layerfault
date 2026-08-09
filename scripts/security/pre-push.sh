@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$ROOT"
 
 log() { printf '\n==> %s\n' "$*"; }
@@ -49,8 +49,8 @@ cargo test --locked --all-targets
 cargo clippy --locked --all-targets --all-features -- -D warnings
 
 log "Layerfault security and schema contracts"
-bash scripts/security-gates.sh
-python3 scripts/schema-gates.py --binary target/debug/layerfault
+bash scripts/security/gates.sh
+python3 scripts/security/schema-gates.py --binary target/debug/layerfault
 
 log "Dependency lock requirements"
 python3 - <<'PY'

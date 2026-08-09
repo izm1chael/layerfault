@@ -3,7 +3,7 @@
 Run from the repository root:
 
 ```bash
-bash scripts/security-gates.sh
+bash scripts/security/gates.sh
 ```
 
 The gate first executes the established Ollama trust/policy/enforcement suite and then exercises the broader development surface with local synthetic fixtures:

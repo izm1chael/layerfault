@@ -4,7 +4,7 @@ set -euo pipefail
 usage() {
   cat <<'USAGE'
 Usage:
-  prepare-lab-active-fixtures.sh [--onnx-model MODEL.onnx --onnx-sidecar SIDE_CAR]
+  prepare-active-fixtures.sh [--onnx-model MODEL.onnx --onnx-sidecar SIDE_CAR]
 
 Checks the local active-analysis dependencies and, when explicit ONNX model and
 sidecar paths are supplied, recreates a genuine external hardlink alias for the

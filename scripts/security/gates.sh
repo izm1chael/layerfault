@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ROOT="${1:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
+ROOT="${1:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
 cd "$ROOT"
 for cmd in cargo python3 openssl; do
   command -v "$cmd" >/dev/null 2>&1 || { echo "SKIP: $cmd is required" >&2; exit 77; }
 done
 
 # Preserve the established Ollama trust/policy/quarantine security contract first.
-bash scripts/core-security-gates.sh "$ROOT"
+bash scripts/security/core-gates.sh "$ROOT"
 cargo build --locked --quiet
 BIN="$ROOT/target/debug/layerfault"
 TMP="$(mktemp -d)"
@@ -209,7 +209,7 @@ PY2
 # Built-in parser/certification and machine-output contracts.
 "$BIN" selftest --json > "$TMP/selftest.json"
 "$BIN" certify --json > "$TMP/certify.json"
-python3 scripts/schema-gates.py --binary "$BIN"
+python3 scripts/security/schema-gates.py --binary "$BIN"
 "$BIN" doctor --json >/dev/null
 "$BIN" sources --json >/dev/null
 "$BIN" version --json >/dev/null
@@ -256,7 +256,7 @@ ORPHAN_PATH="$STORE/blobs/sha256-$(printf orphan | sha256sum | awk '{print $1}')
 [[ ! -e "$ORPHAN_PATH" ]] || { echo "GC execute did not remove demonstrably orphaned blob" >&2; exit 1; }
 
 # SBOM generation is local and deterministic.
-python3 scripts/cargo-sbom.py "$TMP/layerfault-sbom.cdx.json" >/dev/null
+python3 scripts/build/sbom.py "$TMP/layerfault-sbom.cdx.json" >/dev/null
 python3 - "$TMP/layerfault-sbom.cdx.json" <<'PY'
 import json,sys
 x=json.load(open(sys.argv[1])); assert x["bomFormat"]=="CycloneDX" and x["specVersion"]=="1.7"
