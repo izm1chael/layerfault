@@ -201,9 +201,9 @@
       "sha256": "ea34b719f438e153e8746cde9677ca85f1a645076e44240a7bca95e72c70b710"
     },
     {
-      "bytes": 20,
+      "bytes": 25,
       "path": "corpus/heuristics/aws-key.txt",
-      "sha256": "457643f44d19aed85fd756aa50cc0cd6b57376d4e8f5a72f9f85972a522002a3"
+      "sha256": "a0389201aab19d1a4146140f6db940b56af3654e8d2fcebfb55a8222d7a43e40"
     },
     {
       "bytes": 62,
@@ -237,7 +237,7 @@
     },
     {
       "bytes": 44,
-      "path": "corpus/heuristics/nul.bin",
+      "path": "corpus/heuristics/nul-bytes.bin",
       "sha256": "772aec01acdb805d28a16a7defce204dc84854d91de15e910deb0a39fd0aa9be"
     },
     {
