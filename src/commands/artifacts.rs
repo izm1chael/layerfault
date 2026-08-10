@@ -229,15 +229,11 @@ pub(crate) fn run_pipeline(args: PipelineArgs) -> Result<()> {
         &context,
     );
     let scanner_exit = artifact_report_exit(&report);
-    let exit = if scanner_exit != 0 {
-        scanner_exit
-    } else {
-        match decision.action {
-            policy::PolicyAction::Block => 4,
-            policy::PolicyAction::Warn => 1,
-            policy::PolicyAction::Allow => 0,
-        }
-    };
+    let exit = layerfault::decision::SecurityDecision::combine_scanner_and_policy_exit_code(
+        scanner_exit,
+        decision.action == policy::PolicyAction::Block,
+        decision.action == policy::PolicyAction::Warn,
+    );
     let output = pipeline_json(
         &report.path,
         Some(&identity),

@@ -249,10 +249,21 @@ pub fn validate_index(path: &Path, file: &File, file_len: u64) -> Result<(usize,
     if map.is_empty() || map.len() > MAX_TENSORS {
         bail!("weight_map tensor count is outside the supported safety range");
     }
-    let parent = path
-        .parent()
-        .ok_or_else(|| anyhow!("index path has no parent directory"))?;
-    let canonical_parent = std::fs::canonicalize(parent).unwrap_or_else(|_| parent.to_path_buf());
+    // `Path::parent()` returns `Some("")` for a bare relative filename (not
+    // `None`), and `Path::starts_with("")` is trivially true for every path.
+    // Left unhandled, that combination silently disables the symlink-escape
+    // containment check below whenever the index is opened by bare filename.
+    let parent = match path.parent() {
+        None => bail!("index path has no parent directory"),
+        Some(parent) if parent.as_os_str().is_empty() => Path::new("."),
+        Some(parent) => parent,
+    };
+    let canonical_parent = std::fs::canonicalize(parent).with_context(|| {
+        format!(
+            "unable to canonicalize Safetensors index directory '{}'",
+            parent.display()
+        )
+    })?;
     let mut shards = BTreeSet::<String>::new();
     for (tensor, shard) in &map {
         if tensor.is_empty() || tensor.len() > 16 * 1024 {

@@ -441,6 +441,162 @@ fn dataset_poisoning_review_accepts_a_bare_relative_filename() {
 }
 
 #[test]
+fn pipeline_single_artifact_honours_policy_block_over_scanner_warn() {
+    // `pipeline` on a single artifact used to compute its exit code as
+    // `if scanner_exit != 0 { scanner_exit } else { policy-based }` instead
+    // of going through the shared combine helper. A raw HDF5/Keras artifact
+    // always scores a scanner-level WARN (LF-KERAS-HDF5-LIMIT), so a policy
+    // that independently BLOCKs on size (`max_model_bytes`) was silently
+    // downgraded to exit 1 (WARN) instead of exit 4 (BLOCK) -- a human
+    // reading the exit code would believe the artifact merely warranted
+    // review when the operator's policy actually rejected it outright.
+    let root = temp_dir("pipeline-policy-vs-warn");
+    let _ = fs::remove_dir_all(&root);
+    fs::create_dir_all(&root).expect("create dir");
+    let artifact_path = root.join("model.h5");
+    fs::write(&artifact_path, b"not a real hdf5 but nonzero length").expect("write HDF5 fixture");
+    let policy_path = root.join("tiny-policy.json");
+    fs::write(
+        &policy_path,
+        br#"{"version":1,"profile":"workstation","max_model_bytes":1}"#,
+    )
+    .expect("write policy file");
+
+    let output = run(&[
+        "pipeline",
+        artifact_path.to_str().unwrap(),
+        "--policy-file",
+        policy_path.to_str().unwrap(),
+        "--json",
+    ]);
+    assert_eq!(
+        output.status.code(),
+        Some(4),
+        "expected policy BLOCK (exit 4) to win over the scanner WARN; stdout={} stderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let value: Value = serde_json::from_slice(&output.stdout).expect("pipeline JSON");
+    assert_eq!(value["decision"], "BLOCK");
+
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn trust_export_accepts_a_bare_relative_output_filename() {
+    // `paths::write_private` (the shared primitive behind --output/--evidence-out
+    // across many subcommands) used to canonicalize `path.parent()` directly.
+    // For a bare relative filename like "out.json", `parent()` returns
+    // `Some("")` (not `None`), so directory-creation/permission calls on the
+    // empty path failed with an opaque "Unable to secure ''" that never named
+    // the file the user actually asked to write.
+    let root = temp_dir("trust-export-bare-filename");
+    let _ = fs::remove_dir_all(&root);
+    fs::create_dir_all(&root).expect("create dir");
+
+    let output = run_in(&root, &["trust", "export", "--output", "bare-trust.json"]);
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "stdout={} stderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(root.join("bare-trust.json").is_file());
+
+    let _ = fs::remove_dir_all(root);
+}
+
+#[cfg(unix)]
+#[test]
+fn safetensors_index_symlink_escape_is_caught_via_bare_relative_filename() {
+    // Security-relevant, not just cosmetic: `validate_index` canonicalizes
+    // `path.parent()` and falls back to the *unresolved* parent on failure,
+    // then checks `canonical_shard.starts_with(&canonical_parent)` to block
+    // shard symlinks that escape the index directory. `Path::parent()` on a
+    // bare relative index filename returns `Some("")`, canonicalizing ""
+    // fails, and `Path::starts_with("")` is trivially true for every path --
+    // so the escape check was silently disabled for the most natural
+    // invocation (`cd model_dir && layerfault inspect model.safetensors.index.json`).
+    let root = temp_dir("safetensors-symlink-escape");
+    let outside = temp_dir("safetensors-symlink-escape-outside");
+    let _ = fs::remove_dir_all(&root);
+    let _ = fs::remove_dir_all(&outside);
+    fs::create_dir_all(&root).expect("create model dir");
+    fs::create_dir_all(&outside).expect("create outside dir");
+
+    write_safetensors(&outside.join("secret.safetensors"));
+    std::os::unix::fs::symlink(
+        outside.join("secret.safetensors"),
+        root.join("shard.safetensors"),
+    )
+    .expect("create escaping symlink");
+    fs::write(
+        root.join("model.safetensors.index.json"),
+        br#"{"weight_map":{"w":"shard.safetensors"}}"#,
+    )
+    .expect("write index");
+
+    let output = run_in(
+        &root,
+        &["inspect", "model.safetensors.index.json", "--json"],
+    );
+    assert_eq!(
+        output.status.code(),
+        Some(3),
+        "expected the escape to BLOCK; stdout={} stderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let value: Value = serde_json::from_slice(&output.stdout).expect("inspect JSON");
+    let detail = value["results"][0]["detail"].as_str().unwrap_or_default();
+    assert!(
+        detail.contains("resolves outside the index directory"),
+        "expected the escape finding, got detail={detail:?}"
+    );
+
+    let _ = fs::remove_dir_all(root);
+    let _ = fs::remove_dir_all(outside);
+}
+
+#[test]
+fn tensorflow_checkpoint_shards_are_found_via_bare_relative_filename() {
+    // Same `Path::parent()` footgun in checkpoint sibling-shard discovery:
+    // reading "" as a directory fails outright, so a bare relative ".index"
+    // filename used to error instead of finding its sibling data shard.
+    let root = temp_dir("tf-checkpoint-bare-filename");
+    let _ = fs::remove_dir_all(&root);
+    fs::create_dir_all(&root).expect("create dir");
+    fs::write(
+        root.join("model.ckpt.index"),
+        b"not a real TF index, contents unused",
+    )
+    .expect("write checkpoint index");
+    fs::write(
+        root.join("model.ckpt.data-00000-of-00001"),
+        b"not real shard data either",
+    )
+    .expect("write checkpoint shard");
+
+    let output = run_in(&root, &["inspect", "model.ckpt.index", "--json"]);
+    assert_eq!(
+        output.status.code(),
+        Some(1),
+        "stdout={} stderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let value: Value = serde_json::from_slice(&output.stdout).expect("inspect JSON");
+    let detail = value["results"][0]["detail"].as_str().unwrap_or_default();
+    assert!(
+        detail.contains("1 data shard"),
+        "expected the sibling shard to be found, got detail={detail:?}"
+    );
+
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
 fn artifact_json_exposes_cache_diagnostics() {
     let path = temp_dir("cache-diagnostics").with_extension("safetensors");
     let _ = fs::remove_file(&path);

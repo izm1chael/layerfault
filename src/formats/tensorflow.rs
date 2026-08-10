@@ -74,9 +74,14 @@ pub fn inspect_saved_model(file: &File, len: u64) -> Result<TensorFlowSummary> {
 }
 
 pub fn inspect_checkpoint(path: &Path, _file: &File, len: u64) -> Result<TensorFlowSummary> {
-    let parent = path
-        .parent()
-        .ok_or_else(|| anyhow::anyhow!("checkpoint index has no parent"))?;
+    // `Path::parent()` returns `Some("")` for a bare relative filename (not
+    // `None`), and reading "" as a directory fails outright, so the
+    // empty-parent case must be folded into "." explicitly.
+    let parent = match path.parent() {
+        None => bail!("checkpoint index has no parent"),
+        Some(parent) if parent.as_os_str().is_empty() => Path::new("."),
+        Some(parent) => parent,
+    };
     let stem = path
         .file_name()
         .and_then(|value| value.to_str())

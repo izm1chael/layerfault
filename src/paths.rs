@@ -1,4 +1,4 @@
-use anyhow::{anyhow, Context, Result};
+use anyhow::{anyhow, bail, Context, Result};
 use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -75,9 +75,15 @@ pub fn ensure_private_dir(path: &Path) -> Result<()> {
 }
 
 pub fn write_private(path: &Path, bytes: &[u8]) -> Result<()> {
-    let parent = path
-        .parent()
-        .ok_or_else(|| anyhow!("Path '{}' has no parent", path.display()))?;
+    // `Path::parent()` returns `Some("")` for a bare relative filename like
+    // "out.json" (not `None`), so the empty-parent case must be folded into
+    // "." explicitly or downstream directory/permission operations fail on
+    // the empty path with an opaque error that never names the real target.
+    let parent = match path.parent() {
+        None => bail!("Path '{}' has no parent", path.display()),
+        Some(parent) if parent.as_os_str().is_empty() => Path::new("."),
+        Some(parent) => parent,
+    };
     ensure_private_dir(parent)?;
 
     // NamedTempFile reserves a fresh inode with exclusive creation. Its persist

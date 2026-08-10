@@ -1,7 +1,7 @@
 use crate::provenance::TrustState;
 use crate::scanner::{Confidence, FindingClass, LayerScanResult, ScanStatus};
 use crate::trust::glob_match;
-use anyhow::{anyhow, Context, Result};
+use anyhow::{anyhow, bail, Context, Result};
 use std::path::Path;
 
 const MAX_POLICY_BYTES: u64 = 2 * 1024 * 1024;
@@ -533,9 +533,13 @@ pub fn record_policy_override(
         Some(path) => path.to_path_buf(),
         None => crate::paths::config_dir()?.join("override-audit.jsonl"),
     };
-    let parent = path
-        .parent()
-        .ok_or_else(|| anyhow!("Override log path has no parent"))?;
+    // `Path::parent()` returns `Some("")` for a bare relative filename (not
+    // `None`), so the empty-parent case must be folded into "." explicitly.
+    let parent = match path.parent() {
+        None => bail!("Override log path has no parent"),
+        Some(parent) if parent.as_os_str().is_empty() => Path::new("."),
+        Some(parent) => parent,
+    };
     crate::paths::ensure_private_dir(parent)?;
     match std::fs::symlink_metadata(&path) {
         Ok(metadata) if metadata.file_type().is_symlink() => {
