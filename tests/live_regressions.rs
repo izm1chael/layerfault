@@ -33,6 +33,14 @@ fn run(args: &[&str]) -> Output {
         .expect("run Layerfault")
 }
 
+fn run_in(cwd: &Path, args: &[&str]) -> Output {
+    Command::new(env!("CARGO_BIN_EXE_layerfault"))
+        .current_dir(cwd)
+        .args(args)
+        .output()
+        .expect("run Layerfault")
+}
+
 fn varint(mut value: u64) -> Vec<u8> {
     let mut out = Vec::new();
     loop {
@@ -352,6 +360,82 @@ fn onnx_external_range_blocks_consistently_across_every_cli_surface() {
             "--json",
         ]),
     );
+
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn onnx_external_range_finding_survives_a_bare_relative_filename() {
+    // `path.parent()` on a bare relative filename like "model.onnx" (no
+    // directory component) returns `Some("")`, not `None`. A prior bug
+    // canonicalized that empty path directly, which fails and replaces the
+    // specific, actionable LF-ONNX-EXTERNAL-RANGE finding with an opaque
+    // "unable to canonicalize ONNX parent ''" error -- exactly the kind of
+    // internal-detail message a human running the CLI from inside the
+    // model's own directory (`cd model_dir && layerfault verify-file
+    // model.onnx`) should never see in place of the real finding.
+    let root = temp_dir("onnx-bare-filename");
+    let _ = fs::remove_dir_all(&root);
+    fs::create_dir_all(&root).expect("create package");
+    write_onnx_external_offset_overflow(&root);
+
+    let output = run_in(&root, &["inspect", "model.onnx", "--json"]);
+    assert_eq!(
+        output.status.code(),
+        Some(3),
+        "stdout={} stderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let value: Value = serde_json::from_slice(&output.stdout).expect("inspect JSON");
+    let matches: Vec<&str> = value["results"]
+        .as_array()
+        .expect("results array")
+        .iter()
+        .flat_map(|result| result["matches"].as_array().into_iter().flatten())
+        .filter_map(Value::as_str)
+        .collect();
+    assert!(
+        matches
+            .iter()
+            .any(|m| m.contains("LF-ONNX-EXTERNAL-RANGE") && m.contains("exceeds file length")),
+        "expected the specific external-range finding, got matches={matches:?}"
+    );
+    assert!(
+        !matches.iter().any(|m| m.contains("canonicalize")),
+        "the empty-parent canonicalization error leaked into the findings: {matches:?}"
+    );
+
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn dataset_poisoning_review_accepts_a_bare_relative_filename() {
+    // Same `Path::parent()` footgun as the ONNX case above, in the dataset
+    // single-file path: it used to hard-fail with a bare OS error instead of
+    // running the review, for the most natural invocation of the command.
+    let root = temp_dir("dataset-bare-filename");
+    let _ = fs::remove_dir_all(&root);
+    fs::create_dir_all(&root).expect("create dataset dir");
+    fs::write(
+        root.join("train.jsonl"),
+        "{\"text\":\"normal\",\"label\":\"ok\"}\n",
+    )
+    .expect("write dataset");
+
+    let output = run_in(
+        &root,
+        &["dataset", "poisoning-review", "train.jsonl", "--json"],
+    );
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "stdout={} stderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let value: Value = serde_json::from_slice(&output.stdout).expect("dataset JSON");
+    assert_eq!(value["state"], "NO_SUSPICIOUS_INDICATORS_OBSERVED");
 
     let _ = fs::remove_dir_all(root);
 }

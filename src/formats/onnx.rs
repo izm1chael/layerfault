@@ -148,7 +148,14 @@ fn bind_external_data(
     model_digest: &str,
     external: &[OnnxExternalData],
 ) -> Result<(String, Vec<String>, bool)> {
-    let parent = model_path.parent().unwrap_or_else(|| Path::new("."));
+    // `Path::parent()` returns `Some("")` for a bare relative filename like
+    // "model.onnx" (not `None`), so the empty-parent case must be folded into
+    // "." explicitly or canonicalization fails on the empty path and masks
+    // the real external-data finding behind a generic I/O error.
+    let parent = model_path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."));
     let parent = parent
         .canonicalize()
         .with_context(|| format!("unable to canonicalize ONNX parent '{}'", parent.display()))?;

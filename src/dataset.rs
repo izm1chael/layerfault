@@ -370,7 +370,14 @@ fn enumerate(path: &Path) -> Result<Vec<DatasetPlan>> {
         bail!("dataset root may not be a symlink");
     }
     if metadata.is_file() {
-        let root = std::fs::canonicalize(path.parent().unwrap_or_else(|| Path::new(".")))?;
+        // `Path::parent()` returns `Some("")` for a bare relative filename
+        // like "train.jsonl" (not `None`), so the empty-parent case must be
+        // folded into "." explicitly or canonicalization fails outright.
+        let parent = path
+            .parent()
+            .filter(|parent| !parent.as_os_str().is_empty())
+            .unwrap_or_else(|| Path::new("."));
+        let root = std::fs::canonicalize(parent)?;
         let canonical = std::fs::canonicalize(path)?;
         return Ok(vec![plan_for(root, canonical)?]);
     }
