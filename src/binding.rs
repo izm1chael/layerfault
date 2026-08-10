@@ -56,13 +56,19 @@ impl Drop for StagedArtifact {
 
 pub fn stage_verified(path: &Path, expected_sha256: &str) -> Result<StagedArtifact> {
     let parent = crate::paths::config_dir()?.join("admission-staging");
-    stage_verified_under(path, expected_sha256, &parent)
+    stage_verified_under(path, expected_sha256, &parent, false)
+}
+
+pub fn stage_verified_executable(path: &Path, expected_sha256: &str) -> Result<StagedArtifact> {
+    let parent = crate::paths::config_dir()?.join("runtime-staging");
+    stage_verified_under(path, expected_sha256, &parent, true)
 }
 
 fn stage_verified_under(
     path: &Path,
     expected_sha256: &str,
     parent: &Path,
+    executable: bool,
 ) -> Result<StagedArtifact> {
     if !expected_sha256.starts_with("sha256:") {
         return Err(anyhow!(
@@ -112,7 +118,8 @@ fn stage_verified_under(
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        fs::set_permissions(&target, fs::Permissions::from_mode(0o400))?;
+        let mode = if executable { 0o500 } else { 0o400 };
+        fs::set_permissions(&target, fs::Permissions::from_mode(mode))?;
     }
     Ok(StagedArtifact {
         root: root.clone(),
@@ -122,7 +129,7 @@ fn stage_verified_under(
             original: path.display().to_string(),
             runtime_path: Some(target.display().to_string()),
             sha256: Some(observed),
-            detail: "Runtime receives a private read-only copy created from a no-follow file descriptor after admission; the copy digest is rechecked before launch".to_owned(),
+            detail: "Runtime receives a private copy created from a no-follow file descriptor after admission; the copy digest is rechecked before launch".to_owned(),
         },
     })
 }
@@ -196,8 +203,35 @@ mod tests {
             "sha256:{}",
             hex::encode(Sha256::digest(b"verified artifact"))
         );
-        let staged = stage_verified_under(&source, &digest, &parent)?;
+        let staged = stage_verified_under(&source, &digest, &parent, false)?;
         assert_eq!(fs::read(staged.path())?, b"verified artifact");
+        staged.cleanup()?;
+        let _ = fs::remove_dir_all(base);
+        Ok(())
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn staged_executable_is_private_and_executable() -> Result<()> {
+        use std::os::unix::fs::PermissionsExt;
+        let base = std::env::temp_dir().join(format!(
+            "layerfault-binding-executable-{}-{}",
+            std::process::id(),
+            crate::paths::now_unix()
+        ));
+        let parent = base.join("staging");
+        fs::create_dir_all(&base)?;
+        let source = base.join("runtime");
+        fs::write(&source, b"verified executable")?;
+        let digest = format!(
+            "sha256:{}",
+            hex::encode(Sha256::digest(b"verified executable"))
+        );
+        let staged = stage_verified_under(&source, &digest, &parent, true)?;
+        assert_eq!(
+            fs::metadata(staged.path())?.permissions().mode() & 0o777,
+            0o500
+        );
         staged.cleanup()?;
         let _ = fs::remove_dir_all(base);
         Ok(())

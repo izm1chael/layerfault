@@ -41,6 +41,12 @@ pub fn inspect_and_evaluate(
     if let Some(request) = sigstore {
         let evaluation =
             crate::sigstore::verify_blob(path, request.bundle, request.identity, request.issuer)?;
+        let verifier_evidence = format!(
+            "verifier={} verifier_sha256={} verifier_version={}",
+            evaluation.verifier_path,
+            evaluation.verifier_sha256,
+            evaluation.verifier_version.as_deref().unwrap_or("unknown")
+        );
         if evaluation.verified {
             trust_state = TrustState::Trusted;
             trusted_signatures = 1;
@@ -57,8 +63,8 @@ pub fn inspect_and_evaluate(
                 finding_class: FindingClass::Attestation,
                 confidence: Confidence::High,
                 detail: Some(format!(
-                    "Sigstore bundle verified for certificate identity '{}' from issuer '{}'",
-                    evaluation.identity, evaluation.issuer
+                    "Sigstore bundle verified for certificate identity '{}' from issuer '{}'; {}",
+                    evaluation.identity, evaluation.issuer, verifier_evidence
                 )),
                 matches: vec!["[LF-PROV-SIGSTORE] verified Sigstore bundle".to_owned()],
                 duration_ms: 0,
@@ -76,8 +82,8 @@ pub fn inspect_and_evaluate(
                 finding_class: FindingClass::Attestation,
                 confidence: Confidence::High,
                 detail: Some(format!(
-                    "Sigstore verification failed: {}",
-                    evaluation.detail
+                    "Sigstore verification failed: {}; {}",
+                    evaluation.detail, verifier_evidence
                 )),
                 matches: vec!["[LF-PROV-SIGSTORE-INVALID] invalid Sigstore bundle".to_owned()],
                 duration_ms: 0,

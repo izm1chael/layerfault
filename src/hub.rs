@@ -84,6 +84,64 @@ pub struct CrawlPage {
     pub next: Option<String>,
 }
 
+/// True when a Hugging Face repository member can materially affect model
+/// loading, execution, structure, tokenizer/template behaviour, or package
+/// admission. Hosted/direct reviews must share this selector so a PASS never
+/// means "only weight/config suffixes happened to be downloaded".
+pub fn is_security_relevant_member(path: &str) -> bool {
+    let lower = path.to_ascii_lowercase();
+    let name = lower.rsplit('/').next().unwrap_or(&lower);
+    [
+        ".gguf",
+        ".safetensors",
+        ".safetensors.index.json",
+        ".onnx",
+        ".tflite",
+        ".keras",
+        ".h5",
+        ".hdf5",
+        ".pb",
+        ".pkl",
+        ".pickle",
+        ".joblib",
+        ".pt",
+        ".pth",
+        ".ckpt",
+        ".bin",
+        ".py",
+        ".pyi",
+        ".sh",
+        ".ps1",
+        ".bat",
+        ".cmd",
+        ".exe",
+        ".dll",
+        ".so",
+        ".dylib",
+        ".node",
+        ".jar",
+        ".json",
+        ".toml",
+        ".yaml",
+        ".yml",
+        ".jinja",
+        ".j2",
+    ]
+    .iter()
+    .any(|suffix| lower.ends_with(suffix))
+        || matches!(
+            name,
+            "setup.py"
+                | "pyproject.toml"
+                | "requirements.txt"
+                | "requirements-dev.txt"
+                | "environment.yml"
+                | "environment.yaml"
+                | "model_index.json"
+                | "configuration.json"
+        )
+}
+
 pub struct HubClient {
     client: Client,
     token: Option<String>,
@@ -608,5 +666,25 @@ mod tests {
     fn secret_compare() {
         assert!(verify_webhook_secret(Some("abc"), "abc"));
         assert!(!verify_webhook_secret(Some("abd"), "abc"));
+    }
+    #[test]
+    fn security_member_selector_includes_loader_and_serialization_risk() {
+        for path in [
+            "pytorch_model.bin",
+            "weights/model.pkl",
+            "model.safetensors",
+            "loader.py",
+            "native/extension.so",
+            "config.json",
+            "chat_template.jinja",
+            "requirements.txt",
+        ] {
+            assert!(
+                is_security_relevant_member(path),
+                "expected security member: {path}"
+            );
+        }
+        assert!(!is_security_relevant_member("README.md"));
+        assert!(!is_security_relevant_member("assets/logo.png"));
     }
 }

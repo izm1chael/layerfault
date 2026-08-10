@@ -1,4 +1,5 @@
 use anyhow::{anyhow, Result};
+use std::collections::HashMap;
 use std::io::Read;
 use std::sync::{
     mpsc::{sync_channel, TrySendError},
@@ -15,7 +16,7 @@ const HTTP_QUEUE_DEPTH: usize = 1024;
 struct State {
     db: Mutex<super::db::PlatformDb>,
     config: super::PlatformConfig,
-    limiter: Mutex<RateWindow>,
+    limiter: Mutex<HashMap<String, RateWindow>>,
 }
 struct RateWindow {
     minute: u64,
@@ -30,10 +31,7 @@ pub fn serve(config: super::PlatformConfig) -> Result<()> {
     let state = Arc::new(State {
         db: Mutex::new(db),
         config,
-        limiter: Mutex::new(RateWindow {
-            minute: 0,
-            count: 0,
-        }),
+        limiter: Mutex::new(HashMap::new()),
     });
     let workers = std::thread::available_parallelism()
         .map(|value| value.get())
@@ -85,21 +83,27 @@ pub fn serve(config: super::PlatformConfig) -> Result<()> {
 }
 
 fn handle(request: Request, state: &State) -> Result<()> {
-    if !allow_request(&state.limiter)? {
-        return respond_json(
-            request,
-            429,
-            &serde_json::json!({"error":"rate limit exceeded"}),
-        );
-    }
     let method = request.method().clone();
     let raw_url = request.url().to_owned();
     let path = raw_url.split('?').next().unwrap_or("/");
+    // Health is deliberately exempt from client availability quotas so a noisy
+    // or hostile client cannot make the service appear dead to orchestration.
     if method == Method::Get && path == "/api/v1/health" {
         return respond_json(
             request,
             200,
             &serde_json::json!({"status":"ok","version":env!("CARGO_PKG_VERSION")}),
+        );
+    }
+    let client = request
+        .remote_addr()
+        .map(|addr| addr.ip().to_string())
+        .unwrap_or_else(|| "unknown".to_owned());
+    if !allow_request(&state.limiter, &client)? {
+        return respond_json(
+            request,
+            429,
+            &serde_json::json!({"error":"rate limit exceeded"}),
         );
     }
     if method == Method::Get && path == "/api/v1/models" {
@@ -283,7 +287,16 @@ fn admin_crawl(mut request: Request, state: &State) -> Result<()> {
     let payload: serde_json::Value = if bytes.is_empty() {
         serde_json::json!({})
     } else {
-        serde_json::from_slice(&bytes)?
+        match serde_json::from_slice(&bytes) {
+            Ok(value) => value,
+            Err(_) => {
+                return respond_json(
+                    request,
+                    400,
+                    &serde_json::json!({"error":"invalid JSON request body"}),
+                )
+            }
+        }
     };
     let limit = payload
         .get("limit")
@@ -291,12 +304,14 @@ fn admin_crawl(mut request: Request, state: &State) -> Result<()> {
         .unwrap_or(100)
         .clamp(1, 1000) as usize;
     let cursor = payload.get("cursor").and_then(|v| v.as_str());
+    let page = super::worker::fetch_crawl_page(limit, cursor)?;
     let mut db = lock_db(state)?;
-    let page = super::worker::crawl_once(&mut db, limit, cursor)?;
+    let queued = super::worker::enqueue_crawl_page(&mut db, &page)?;
+    drop(db);
     respond_json(
         request,
         202,
-        &serde_json::json!({"queued":page.models.len(),"next":page.next}),
+        &serde_json::json!({"queued":queued,"next":page.next}),
     )
 }
 
@@ -333,7 +348,16 @@ fn webhook(mut request: Request, state: &State) -> Result<()> {
             &serde_json::json!({"error":"request body too large"}),
         );
     }
-    let payload: serde_json::Value = serde_json::from_slice(&bytes)?;
+    let payload: serde_json::Value = match serde_json::from_slice(&bytes) {
+        Ok(value) => value,
+        Err(_) => {
+            return respond_json(
+                request,
+                400,
+                &serde_json::json!({"error":"invalid JSON webhook body"}),
+            )
+        }
+    };
     let repo = payload
         .pointer("/repo/name")
         .and_then(|v| v.as_str())
@@ -573,15 +597,25 @@ fn lock_db(state: &State) -> Result<std::sync::MutexGuard<'_, super::db::Platfor
         .lock()
         .map_err(|_| anyhow!("platform database lock is poisoned"))
 }
-fn allow_request(limiter: &Mutex<RateWindow>) -> Result<bool> {
+fn allow_request(limiter: &Mutex<HashMap<String, RateWindow>>, client: &str) -> Result<bool> {
     let minute = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
         .as_secs()
         / 60;
-    let mut rate = limiter
+    let mut rates = limiter
         .lock()
         .map_err(|_| anyhow!("rate limiter lock is poisoned"))?;
+    // Bound memory as well as request rate. Stale client buckets are discarded
+    // every minute; if a source-address spray exceeds the cap, collapse new
+    // callers into a shared overflow bucket rather than growing indefinitely.
+    rates.retain(|_, value| value.minute == minute);
+    let key = if rates.contains_key(client) || rates.len() < 16_384 {
+        client.to_owned()
+    } else {
+        "__overflow__".to_owned()
+    };
+    let rate = rates.entry(key).or_insert(RateWindow { minute, count: 0 });
     if rate.minute != minute {
         rate.minute = minute;
         rate.count = 0;

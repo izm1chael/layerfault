@@ -1,14 +1,13 @@
 use crate::safeio::{open_readonly_nofollow, read_all_from_file};
 use crate::scanner::{CheckType, Confidence, FindingClass, LayerScanResult, ScanStatus};
 use crate::sources;
-use anyhow::{anyhow, Context, Result};
+use anyhow::{anyhow, bail, Context, Result};
 use ed25519_dalek::pkcs8::DecodePublicKey;
 use ed25519_dalek::{Signature, Verifier, VerifyingKey};
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 const BUILTIN: &str = include_str!("../advisories/runtime-advisories.json");
 const MAX_DATABASE_BYTES: u64 = 4 * 1024 * 1024;
@@ -75,6 +74,7 @@ pub struct AdvisoryDatabase {
 pub struct RuntimeInfo {
     pub runtime: RuntimeKind,
     pub executable: String,
+    pub executable_sha256: String,
     pub raw_version: String,
     pub parsed_version: Option<String>,
 }
@@ -237,7 +237,8 @@ pub fn detect_runtime_executable(kind: RuntimeKind, executable: &Path) -> Result
             executable.display()
         )
     })?;
-    let output = Command::new(&path) // nosemgrep: rust.actix.command-injection.rust-actix-command-injection.rust-actix-command-injection -- canonical executable path; std::process::Command does not invoke a shell
+    let executable_sha256 = runtime_executable_sha256(&path)?;
+    let output = crate::safeio::command_for_executable(&path)? // nosemgrep: rust.actix.command-injection.rust-actix-command-injection.rust-actix-command-injection -- canonical executable path; std::process::Command does not invoke a shell
         .arg("--version")
         .output()
         .with_context(|| format!("Unable to execute '{} --version'", path.display()))?;
@@ -261,9 +262,39 @@ pub fn detect_runtime_executable(kind: RuntimeKind, executable: &Path) -> Result
     Ok(RuntimeInfo {
         runtime: kind,
         executable: path.display().to_string(),
+        executable_sha256,
         raw_version: combined.trim().to_owned(),
         parsed_version: parsed,
     })
+}
+
+pub fn revalidate_runtime_identity(info: &RuntimeInfo) -> Result<()> {
+    let path = Path::new(&info.executable);
+    let current = runtime_executable_sha256(path)?;
+    if current != info.executable_sha256 {
+        bail!(
+            "runtime executable '{}' changed after advisory/version admission (expected {}, got {})",
+            info.executable,
+            info.executable_sha256,
+            current
+        );
+    }
+    Ok(())
+}
+
+fn runtime_executable_sha256(path: &Path) -> Result<String> {
+    use std::io::Read as _;
+    let mut file = crate::safeio::open_readonly_nofollow(path)?;
+    let mut hasher = Sha256::new();
+    let mut buffer = [0u8; 1024 * 1024];
+    loop {
+        let count = file.read(&mut buffer)?;
+        if count == 0 {
+            break;
+        }
+        hasher.update(&buffer[..count]);
+    }
+    Ok(format!("sha256:{}", hex::encode(hasher.finalize())))
 }
 
 pub fn evaluate(kind: RuntimeKind, database_path: Option<&Path>) -> Result<RuntimeEvaluation> {
@@ -434,6 +465,7 @@ mod tests {
         let info = RuntimeInfo {
             runtime: RuntimeKind::LlamaCpp,
             executable: "test".into(),
+            executable_sha256: "sha256:synthetic".into(),
             raw_version: "version: 9637".into(),
             parsed_version: Some("b9637".into()),
         };
@@ -447,6 +479,7 @@ mod tests {
         let info = RuntimeInfo {
             runtime: RuntimeKind::Ollama,
             executable: "test".into(),
+            executable_sha256: "sha256:synthetic".into(),
             raw_version: "ollama version is 0.17.0".into(),
             parsed_version: Some("0.17.0".into()),
         };

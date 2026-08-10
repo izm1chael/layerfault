@@ -225,8 +225,10 @@ jobs:
             fi
             cp "$file" "release-assets/$name"
           done
-          cp install.sh install.ps1 scripts/install/active-runtime.sh release-assets/
+          cp install.sh install.ps1 release-assets/
+          cp scripts/install/active-runtime.sh release-assets/install-active-runtime.sh
           cp packaging/active-requirements.txt release-assets/
+          bash scripts/release/smoke-assembled-installers.sh release-assets
           (cd release-assets && sha256sum * > SHA256SUMS)
       - name: Generate Homebrew formula artifact
         run: |

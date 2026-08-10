@@ -142,8 +142,22 @@ pub fn quarantine_model_with_evidence(
     // manifest pointing at blobs that have not yet been moved.
     operations.push((model_ref.manifest_path.clone(), qdir.join("manifest")));
 
-    if let Err(error) = apply_moves(&operations) {
-        let _ = fs::remove_dir_all(&qdir);
+    if let Err((error, rollback_complete)) = apply_moves(&operations) {
+        if rollback_complete {
+            let _ = fs::remove_dir_all(&qdir);
+        } else {
+            // The quarantine directory may contain the only remaining copy of
+            // one or more artifacts. Preserve it and record explicit recovery
+            // state instead of violating the non-destructive guarantee.
+            let recovery = qdir.join("RECOVERY_REQUIRED.txt");
+            let _ = paths::write_private(
+                &recovery,
+                format!(
+                    "Layerfault quarantine move failed and rollback was incomplete.\nDo not delete this directory until artifacts are recovered.\nError: {error}\n"
+                )
+                .as_bytes(),
+            );
+        }
         return Err(error);
     }
     Ok(record)
@@ -264,7 +278,7 @@ pub fn restore(base_dir: &Path, id: &str, force: bool) -> Result<QuarantineRecor
         operations.push((manifest_dst.clone(), replacement_root.join("manifest")));
     }
     operations.push((qdir.join("manifest"), manifest_dst));
-    apply_moves(&operations)?;
+    apply_moves(&operations).map_err(|(error, _)| error)?;
     fs::remove_dir_all(&qdir)?;
     Ok(record)
 }
@@ -411,21 +425,46 @@ fn hash_file(path: &Path) -> Result<(String, u64)> {
     Ok((hex::encode(hasher.finalize()), total))
 }
 
-fn apply_moves(operations: &[(PathBuf, PathBuf)]) -> Result<()> {
+fn apply_moves(
+    operations: &[(PathBuf, PathBuf)],
+) -> std::result::Result<(), (anyhow::Error, bool)> {
     let mut completed = Vec::<(PathBuf, PathBuf)>::new();
     for (src, dst) in operations {
         if let Some(parent) = dst.parent() {
-            fs::create_dir_all(parent)?;
+            if let Err(error) = fs::create_dir_all(parent) {
+                return Err((
+                    anyhow!("Unable to prepare '{}': {error}", parent.display()),
+                    true,
+                ));
+            }
         }
         if let Err(error) = fs::rename(src, dst) {
+            let mut rollback_failures = Vec::new();
             for (done_src, done_dst) in completed.iter().rev() {
-                let _ = fs::rename(done_dst, done_src);
+                if let Err(rollback_error) = fs::rename(done_dst, done_src) {
+                    rollback_failures.push(format!(
+                        "'{}' -> '{}': {rollback_error}",
+                        done_dst.display(),
+                        done_src.display()
+                    ));
+                }
             }
-            return Err(anyhow!(
-                "Unable to move '{}' to '{}': {error}",
-                src.display(),
-                dst.display()
-            ));
+            let rollback_complete = rollback_failures.is_empty();
+            let message = if rollback_complete {
+                format!(
+                    "Unable to move '{}' to '{}': {error}; completed moves were rolled back",
+                    src.display(),
+                    dst.display()
+                )
+            } else {
+                format!(
+                    "Unable to move '{}' to '{}': {error}; QUARANTINE_ROLLBACK_INCOMPLETE: {}",
+                    src.display(),
+                    dst.display(),
+                    rollback_failures.join("; ")
+                )
+            };
+            return Err((anyhow!(message), rollback_complete));
         }
         completed.push((src.clone(), dst.clone()));
     }

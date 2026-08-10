@@ -166,6 +166,7 @@ fn check_type_label(check_type: &CheckType) -> &'static str {
         CheckType::SignedEvidence => "SignedEvidence",
         CheckType::LayerPolicy => "LayerPolicy",
         CheckType::ScanError => "ScanError",
+        CheckType::PickleStructure => "PickleStructure",
     }
 }
 

@@ -10,6 +10,20 @@ def read_tsv(path: Path):
     with path.open(newline="", encoding="utf-8") as fh:
         return list(csv.DictReader(fh, delimiter="\t"))
 
+def read_operation_output(run_dir: Path, row: dict[str, str]) -> str:
+    relative = row.get("output", "")
+    if not relative:
+        raise ValueError("summary row has no output path")
+    root = run_dir.resolve()
+    output = (root / relative).resolve()
+    try:
+        output.relative_to(root)
+    except ValueError as exc:
+        raise ValueError(f"output path escapes run directory: {relative}") from exc
+    if output.stat().st_size > 64 * 1024 * 1024:
+        raise ValueError(f"output exceeds 64 MiB contract-check cap: {relative}")
+    return output.read_text(encoding="utf-8", errors="replace")
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("run_dir", type=Path)
@@ -40,6 +54,16 @@ def main() -> int:
             else:
                 kind = "FALSE_POSITIVE_REGRESSION"
             failures.append((kind, key, expected, {"decision": actual, "exit_code": actual_exit}))
+        required_prefixes = expected.get("required_rule_prefixes", [])
+        if required_prefixes:
+            try:
+                output = read_operation_output(args.run_dir, row)
+                missing = [prefix for prefix in required_prefixes if prefix not in output]
+            except (OSError, ValueError) as error:
+                failures.append(("EVIDENCE_UNAVAILABLE", key, expected, str(error)))
+            else:
+                if missing:
+                    failures.append(("RULE_EVIDENCE_MISSING", key, expected, {"missing": missing}))
     for kind, key, expected, actual in failures:
         print(f"{kind}: {key}: expected={expected} actual={actual}")
     if failures:

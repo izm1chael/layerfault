@@ -86,7 +86,7 @@ fn results_from_inventory(
     // Prompt/template/system metadata has an independent collection budget so
     // verbose descriptions cannot evict the security-critical text view.
     if !parsed.priority_text.is_empty() {
-        results.push(HeuristicsScanner::scan_content_for_media(
+        results.push(HeuristicsScanner::scan_template_content_for_media(
             &parsed.priority_text,
             layer_digest,
             media_type,

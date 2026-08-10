@@ -10,6 +10,11 @@ use anyhow::{bail, Result};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Arc, Mutex,
+};
+use std::time::{Duration, Instant};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BehaviourLimits {
@@ -83,8 +88,11 @@ impl BehaviourLimits {
         if tokens > 0 {
             self.max_tokens = self.max_tokens.min(tokens);
         }
-        if timeout > 0 {
-            self.timeout_seconds = self.timeout_seconds.min(timeout);
+        // --timeout-seconds is the hard command-wide deadline. The CLI passes
+        // u64::MAX when it was not specified, preserving the profile default;
+        // an explicit value replaces (rather than clamps to) that default.
+        if timeout > 0 && timeout != u64::MAX {
+            self.timeout_seconds = timeout;
         }
         if mutations > 0 {
             self.max_mutations = self.max_mutations.min(mutations);
@@ -104,6 +112,88 @@ pub struct ActiveExecutionOptions {
     /// Permit Hugging Face custom Python loaders (`trust_remote_code=True`) in
     /// the sandboxed Transformers backend.
     pub execute_custom_code: bool,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct CommandDeadline {
+    started: Instant,
+    total: Duration,
+}
+
+impl CommandDeadline {
+    pub(crate) fn new(seconds: u64) -> Self {
+        Self {
+            started: Instant::now(),
+            total: Duration::from_secs(seconds.max(1)),
+        }
+    }
+
+    pub(crate) fn remaining(&self) -> Duration {
+        self.total.saturating_sub(self.started.elapsed())
+    }
+
+    pub(crate) fn expired(&self) -> bool {
+        self.remaining().is_zero()
+    }
+
+    pub(crate) fn elapsed_seconds(&self) -> u64 {
+        self.started.elapsed().as_secs()
+    }
+}
+
+pub(crate) struct ProgressHeartbeat {
+    stop: Arc<AtomicBool>,
+    phase: Arc<Mutex<String>>,
+    thread: Option<std::thread::JoinHandle<()>>,
+}
+
+impl ProgressHeartbeat {
+    pub(crate) fn start(label: &str) -> Self {
+        let stop = Arc::new(AtomicBool::new(false));
+        let phase = Arc::new(Mutex::new(format!("phase={label} runtime-start")));
+        let thread_stop = Arc::clone(&stop);
+        let thread_phase = Arc::clone(&phase);
+        let started = Instant::now();
+        let label = label.to_owned();
+        let thread = std::thread::spawn(move || {
+            while !thread_stop.load(Ordering::Relaxed) {
+                for _ in 0..100 {
+                    if thread_stop.load(Ordering::Relaxed) {
+                        return;
+                    }
+                    std::thread::sleep(Duration::from_millis(100));
+                }
+                let detail = thread_phase
+                    .lock()
+                    .map(|value| value.clone())
+                    .unwrap_or_else(|_| "phase=unknown".to_owned());
+                eprintln!(
+                    "ACTIVE {label} elapsed={}s {detail}",
+                    started.elapsed().as_secs()
+                );
+            }
+        });
+        Self {
+            stop,
+            phase,
+            thread: Some(thread),
+        }
+    }
+
+    pub(crate) fn update(&self, value: impl Into<String>) {
+        if let Ok(mut phase) = self.phase.lock() {
+            *phase = value.into();
+        }
+    }
+}
+
+impl Drop for ProgressHeartbeat {
+    fn drop(&mut self) {
+        self.stop.store(true, Ordering::Relaxed);
+        if let Some(thread) = self.thread.take() {
+            let _ = thread.join();
+        }
+    }
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -259,6 +349,32 @@ pub fn run_external_llama_active(
     limits: BehaviourLimits,
     active: ActiveExecutionOptions,
 ) -> Result<BehaviourReport> {
+    let deadline = CommandDeadline::new(limits.timeout_seconds);
+    run_external_llama_active_deadline(
+        model,
+        runtime_path,
+        suite_path,
+        seed,
+        limits,
+        active,
+        &deadline,
+        "model",
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn run_external_llama_active_deadline(
+    model: &Path,
+    runtime_path: Option<&Path>,
+    suite_path: Option<&Path>,
+    seed: u64,
+    limits: BehaviourLimits,
+    active: ActiveExecutionOptions,
+    deadline: &CommandDeadline,
+    phase_label: &str,
+) -> Result<BehaviourReport> {
+    let heartbeat = ProgressHeartbeat::start(phase_label);
+    heartbeat.update(format!("phase={phase_label} static-admission"));
     if active.execute_custom_code {
         bail!("custom Hugging Face loader execution is only supported by the Transformers backend");
     }
@@ -267,32 +383,53 @@ pub fn run_external_llama_active(
         sandbox::require_high_risk_observation_stack()?;
     }
     static_admit(model, active.allow_static_blocked)?;
+    if deadline.expired() {
+        bail!("behaviour command hard total timeout expired during static admission");
+    }
     let model = resolve_gguf(model)?;
     let model_identity = crate::modelmeta::build_snapshot(&model)?.identity.canonical;
     let suite = probes::expand_mutations(probes::load_suite(suite_path)?, limits.max_mutations);
     let executable = match runtime_path {
         Some(path) => path.to_path_buf(),
-        None => crate::sources::find_executable("llama-cli")
+        None => crate::sources::find_executable("llama-server")
+            .or_else(|| crate::sources::find_executable("llama-cli"))
             .or_else(|| crate::sources::find_executable("main"))
-            .ok_or_else(|| anyhow::anyhow!("llama.cpp CLI was not found on PATH"))?,
+            .ok_or_else(|| anyhow::anyhow!("llama.cpp runtime was not found on PATH"))?,
     };
     let runtime = runtime::RuntimeAdapter::new(executable, &limits)?;
-    let identity = runtime.identity()?;
+    let identity = runtime.identity();
     let canary_a = synthetic_canary(&model_identity, seed, "A");
     let canary_b = synthetic_canary(&model_identity, seed, "B");
+    heartbeat.update(format!("phase={phase_label} model-loading"));
+    let mut session = runtime.open(&model, &[&canary_a, &canary_b], deadline.remaining())?;
+    heartbeat.update(format!("phase={phase_label} model-loaded"));
+    let planned = suite
+        .probes
+        .iter()
+        .take(limits.max_prompts)
+        .map(|probe| probe.repeat.max(1).min(limits.repeat_count.max(1)))
+        .sum::<usize>();
+    let mut probe_index = 0usize;
     let mut executions = Vec::new();
-    for probe in suite.probes.iter().take(limits.max_prompts) {
+    'probes: for probe in suite.probes.iter().take(limits.max_prompts) {
         let repeat = probe.repeat.max(1).min(limits.repeat_count.max(1));
         for repeat_index in 0..repeat {
+            if deadline.expired() {
+                bail!("behaviour command hard total timeout expired before probe execution");
+            }
+            probe_index = probe_index.saturating_add(1);
+            heartbeat.update(format!(
+                "phase={phase_label} probe={probe_index}/{planned} id={}",
+                probe.id
+            ));
             let system = probes::render(&probe.system, &canary_a, &canary_b);
             let prompt = probes::render(&probe.prompt, &canary_a, &canary_b);
             let combined = format!("<system>\n{system}\n</system>\n<user>\n{prompt}\n</user>");
-            let result = runtime.run(
-                &model,
+            let result = session.infer(
                 &combined,
                 seed.saturating_add(repeat_index as u64),
                 limits.max_tokens,
-                &[&canary_a, &canary_b],
+                deadline.remaining(),
             )?;
             let evaluation = evaluate::evaluate_runtime(
                 &probe.category,
@@ -301,6 +438,7 @@ pub fn run_external_llama_active(
                 &[&canary_a, &canary_b],
                 &result.telemetry,
             );
+            let timed_out = result.timed_out;
             executions.push(ProbeExecution {
                 probe_id: probe.id.clone(),
                 category: probe.category.clone(),
@@ -309,12 +447,21 @@ pub fn run_external_llama_active(
                 response_excerpt: bounded_excerpt(&result.stdout, 4096),
                 duration_ms: result.duration_ms,
                 exit_code: result.exit_code,
-                timed_out: result.timed_out,
+                timed_out,
                 telemetry: result.telemetry,
                 evaluation,
             });
+            if timed_out {
+                break 'probes;
+            }
         }
     }
+    heartbeat.update(format!("phase={phase_label} teardown"));
+    let _ = session.close()?;
+    heartbeat.update(format!(
+        "phase={phase_label} complete elapsed={}s",
+        deadline.elapsed_seconds()
+    ));
     finalize_report(
         model_identity,
         model.display().to_string(),
@@ -354,10 +501,30 @@ pub fn compare_external_llama_active(
     limits: BehaviourLimits,
     active: ActiveExecutionOptions,
 ) -> Result<DifferentialReport> {
-    let base_report =
-        run_external_llama_active(base, runtime_path, suite_path, seed, limits.clone(), active)?;
-    let derived_report =
-        run_external_llama_active(derived, runtime_path, suite_path, seed, limits, active)?;
+    let deadline = CommandDeadline::new(limits.timeout_seconds);
+    let base_report = run_external_llama_active_deadline(
+        base,
+        runtime_path,
+        suite_path,
+        seed,
+        limits.clone(),
+        active,
+        &deadline,
+        "base",
+    )?;
+    if deadline.expired() {
+        bail!("behaviour comparison hard total timeout expired after base model");
+    }
+    let derived_report = run_external_llama_active_deadline(
+        derived,
+        runtime_path,
+        suite_path,
+        seed,
+        limits,
+        active,
+        &deadline,
+        "derived",
+    )?;
     compare_reports(base_report, derived_report)
 }
 

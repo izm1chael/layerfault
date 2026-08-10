@@ -11,12 +11,13 @@ use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 
-const CACHE_SCHEMA_VERSION: u32 = 1;
+const CACHE_SCHEMA_VERSION: u32 = 2;
 const DIGEST_CACHE_REVISION: &str = "sha256-v1";
 const EVIDENCE_CACHE_REVISION: &str = env!("LAYERFAULT_SCANNER_REVISION");
 const DEFAULT_DIGEST_MIN_CACHE_BYTES: u64 = 16 * 1024 * 1024;
 const DEFAULT_EVIDENCE_MIN_CACHE_BYTES: u64 = 4 * 1024 * 1024;
 const MAX_RECORD_BYTES: u64 = 16 * 1024 * 1024;
+#[cfg(any(unix, test))]
 const GUARD_BYTES: usize = 4096;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -112,7 +113,7 @@ pub fn sha256_prefixed(path: &Path, file: &File) -> Result<HashOutcome> {
     let before = capture_identity(path, file)?;
     if eligible(before.len) {
         if let Some(record) = load_digest_record(&before)? {
-            let guard = guard_sha256(file, before.len)?;
+            let guard = cache_validation_sha256(file, before.len, None)?;
             let after = capture_identity(path, file)?;
             if after == before && guard == record.guard_sha256 {
                 return Ok(HashOutcome {
@@ -134,7 +135,7 @@ pub fn sha256_prefixed(path: &Path, file: &File) -> Result<HashOutcome> {
     }
 
     if eligible(after.len) {
-        let guard_sha256 = guard_sha256(file, after.len)?;
+        let guard_sha256 = cache_validation_sha256(file, after.len, Some(&sha256))?;
         let final_identity = capture_identity(path, file)?;
         if final_identity != after {
             return Err(anyhow!(
@@ -180,7 +181,7 @@ where
     let before = capture_identity(path, file)?;
     if eligible(before.len) {
         if let Some(record) = load_digest_record(&before)? {
-            let guard = guard_sha256(file, before.len)?;
+            let guard = cache_validation_sha256(file, before.len, None)?;
             let after = capture_identity(path, file)?;
             if after == before && guard == record.guard_sha256 {
                 return Ok((
@@ -205,7 +206,7 @@ where
     }
 
     if eligible(after.len) {
-        let guard_sha256 = guard_sha256(file, after.len)?;
+        let guard_sha256 = cache_validation_sha256(file, after.len, Some(&sha256))?;
         let final_identity = capture_identity(path, file)?;
         if final_identity != after {
             return Err(anyhow!(
@@ -314,7 +315,7 @@ where
     {
         return Ok(None);
     }
-    let guard = guard_sha256(file, current.len)?;
+    let guard = cache_validation_sha256(file, current.len, None)?;
     let after = capture_identity(path, file)?;
     if after != current || guard != record.guard_sha256 {
         return Ok(None);
@@ -337,7 +338,7 @@ where
     if current != *expected_identity || !evidence_eligible(current.len) {
         return Ok(());
     }
-    let guard_sha256 = guard_sha256(file, current.len)?;
+    let guard_sha256 = cache_validation_sha256(file, current.len, None)?;
     let after = capture_identity(path, file)?;
     if after != current {
         return Ok(());
@@ -493,6 +494,7 @@ where
     crate::paths::write_private(&path, &bytes)
 }
 
+#[cfg(unix)]
 fn guard_sha256(file: &File, len: u64) -> Result<String> {
     let mut hasher = Sha256::new();
     hasher.update(b"layerfault-file-guard-v1\0");
@@ -506,6 +508,27 @@ fn guard_sha256(file: &File, len: u64) -> Result<String> {
     Ok(format!("sha256:{}", hex::encode(hasher.finalize())))
 }
 
+fn cache_validation_sha256(
+    file: &File,
+    len: u64,
+    known_full_digest: Option<&str>,
+) -> Result<String> {
+    #[cfg(unix)]
+    {
+        let _ = known_full_digest;
+        guard_sha256(file, len)
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = len;
+        match known_full_digest {
+            Some(digest) => Ok(digest.to_owned()),
+            None => sha256_uncached_prefixed(file),
+        }
+    }
+}
+
+#[cfg(unix)]
 fn guard_offsets(len: u64) -> Vec<u64> {
     if len == 0 {
         return vec![0];
@@ -520,6 +543,7 @@ fn guard_offsets(len: u64) -> Vec<u64> {
     offsets
 }
 
+#[cfg(unix)]
 fn read_guard(file: &File, offset: u64, len: u64) -> Result<Vec<u8>> {
     if offset >= len {
         return Ok(Vec::new());
@@ -552,6 +576,7 @@ mod tests {
         ))
     }
 
+    #[cfg(unix)]
     #[test]
     fn guard_changes_when_sampled_content_changes() -> Result<()> {
         let root = test_root("guard");
@@ -590,6 +615,29 @@ mod tests {
         std::fs::write(&path, b"two-two")?;
         let file = crate::safeio::open_readonly_nofollow(&path)?;
         let after = capture_identity(&path, &file)?;
+        assert_ne!(before, after);
+        let _ = std::fs::remove_dir_all(root);
+        Ok(())
+    }
+
+    #[cfg(not(unix))]
+    #[test]
+    fn cache_validation_covers_content_outside_sampled_guard_regions() -> Result<()> {
+        let root = test_root("full-validation");
+        std::fs::create_dir_all(&root)?;
+        let path = root.join("model.bin");
+        std::fs::write(&path, vec![b'a'; GUARD_BYTES * 8])?;
+        let file = crate::safeio::open_readonly_nofollow(&path)?;
+        let before = cache_validation_sha256(&file, file.metadata()?.len(), None)?;
+        drop(file);
+
+        let mut file = std::fs::OpenOptions::new().write(true).open(&path)?;
+        file.seek(SeekFrom::Start((GUARD_BYTES * 2) as u64))?;
+        file.write_all(b"changed outside sampled guard")?;
+        drop(file);
+
+        let file = crate::safeio::open_readonly_nofollow(&path)?;
+        let after = cache_validation_sha256(&file, file.metadata()?.len(), None)?;
         assert_ne!(before, after);
         let _ = std::fs::remove_dir_all(root);
         Ok(())

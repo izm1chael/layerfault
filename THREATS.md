@@ -35,6 +35,7 @@ Every result has three independent dimensions:
 | T13 | Local Attestation | Integrity | Missing/unverified = Warn; invalid under supplied key = Fail |
 | T14 | PII Leakage | Heuristics | Warning; values are redacted |
 | T15 | GGUF Metadata Content Indicator | Metadata | Inherits the underlying heuristic result |
+| T16 | Pickle Opcode / Global Reference Risk | Serialization | Malformed/dangerous = Fail; unknown global = Warn; allowlisted globals = Pass |
 | S1 | GGUF Structural Failure | Metadata | Fail |
 | C1 | Unsupported/Unknown Layer | Layer policy | Warn after integrity verification |
 
@@ -90,7 +91,11 @@ Selected human-readable GGUF metadata (for example chat templates, prompts, desc
 
 ## 6. Content heuristics T1-T6, T9-T11, T14
 
-The regex signature table in `scanner/heuristics.rs` preserves individual signature IDs and bounded context. File-backed text layers are scanned incrementally across the complete descriptor with overlap between chunks; Layerfault no longer skips heuristic inspection merely because a layer exceeds 10 MiB. Invalid UTF-8 is decoded lossily for detection and zero-width/bidirectional control characters are removed from a parallel detection view while the original bytes remain the integrity evidence. Any normalization without a signature match is surfaced as an operational warning rather than a silent clean pass.
+The regex signature table in `scanner/heuristics.rs` preserves individual signature IDs and bounded context. File-backed text layers are scanned incrementally across the complete descriptor with overlap between chunks; Layerfault no longer skips heuristic inspection merely because a layer exceeds 10 MiB. Invalid UTF-8 is decoded lossily for detection and zero-width/bidirectional control characters are removed from a parallel detection view while the original bytes remain the integrity evidence. A small, reviewable confusable-character map normalizes common Greek/Cyrillic homoglyph substitutions for matching without changing the integrity bytes. Normalization by itself is not a security finding.
+
+Suspicious Base64-, hexadecimal-, and ROT13-shaped text is decoded under explicit byte, candidate, and recursion-depth limits (depth at most two) and the high-value T1-T5/T9 signatures are re-run against decoded text. A decoded hit is emitted as `LF-HEUR-DECODED-MATCH` with the transform chain recorded; Layerfault never executes decoded content. Exhausting the decode budget is an explicit incomplete-coverage warning rather than a clean result.
+
+Prompt/chat-template metadata receives additional template-specific checks for Jinja/SSTI object-graph traversal and dangerous dynamic include/import patterns. These rules inspect template source only; Layerfault does not render or execute the template.
 
 A `RegexSet` first identifies candidate rule families for each streamed window, so Layerfault does not run every extraction expression over every byte. Match counting continues for severity/corroboration, while retained evidence is capped globally and per signature to prevent attacker-controlled report/memory amplification.
 
@@ -138,6 +143,15 @@ Candidate offsets are escalated to `FAIL` only after format-specific validation.
 
 All structural reads are positional and cursor-independent. On cold Ollama model/tensor scans and standalone GGUF/Safetensors admission, executable discovery consumes the same sequential chunks already being hashed, eliminating a second whole-artifact read. Random short magic coincidences therefore remain `PASS`.
 
+
+## 8A. Pickle opcode analysis T16
+
+Pickle/PyTorch/joblib serialization is inspected statically rather than rejected solely by extension. Layerfault parses protocol 0-5 opcode framing with bounded argument lengths and tracks only the stack/memo state needed to resolve `GLOBAL` and `STACK_GLOBAL` references. Environment-dependent `EXT1`/`EXT2`/`EXT4` registry lookups and unresolved or non-allowlisted `NEWOBJ` constructors are blocking execution primitives rather than clean results. Layerfault **never unpickles or executes** the stream. PyTorch ZIP checkpoints are opened as bounded containers and only pickle members are analyzed; member names are containment-checked and decompression/member limits are enforced.
+
+Known tensor/numeric reconstruction globals (for example common PyTorch, NumPy, `OrderedDict`, and narrowly selected builtin container constructors) are allowlisted in code. Explicit execution primitives such as `os.system`, `subprocess.*`, `eval`, `exec`, `compile`, `__import__`, `pty.spawn`, legacy instantiation opcodes, and dangerous `REDUCE`/`BUILD` use fail with named evidence. Unknown globals warn for review rather than being silently trusted or blanket-blocked. Malformed/truncated/desynchronized streams fail structurally. Compressed pickle-by-name inputs that cannot be transparently inspected remain explicit opaque/incomplete warnings.
+
+Primary rule IDs are `LF-PICKLE-SAFE-GLOBALS`, `LF-PICKLE-UNKNOWN-GLOBAL`, `LF-PICKLE-DANGEROUS-GLOBAL`, `LF-PICKLE-MALFORMED`, and the opaque-container/compressed variants.
+
 ## 9. Local attestation T13
 
 Detached Ed25519 signatures are **local attestations**. A valid signature means:
@@ -145,6 +159,8 @@ Detached Ed25519 signatures are **local attestations**. A valid signature means:
 > the supplied public key verifies the exact manifest bytes Layerfault parsed and scanned.
 
 It does not by itself prove who owns that key or establish publisher identity. Publisher/source provenance requires an external trust policy mapping keys to identities/namespaces.
+
+When Sigstore/cosign verification is requested, Layerfault records the canonical verifier path, SHA-256 digest, and reported version and revalidates the executable bytes immediately before verification. This preserves the external-crypto design while making the verifier implementation part of reproducible evidence rather than trusting an unrecorded `$PATH` binary.
 
 The scanner hashes the exact manifest byte buffer it parsed and verifies a signature over that same buffer; it does not reopen the manifest between parse and signature verification.
 
@@ -252,7 +268,7 @@ Layerfault's standalone GGUF/Safetensors admission checks establish structural v
 
 Hugging Face support is an offline cache-consistency check. Repository folder names and refs are not treated as cryptographic publisher identity. Snapshot symlinks must resolve within the repository's local blob store and supported artifacts receive format-specific structural inspection.
 
-Safetensors indexes are treated as security-relevant metadata: shard paths must be safe, referenced shards must be locally resolvable within the allowed source boundary, and each supported shard must pass structural validation.
+Safetensors indexes are treated as security-relevant metadata: shard paths must be safe, referenced shards must be locally resolvable within the allowed source boundary, and each supported shard must pass structural validation. JSON headers/indexes are capped at 32 MiB, tensor entries at 250,000, metadata entries at 10,000, and tensor rank at 32 before inventory construction.
 
 Optional Sigstore verification trusts only the explicitly supplied expected certificate identity and issuer accepted by the installed Cosign verifier. Layerfault never downgrades a failed Sigstore verification to an unsigned warning.
 
@@ -262,7 +278,7 @@ A `lfpkg:sha256:` identity binds a sorted canonical description of package-relat
 
 Layerfault rejects a direct package root that is itself a symlink and never follows package-internal symlinks. The Hugging Face cache adapter is intentionally different because snapshots are symlink trees by design: a snapshot link is accepted only when its canonical target stays inside that repository's local `blobs` directory. Content-addressed scan reuse is keyed by both resolved blob and presented filename role so the same bytes linked as `config.json` and `modeling_*.py` cannot inherit the wrong classification.
 
-Whole-package inspection is static and bounded. Layerfault does not import model Python, execute shell/native files, invoke package installers, or deserialize Pickle/PyTorch objects. Code-capable serialization is therefore treated as an admission risk rather than opened with the vulnerable loader it is intended to protect.
+Whole-package inspection is static and bounded. Discovery prunes ignored directory trees and refuses more than 100,000 entries, depth above 64, member paths above 4,096 UTF-8 bytes, or aggregate declared content above 1 TiB. Layerfault does not import model Python, execute shell/native files, invoke package installers, or deserialize Pickle/PyTorch objects. Code-capable serialization is therefore treated as an admission risk rather than opened with the vulnerable loader it is intended to protect.
 
 Hugging Face `auto_map` is sufficient to establish that a package declares a custom loader relationship; Layerfault does not require a package-local `trust_remote_code=true` value before correlating the referenced local Python module. Runtime callers normally provide that trust decision externally. Correlation uses bytes captured from the same no-follow descriptor already fingerprinted/scanned, avoiding a second path reopen. Oversized JSON members produce bounded coverage evidence instead of aborting package admission.
 
@@ -276,7 +292,7 @@ The built-in catalog is compiled into Layerfault. High/critical matches are `Ope
 
 External catalogs are never trusted merely because they are JSON. The operator must supply an Ed25519 signature and public key. Layerfault opens and verifies the database once and evaluates that same byte buffer, preventing a catalog verify/reopen race. A catalog older than the configured freshness expectation produces a warning: absence of a match in stale data is not proof that a runtime is current.
 
-Runtime version checking and launch use the same canonical executable path resolved by Layerfault. This removes a second PATH lookup but does not claim to prevent a same-privilege attacker from replacing the runtime executable itself after the version check; protecting runtime installation files is an OS/package-management control.
+Runtime version checking records the canonical executable and its SHA-256. Immediately before launch, Layerfault opens that path without following the final symlink, streams it into a private executable staging directory, verifies the copied digest, and mounts only that staged copy as `/runtime`. Replacement of the original pathname after binding therefore cannot change the launched bytes.
 
 ## 18. Verify-to-execute binding
 
@@ -317,7 +333,18 @@ Dataset poisoning analysis is deliberately bounded. Reports expose records avail
 
 Active behavioural analysis is a **separate control** from static admission. It can demonstrate that a particular model/runtime/probe combination produced a response regression or attempted a runtime side effect. A clean active run does not prove the absence of untested triggers, delayed behavior, training-time poisoning, or behavior that requires a different runtime/context.
 
-External active backends fail closed unless Linux Bubblewrap can create an isolated filesystem/network/PID/IPC/UTS view. The model and optional base package are mounted read-only. The runtime is mounted as `/runtime`; normal host executable directories are not mounted, while the minimum shared-library trees needed by the runtime remain read-only. The sandbox receives a private `/proc`, synthetic `/dev`, tmpfs `/tmp`, private writable workspace/HOME, offline Hugging Face settings, dropped Linux capabilities, and no host network namespace.
+
+The built-in active probe corpus defaults to `core-v2`, expanding the fixed corpus to dozens of probes across the existing categories plus conditional/context-triggered behavior and multi-turn consistency scenarios. Mutation expansion covers trigger, obfuscation, prompt-injection, exfiltration, privilege-boundary and related probes under a hard caller-supplied cap. Versioned `core-v1` remains loadable explicitly for reproducing older evidence. Corpus expansion narrows coverage gaps but does not change the epistemic boundary: a clean run is not proof that no trigger exists.
+
+Behavioural runtimes are session-scoped. A llama.cpp model is loaded once into a sandboxed `llama-server` session bound to a Unix-domain socket inside the isolated workspace; each probe is submitted as a stateless request and slot/context state is erased before reuse. The managed Transformers backend similarly loads once into a bounded NDJSON worker. Sessions are never shared across unrelated models. A base/derived comparison therefore performs at most one load per model.
+
+`--timeout-seconds` is a hard command-wide behavioural deadline. Probe operations consume the remaining budget, teardown has a bounded grace period, and Linux runtime trees are placed in their own process group so timeout/cancellation sends TERM and then KILL to descendants before reaping. Progress phases are emitted to stderr so JSON stdout remains machine-readable.
+
+Filesystem telemetry computes aggregate suspicious-mutation state before bounded evidence truncation, retains suspicious entries first, and reports snapshot overflow/incomplete coverage. Evidence caps therefore bound report size without allowing an attacker to hide a suspicious mutation by flooding benign cache files.
+
+Persistent digest and scan-evidence cache records are schema-versioned and content-validated before reuse. Unix validation binds device, inode, change time, timestamps, length, and sampled content. Windows and other non-Unix targets lack the same immutable change identity in this implementation, so Layerfault rehashes the complete file before reusing either its digest or prior PASS evidence; restoring a file's length and timestamps cannot bypass that check.
+
+External active backends fail closed unless Linux Bubblewrap can create an isolated filesystem/network/PID/IPC/UTS view. The model and optional base package are mounted read-only. A digest-verified private copy of the runtime is mounted as `/runtime`; normal host executable directories are not mounted, while the minimum shared-library trees needed by the runtime remain read-only. The sandbox receives a private `/proc`, synthetic `/dev`, tmpfs `/tmp`, private writable workspace/HOME, offline Hugging Face settings, dropped Linux capabilities, and no host network namespace.
 
 Layerfault deliberately places **synthetic** secrets in the private sandbox HOME/workspace and environment. Syscall telemetry can therefore distinguish attempts to access SSH/API-secret decoys without exposing real host credentials. `strace` telemetry records bounded evidence of network syscalls, unexpected process execution, canary/sensitive-path access, and loader/runtime activity. Files surviving in the writable workspace are compared with a pre-run snapshot. The telemetry itself is stored outside the path mounted into the sandbox.
 
@@ -328,3 +355,11 @@ The Transformers/PEFT backend is local-only. It sets Hugging Face/Transformers o
 Differential output analysis is intentionally evidence-based. Deterministic base/derived responses are compared with bounded lexical similarity and repetition metrics. Broad response changes across a fine-tune are not automatically malicious. Isolated divergence relative to the median probe behavior is reported as `LF-DIFF-LOCALIZED-DIVERGENCE`; a trigger-designated isolated divergence or derived output-collapse condition can escalate to `LF-DIFF-SUSPICIOUS-TRIGGER`. Operators should reproduce suspicious rows with adjacent probe mutations before attributing malicious intent.
 
 Trace truncation is surfaced as `LF-BEHAV-TRACE-TRUNCATED` and prevents an over-budget syscall trace from being interpreted as complete side-effect coverage.
+
+## Platform service persistence boundary
+
+Remote PostgreSQL URLs are upgraded to `sslmode=require` and use Rustls certificate and hostname verification. Public WebPKI roots are available by default; private deployments can add PEM roots with `LAYERFAULT_DB_CA_FILE`. Plaintext remote PostgreSQL requires both `sslmode=disable` and the explicit `LAYERFAULT_ALLOW_INSECURE_DB=1` development-risk override. Loopback databases may explicitly disable TLS.
+
+Model/revision and review/finding/advisory writes are database transactions. Schema migration version 2 adds cascading foreign keys for relational platform records on both SQLite and PostgreSQL. Existing orphaned data causes migration failure with a repair-required error rather than being silently discarded. Worker leases use renewable owner/token fencing, and stale workers cannot complete a reclaimed job.
+
+Hub crawling performs network retrieval before acquiring the shared web database lock, then holds the lock only while enqueueing the fetched page. Public HTTP quotas are maintained per source address with bounded bucket storage; health checks remain independent from client quotas.

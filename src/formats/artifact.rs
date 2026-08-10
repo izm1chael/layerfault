@@ -1,4 +1,4 @@
-use super::{keras, onnx, safetensors, tensorflow, tflite, ArtifactFormat};
+use super::{keras, onnx, pickle, safetensors, tensorflow, tflite, ArtifactFormat};
 use crate::safeio::open_readonly_nofollow;
 use crate::scanner::{
     BinaryScanner, Confidence, FindingClass, LayerScanResult, MetadataScanner, ScanStatus,
@@ -139,6 +139,7 @@ fn inspect_opened(
         ArtifactFormat::Safetensors => "application/x-safetensors",
         ArtifactFormat::SafetensorsIndex => "application/x-safetensors-index+json",
         ArtifactFormat::Onnx => "application/x-onnx",
+        ArtifactFormat::Pickle => "application/x-python-pickle",
         ArtifactFormat::TensorFlowSavedModel => "application/x-tensorflow-savedmodel",
         ArtifactFormat::TensorFlowCheckpoint => "application/x-tensorflow-checkpoint",
         ArtifactFormat::TensorFlowLite => "application/x-tflite",
@@ -214,6 +215,9 @@ fn inspect_opened(
             let (finding, compound) = onnx::scan(path, &file, size, &identity, media)?;
             compound_identity = compound;
             results.push(finding);
+        }
+        ArtifactFormat::Pickle => {
+            results.extend(pickle::scan(path, &file, size, &identity, media)?);
         }
         ArtifactFormat::TensorFlowSavedModel => results.push(tensorflow::scan_saved_model(&file, size, &identity, media)?),
         ArtifactFormat::TensorFlowCheckpoint => results.push(tensorflow::scan_checkpoint(path, &file, size, &identity, media)?),

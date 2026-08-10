@@ -118,6 +118,7 @@ pub fn certify(include_sparse: bool) -> Result<CertificationReport> {
     let runtime = crate::advisory::RuntimeInfo {
         runtime: crate::advisory::RuntimeKind::Ollama,
         executable: "synthetic".to_owned(),
+        executable_sha256: "sha256:synthetic".into(),
         raw_version: "ollama version is 0.17.0".to_owned(),
         parsed_version: Some("0.17.0".to_owned()),
     };

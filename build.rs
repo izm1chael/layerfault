@@ -5,10 +5,10 @@ use std::path::{Path, PathBuf};
 
 fn main() {
     let mut build_files = Vec::new();
-    for root in ["src", "schemas", "advisories", "policies"] {
+    for root in ["src", "schemas", "advisories", "policies", "vendor"] {
         collect(Path::new(root), &mut build_files);
     }
-    for file in ["Cargo.toml", "Cargo.lock", "THREATS.md"] {
+    for file in ["Cargo.toml", "Cargo.lock", "THREATS.md", "build.rs"] {
         let path = PathBuf::from(file);
         if path.is_file() {
             build_files.push(path);

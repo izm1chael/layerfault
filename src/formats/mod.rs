@@ -2,6 +2,7 @@ pub mod artifact;
 pub mod gguf;
 pub mod keras;
 pub mod onnx;
+pub mod pickle;
 pub mod safetensors;
 pub mod tensorflow;
 pub mod tflite;
@@ -15,6 +16,7 @@ pub enum ArtifactFormat {
     Safetensors,
     SafetensorsIndex,
     Onnx,
+    Pickle,
     TensorFlowSavedModel,
     TensorFlowCheckpoint,
     TensorFlowLite,
@@ -41,6 +43,12 @@ impl ArtifactFormat {
             Self::SafetensorsIndex
         } else if ext == "safetensors" {
             Self::Safetensors
+        } else if matches!(
+            ext.as_str(),
+            "pkl" | "pickle" | "joblib" | "pt" | "pth" | "ckpt"
+        ) || (prefix.len() >= 2 && prefix[0] == 0x80 && (2..=5).contains(&prefix[1]))
+        {
+            Self::Pickle
         } else if ext == "onnx" {
             Self::Onnx
         } else if name == "saved_model.pb" {
@@ -63,6 +71,7 @@ impl ArtifactFormat {
             Self::Safetensors => "safetensors",
             Self::SafetensorsIndex => "safetensors-index",
             Self::Onnx => "onnx",
+            Self::Pickle => "pickle",
             Self::TensorFlowSavedModel => "tensorflow-savedmodel",
             Self::TensorFlowCheckpoint => "tensorflow-checkpoint",
             Self::TensorFlowLite => "tflite",

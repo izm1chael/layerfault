@@ -451,7 +451,7 @@ The complete RC hardening pass makes security decisions monotonic across composi
 
 Package content inspection no longer has a 4 MiB security-text cliff. Text/config members are streamed through bounded package-risk inspection, while Hugging Face loader metadata is extracted with a streaming JSON visitor so ordinary multi-megabyte `tokenizer.json` files do not become warnings merely because they are large. Evidence retention remains bounded.
 
-Artifact JSON reports include cache diagnostics. Digest and scanner-evidence reuse use separate thresholds: `LAYERFAULT_HASH_CACHE_MIN_BYTES` controls digest caching (default 16 MiB) and `LAYERFAULT_EVIDENCE_CACHE_MIN_BYTES` controls scanner-evidence caching (default 4 MiB). `--no-cache` still disables persistent reuse for the invocation.
+Artifact JSON reports include cache diagnostics. Digest and scanner-evidence reuse use separate thresholds: `LAYERFAULT_HASH_CACHE_MIN_BYTES` controls digest caching (default 16 MiB) and `LAYERFAULT_EVIDENCE_CACHE_MIN_BYTES` controls scanner-evidence caching (default 4 MiB). Unix reuse is bound to device, inode, change time, timestamps, size, and a sampled content guard. Platforms without that immutable change identity, including Windows, revalidate the complete file digest before reusing a digest or prior scan evidence. `--no-cache` still disables persistent reuse for the invocation.
 
 Dataset commands accept `--jobs N`. Poisoning review reports exact bounded coverage and, when more than 250,000 records are available, deterministically samples across the complete record range rather than analysing only the dataset head. Results are merged deterministically so parallelism does not alter the semantic report.
 

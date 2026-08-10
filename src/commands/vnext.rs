@@ -281,15 +281,7 @@ pub(crate) fn run_behaviour(args: BehaviourArgs) -> Result<()> {
         }
         return emit_behaviour(&report, args.json);
     }
-    let defaults = layerfault::behaviour::BehaviourLimits::for_profile(&args.profile)?;
-    let limits = defaults.clamp(
-        args.max_prompts.unwrap_or(usize::MAX),
-        args.max_turns.unwrap_or(usize::MAX),
-        args.max_tokens.map(|v| v as u64).unwrap_or(u64::MAX),
-        args.timeout_seconds.unwrap_or(u64::MAX),
-        args.max_mutations.unwrap_or(usize::MAX),
-        args.repeat_count.unwrap_or(usize::MAX),
-    );
+    let limits = resolve_behaviour_limits(&args)?;
     let active = layerfault::behaviour::ActiveExecutionOptions {
         allow_static_blocked: args.allow_static_blocked,
         execute_custom_code: args.execute_custom_code,
@@ -345,6 +337,21 @@ pub(crate) fn run_behaviour(args: BehaviourArgs) -> Result<()> {
         layerfault::paths::write_private(path, &serde_json::to_vec_pretty(&manifest)?)?;
     }
     emit_behaviour(&report, args.json)
+}
+
+pub(crate) fn resolve_behaviour_limits(
+    args: &BehaviourArgs,
+) -> Result<layerfault::behaviour::BehaviourLimits> {
+    Ok(
+        layerfault::behaviour::BehaviourLimits::for_profile(&args.profile)?.clamp(
+            args.max_prompts.unwrap_or(usize::MAX),
+            args.max_turns.unwrap_or(usize::MAX),
+            args.max_tokens.map(|v| v as u64).unwrap_or(u64::MAX),
+            args.timeout_seconds.unwrap_or(u64::MAX),
+            args.max_mutations.unwrap_or(usize::MAX),
+            args.repeat_count.unwrap_or(usize::MAX),
+        ),
+    )
 }
 
 pub(crate) fn run_compare_behaviour(args: CompareBehaviourArgs) -> Result<()> {

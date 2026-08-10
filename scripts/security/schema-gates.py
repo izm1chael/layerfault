@@ -9,7 +9,7 @@ replacement for a full JSON Schema validator; release CI may additionally run on
 from __future__ import annotations
 import argparse, json, pathlib, subprocess, sys
 
-ROOT = pathlib.Path(__file__).resolve().parents[1]
+ROOT = pathlib.Path(__file__).resolve().parents[2]
 SCHEMAS = ROOT / "schemas"
 
 REQUIRED = {
@@ -19,7 +19,10 @@ REQUIRED = {
 
 def load_schemas() -> None:
     failures=[]
-    for path in sorted(SCHEMAS.glob("*.json")):
+    schemas = sorted(SCHEMAS.glob("*.json"))
+    if not schemas:
+        raise SystemExit(f"no JSON schemas discovered under {SCHEMAS}")
+    for path in schemas:
         try: obj=json.loads(path.read_text())
         except Exception as exc: failures.append(f"{path.name}: invalid JSON: {exc}"); continue
         if obj.get("$schema") != "https://json-schema.org/draft/2020-12/schema":

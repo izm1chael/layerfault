@@ -64,6 +64,7 @@ pub enum CheckType {
     GGUFMetadata,
     SafetensorsStructure,
     OnnxStructure,
+    PickleStructure,
     TensorFlowStructure,
     TfliteStructure,
     KerasStructure,

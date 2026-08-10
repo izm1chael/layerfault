@@ -243,3 +243,76 @@ fn valid_legacy_gguf_reaches_structure_pass() {
         .iter()
         .any(|r| { r["check_type"] == "GGUFMetadata" && r["status"] == "Pass" }));
 }
+
+#[test]
+fn pickle_verdict_tiers_survive_cli_artifact_inspection() {
+    let root = std::env::temp_dir().join(format!(
+        "layerfault-adversarial-pickle-{}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&root);
+    fs::create_dir_all(&root).expect("create pickle fixture directory");
+
+    let cases: &[(&str, &[u8], i32, &str, &str)] = &[
+        (
+            "safe",
+            b"ccollections\nOrderedDict\n.",
+            0,
+            "Pass",
+            "LF-PICKLE-SAFE-GLOBALS",
+        ),
+        (
+            "dangerous",
+            b"cos\nsystem\n)R.",
+            3,
+            "Fail",
+            "LF-PICKLE-DANGEROUS-GLOBAL",
+        ),
+        (
+            "unknown",
+            b"cacme.model\nCustomTensor\n.",
+            1,
+            "Warn",
+            "LF-PICKLE-UNKNOWN-GLOBAL",
+        ),
+        (
+            "malformed",
+            b"\x80\x04cfoo\nbar",
+            3,
+            "Fail",
+            "LF-PICKLE-MALFORMED",
+        ),
+    ];
+
+    for (name, bytes, expected_exit, expected_status, rule) in cases {
+        let path = root.join(format!("{name}.pkl"));
+        fs::write(&path, bytes).expect("write pickle fixture");
+        let output = Command::new(env!("CARGO_BIN_EXE_layerfault"))
+            .args(["inspect", path.to_str().expect("UTF-8 path"), "--json"])
+            .output()
+            .expect("inspect pickle fixture");
+        assert_eq!(
+            output.status.code(),
+            Some(*expected_exit),
+            "unexpected exit for {name}; stderr={}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let json = stdout_json(&output);
+        assert_eq!(json["format"], "pickle");
+        let results = json["results"].as_array().expect("artifact results");
+        assert!(
+            results.iter().any(|result| {
+                result["check_type"] == "PickleStructure"
+                    && result["status"] == *expected_status
+                    && result["matches"].as_array().is_some_and(|matches| {
+                        matches
+                            .iter()
+                            .any(|item| item.as_str().is_some_and(|text| text.contains(rule)))
+                    })
+            }),
+            "missing {rule} for {name}: {json}"
+        );
+    }
+
+    let _ = fs::remove_dir_all(root);
+}

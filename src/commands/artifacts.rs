@@ -435,7 +435,13 @@ fn pipeline_priority(finding: &layerfault::scanner::LayerScanResult) -> u8 {
     match policy::rule_id(finding).as_str() {
         id if id.starts_with("LF-PACKAGE-RACE") || id.starts_with("LF-PROV-") => 0,
         "T15-STRUCT" | "LF-SAFE-STRUCT" | "LF-SAFE-INDEX-INVALID" => 1,
-        "LF-SERIALIZATION-UNSAFE" | "LF-CODE-IMPORT-SIDE-EFFECT" => 3,
+        "LF-PICKLE-DANGEROUS-GLOBAL"
+        | "LF-PICKLE-MALFORMED"
+        | "LF-SERIALIZATION-UNSAFE"
+        | "LF-CODE-IMPORT-SIDE-EFFECT" => 3,
+        "LF-PICKLE-UNKNOWN-GLOBAL"
+        | "LF-PICKLE-OPAQUE-COMPRESSED"
+        | "LF-PICKLE-OPAQUE-CONTAINER" => 4,
         "LF-CODE-AUTO-MAP" | "LF-CODE-REMOTE-TRUST" | "LF-PACKAGE-CODE" => 4,
         "LF-CODE-NETWORK" | "LF-CODE-OS-SYSTEM" | "LF-CODE-SUBPROCESS" => 5,
         _ => 8,

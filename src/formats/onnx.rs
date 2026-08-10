@@ -80,8 +80,14 @@ pub fn scan(
                     Err(error) => {
                         status = crate::scanner::ScanStatus::Fail;
                         class = crate::scanner::FindingClass::Integrity;
+                        let error_text = error.to_string();
+                        let rule = if external_range_violation(&error_text) {
+                            "LF-ONNX-EXTERNAL-RANGE"
+                        } else {
+                            "LF-ONNX-EXTERNAL-INTEGRITY"
+                        };
                         matches.push(format!(
-                            "[LF-ONNX-EXTERNAL-INTEGRITY] external tensor data could not be integrity-bound: {error}"
+                            "[{rule}] external tensor data could not be integrity-bound: {error_text}"
                         ));
                         None
                     }
@@ -120,6 +126,12 @@ pub fn scan(
             None,
         )),
     }
+}
+
+fn external_range_violation(error: &str) -> bool {
+    error.contains("offset ") && error.contains("exceeds file length")
+        || error.contains("range ") && error.contains("exceeds file length")
+        || error.contains("range overflows u64")
 }
 
 struct BoundSidecar {
@@ -799,14 +811,39 @@ mod tests {
     }
 
     fn model_with_external(location: &str) -> Vec<u8> {
-        let mut external = Vec::new();
-        push_len(&mut external, 1, b"location");
-        push_len(&mut external, 2, location.as_bytes());
+        model_with_external_range(location, None, None)
+    }
 
+    fn external_entry(key_name: &str, value: &str) -> Vec<u8> {
+        let mut entry = Vec::new();
+        push_len(&mut entry, 1, key_name.as_bytes());
+        push_len(&mut entry, 2, value.as_bytes());
+        entry
+    }
+
+    fn model_with_external_range(
+        location: &str,
+        offset: Option<u64>,
+        length: Option<u64>,
+    ) -> Vec<u8> {
         let mut tensor = Vec::new();
         push_varint(&mut tensor, 2, 2);
         push_len(&mut tensor, 8, b"weight");
-        push_len(&mut tensor, 13, &external);
+        push_len(&mut tensor, 13, &external_entry("location", location));
+        if let Some(offset) = offset {
+            push_len(
+                &mut tensor,
+                13,
+                &external_entry("offset", &offset.to_string()),
+            );
+        }
+        if let Some(length) = length {
+            push_len(
+                &mut tensor,
+                13,
+                &external_entry("length", &length.to_string()),
+            );
+        }
         push_varint(&mut tensor, 14, 1);
 
         let mut graph = Vec::new();
@@ -882,6 +919,34 @@ mod tests {
         assert!(compound
             .as_deref()
             .is_some_and(|value| value.starts_with("lfonnx:sha256:")));
+        let _ = fs::remove_dir_all(root);
+        Ok(())
+    }
+
+    #[test]
+    fn external_range_violation_is_deterministic_security_finding() -> Result<()> {
+        let root =
+            std::env::temp_dir().join(format!("layerfault-onnx-range-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(root.join("data"))?;
+        let model = model_with_external_range("data/weights.bin", Some(8), Some(16));
+        let model_path = root.join("model.onnx");
+        fs::write(&model_path, &model)?;
+        fs::write(root.join("data/weights.bin"), b"tiny")?;
+        let file = File::open(&model_path)?;
+        let (finding, compound) = scan(
+            &model_path,
+            &file,
+            model.len() as u64,
+            "sha256:model",
+            "application/x-onnx",
+        )?;
+        assert_eq!(finding.status, crate::scanner::ScanStatus::Fail);
+        assert!(finding
+            .matches
+            .iter()
+            .any(|value| value.contains("LF-ONNX-EXTERNAL-RANGE")));
+        assert!(compound.is_none());
         let _ = fs::remove_dir_all(root);
         Ok(())
     }

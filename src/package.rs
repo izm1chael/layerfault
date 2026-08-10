@@ -1,7 +1,7 @@
 use crate::formats::{artifact, ArtifactFormat};
 use crate::safeio::open_readonly_nofollow;
 use crate::scanner::{CheckType, Confidence, FindingClass, LayerScanResult, ScanStatus};
-use anyhow::{anyhow, Context, Result};
+use anyhow::{anyhow, bail, Context, Result};
 use serde::de::{DeserializeSeed, MapAccess, SeqAccess, Visitor};
 use sha2::{Digest, Sha256};
 use std::collections::BTreeSet;
@@ -12,7 +12,10 @@ use walkdir::WalkDir;
 
 const TEXT_STREAM_CHUNK_BYTES: usize = 256 * 1024;
 const TEXT_STREAM_OVERLAP_BYTES: usize = 8 * 1024;
-const MAX_BINARY_PREFIX_BYTES: u64 = 2 * 1024 * 1024;
+const MAX_PACKAGE_ENTRIES: usize = 100_000;
+const MAX_PACKAGE_DEPTH: usize = 64;
+const MAX_PACKAGE_PATH_BYTES: usize = 4096;
+const MAX_PACKAGE_TOTAL_BYTES: u64 = 1024 * 1024 * 1024 * 1024;
 
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct PackageEntry {
@@ -51,6 +54,11 @@ struct PackageMemberEvidence {
     json_parse_error: Option<String>,
 }
 
+struct PackageDiscovery {
+    paths: Vec<PathBuf>,
+    symlinks: Vec<(String, Option<PathBuf>)>,
+}
+
 impl PackageReport {
     pub fn blocking(&self) -> bool {
         self.findings
@@ -72,22 +80,11 @@ pub fn inspect(root: &Path) -> Result<PackageReport> {
     let root = root
         .canonicalize()
         .with_context(|| format!("Unable to canonicalize package root '{}'", root.display()))?;
-    let mut paths = Vec::<PathBuf>::new();
     let mut findings = Vec::new();
-
-    for entry in WalkDir::new(&root).follow_links(false) {
-        let entry = entry?;
-        if entry.depth() == 0 {
-            continue;
-        }
-        let rel = safe_relative(&root, entry.path())?;
-        if ignored_path(&rel) {
-            continue;
-        }
-        if entry.file_type().is_symlink() {
-            let target = std::fs::read_link(entry.path()).ok();
-            findings.push(finding(
-                &format!("package:{}", rel),
+    let mut discovery = discover_package(&root)?;
+    for (rel, target) in discovery.symlinks {
+        findings.push(finding(
+                &format!("package:{rel}"),
                 CheckType::PackageSecurity,
                 ScanStatus::Fail,
                 FindingClass::Structural,
@@ -95,23 +92,19 @@ pub fn inspect(root: &Path) -> Result<PackageReport> {
                 "LF-PACKAGE-SYMLINK",
                 format!("Package contains symlink '{}' -> '{}'; model packages are fingerprinted and scanned without following links", rel, target.as_ref().map(|p| p.display().to_string()).unwrap_or_else(|| "<unreadable>".to_owned())),
             ));
-            continue;
-        }
-        if entry.file_type().is_file() {
-            paths.push(entry.into_path());
-        }
     }
-
-    paths.sort_by_key(|path| safe_relative(&root, path).unwrap_or_default());
+    discovery
+        .paths
+        .sort_by_key(|path| safe_relative(&root, path).unwrap_or_default());
     let mut files = Vec::new();
     let mut member_evidence = Vec::new();
     let mut total_bytes = 0_u64;
 
-    for path in paths {
+    for path in discovery.paths {
         let rel = safe_relative(&root, &path)?;
         let file = open_readonly_nofollow(&path)?;
         let size = file.metadata()?.len();
-        total_bytes = total_bytes.saturating_add(size);
+        total_bytes = checked_package_total(total_bytes, size)?;
         let hash = crate::hashcache::sha256_prefixed(&path, &file)?;
         let digest = hash.sha256.clone();
         let kind = classify(&path);
@@ -186,30 +179,19 @@ pub fn fingerprint_report(root: &Path) -> Result<PackageFingerprintReport> {
         return Err(anyhow!("'{}' is not a directory", root.display()));
     }
     let root = root.canonicalize()?;
-    let mut paths = Vec::new();
-    for entry in WalkDir::new(&root).follow_links(false) {
-        let entry = entry?;
-        if entry.depth() == 0 {
-            continue;
-        }
-        let rel = safe_relative(&root, entry.path())?;
-        if ignored_path(&rel) {
-            continue;
-        }
-        if entry.file_type().is_symlink() {
-            return Err(anyhow!(
-                "Package contains symlink '{}'; fingerprint-only identity refuses ambiguous package members",
-                rel
-            ));
-        }
-        if entry.file_type().is_file() {
-            paths.push(entry.into_path());
-        }
+    let mut discovery = discover_package(&root)?;
+    if let Some((rel, _)) = discovery.symlinks.first() {
+        return Err(anyhow!(
+            "Package contains symlink '{}'; fingerprint-only identity refuses ambiguous package members",
+            rel
+        ));
     }
-    paths.sort_by_key(|path| safe_relative(&root, path).unwrap_or_default());
+    discovery
+        .paths
+        .sort_by_key(|path| safe_relative(&root, path).unwrap_or_default());
     let mut files = Vec::new();
     let mut total_bytes = 0_u64;
-    for path in paths {
+    for path in discovery.paths {
         let rel = safe_relative(&root, &path)?;
         let file = open_readonly_nofollow(&path)?;
         let size = file.metadata()?.len();
@@ -220,7 +202,7 @@ pub fn fingerprint_report(root: &Path) -> Result<PackageFingerprintReport> {
                 rel
             ));
         }
-        total_bytes = total_bytes.saturating_add(size);
+        total_bytes = checked_package_total(total_bytes, size)?;
         files.push(PackageEntry {
             relative_path: rel,
             kind: classify(&path).to_owned(),
@@ -242,6 +224,73 @@ pub fn fingerprint_report(root: &Path) -> Result<PackageFingerprintReport> {
         files,
         total_bytes,
     })
+}
+
+fn discover_package(root: &Path) -> Result<PackageDiscovery> {
+    let mut paths = Vec::new();
+    let mut symlinks = Vec::new();
+    let mut entries = 0usize;
+    let mut declared_bytes = 0u64;
+    let mut walker = WalkDir::new(root).follow_links(false).into_iter();
+    while let Some(entry) = walker.next() {
+        let entry = entry?;
+        if entry.depth() == 0 {
+            continue;
+        }
+        if entry.depth() > MAX_PACKAGE_DEPTH {
+            bail!(
+                "Package entry '{}' exceeds maximum traversal depth {MAX_PACKAGE_DEPTH}",
+                entry.path().display()
+            );
+        }
+        let rel = safe_relative(root, entry.path())?;
+        if ignored_path(&rel) {
+            if entry.file_type().is_dir() {
+                walker.skip_current_dir();
+            }
+            continue;
+        }
+        entries = entries.saturating_add(1);
+        enforce_package_discovery_limits(entries, entry.depth(), rel.len(), declared_bytes)?;
+        if entry.file_type().is_symlink() {
+            symlinks.push((rel, std::fs::read_link(entry.path()).ok()));
+            continue;
+        }
+        if entry.file_type().is_file() {
+            declared_bytes = checked_package_total(declared_bytes, entry.metadata()?.len())?;
+            paths.push(entry.into_path());
+        }
+    }
+    Ok(PackageDiscovery { paths, symlinks })
+}
+
+fn enforce_package_discovery_limits(
+    entries: usize,
+    depth: usize,
+    path_bytes: usize,
+    total_bytes: u64,
+) -> Result<()> {
+    if entries > MAX_PACKAGE_ENTRIES {
+        bail!("Package exceeds maximum entry count {MAX_PACKAGE_ENTRIES}");
+    }
+    if depth > MAX_PACKAGE_DEPTH {
+        bail!("Package exceeds maximum traversal depth {MAX_PACKAGE_DEPTH}");
+    }
+    if path_bytes > MAX_PACKAGE_PATH_BYTES {
+        bail!("Package member path exceeds {MAX_PACKAGE_PATH_BYTES} bytes");
+    }
+    if total_bytes > MAX_PACKAGE_TOTAL_BYTES {
+        bail!("Package exceeds maximum aggregate size {MAX_PACKAGE_TOTAL_BYTES} bytes");
+    }
+    Ok(())
+}
+
+fn checked_package_total(current: u64, next: u64) -> Result<u64> {
+    let total = current
+        .checked_add(next)
+        .ok_or_else(|| anyhow!("Package aggregate size overflow"))?;
+    enforce_package_discovery_limits(0, 0, 0, total)?;
+    Ok(total)
 }
 
 pub fn inspect_member(display_path: &Path, content_path: &Path) -> Result<Vec<LayerScanResult>> {
@@ -332,15 +381,19 @@ fn scan_package_file(
         .unwrap_or("")
         .to_ascii_lowercase();
 
-    if is_unsafe_serialization(&lower, &ext, file)? {
+    if unsafe_serialization_name(&lower) {
+        // Bare/ZIP pickle names are dispatched above through ArtifactFormat::Pickle.
+        // Reaching here therefore means a compressed/opaque serialization name
+        // whose payload is not transparently decompressed in this pass. Keep it
+        // review-required instead of inventing a blanket unsafe-format BLOCK.
         out.push(finding(
             digest,
             CheckType::PackageSecurity,
-            ScanStatus::Fail,
-            FindingClass::ContentIndicator,
+            ScanStatus::Warn,
+            FindingClass::Compatibility,
             Confidence::High,
-            "LF-SERIALIZATION-UNSAFE",
-            format!("Package file '{}' uses or strongly resembles an unsafe code-capable serialization format; Layerfault never deserializes it", rel),
+            "LF-PICKLE-OPAQUE-COMPRESSED",
+            format!("Package file '{}' has a pickle/PyTorch serialization name behind unsupported compression; opcode analysis could not verify the payload", rel),
         ));
     } else if ext == "bin" {
         out.push(finding(
@@ -850,22 +903,6 @@ fn correlate_custom_code(
     }
 }
 
-fn is_unsafe_serialization(lower: &str, ext: &str, file: &std::fs::File) -> Result<bool> {
-    if unsafe_serialization_name(lower) {
-        return Ok(true);
-    }
-    if lower.ends_with("pytorch_model.bin") || ext == "bin" {
-        let bytes = prefix(file, MAX_BINARY_PREFIX_BYTES as usize)?;
-        if bytes.first().is_some_and(|b| *b == 0x80)
-            || find_bytes(&bytes, b"data.pkl")
-            || find_bytes(&bytes, b"pickle")
-        {
-            return Ok(true);
-        }
-    }
-    Ok(false)
-}
-
 fn unsafe_serialization_name(lower: &str) -> bool {
     let filename = lower.rsplit('/').next().unwrap_or(lower);
     let mut candidate = filename;
@@ -985,12 +1022,6 @@ fn prefix(file: &std::fs::File, limit: usize) -> Result<Vec<u8>> {
     Ok(bytes)
 }
 
-fn find_bytes(haystack: &[u8], needle: &[u8]) -> bool {
-    haystack
-        .windows(needle.len())
-        .any(|window| window == needle)
-}
-
 fn finding(
     digest: &str,
     check_type: CheckType,
@@ -1017,6 +1048,14 @@ fn finding(
 mod tests {
     use super::*;
     use std::fs;
+
+    #[test]
+    fn package_resource_limits_fail_closed() {
+        assert!(enforce_package_discovery_limits(MAX_PACKAGE_ENTRIES + 1, 1, 1, 0).is_err());
+        assert!(enforce_package_discovery_limits(1, MAX_PACKAGE_DEPTH + 1, 1, 0).is_err());
+        assert!(enforce_package_discovery_limits(1, 1, MAX_PACKAGE_PATH_BYTES + 1, 0).is_err());
+        assert!(checked_package_total(MAX_PACKAGE_TOTAL_BYTES, 1).is_err());
+    }
 
     #[test]
     fn package_fingerprint_is_path_stable() -> Result<()> {
@@ -1063,14 +1102,14 @@ mod tests {
         assert!(report.findings.iter().any(|f| f
             .matches
             .iter()
-            .any(|m| m.contains("LF-SERIALIZATION-UNSAFE"))
+            .any(|m| m.contains("LF-PICKLE-MALFORMED"))
             && f.status == ScanStatus::Fail));
         let _ = fs::remove_dir_all(root);
         Ok(())
     }
 
     #[test]
-    fn nested_compressed_joblib_is_blocked_without_deserialization() -> Result<()> {
+    fn nested_compressed_joblib_warns_when_payload_is_opaque() -> Result<()> {
         let root = std::env::temp_dir().join(format!(
             "layerfault-package-double-compressed-joblib-{}",
             std::process::id()
@@ -1083,11 +1122,11 @@ mod tests {
         )?;
         let report = inspect(&root)?;
         assert!(report.findings.iter().any(|finding| {
-            finding.status == ScanStatus::Fail
+            finding.status == ScanStatus::Warn
                 && finding
                     .matches
                     .iter()
-                    .any(|value| value.contains("LF-SERIALIZATION-UNSAFE"))
+                    .any(|value| value.contains("LF-PICKLE-OPAQUE-COMPRESSED"))
         }));
         assert!(report
             .files
@@ -1115,7 +1154,7 @@ mod tests {
                 && finding
                     .matches
                     .iter()
-                    .any(|value| value.contains("LF-SERIALIZATION-UNSAFE"))
+                    .any(|value| value.contains("LF-PICKLE-MALFORMED"))
         }));
         let _ = fs::remove_dir_all(root);
         Ok(())

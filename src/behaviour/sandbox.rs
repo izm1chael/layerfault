@@ -2,6 +2,8 @@ use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
+use std::process::{Child, Command};
+use std::time::{Duration, Instant};
 
 const MAX_SNAPSHOT_FILES: usize = 4096;
 const MAX_TRACE_BYTES: u64 = 32 * 1024 * 1024;
@@ -41,6 +43,9 @@ pub struct SandboxTelemetry {
     pub canary_accesses: Vec<String>,
     pub trace_available: bool,
     pub trace_truncated: bool,
+    pub snapshot_overflow: bool,
+    pub total_filesystem_mutations: usize,
+    pub suspicious_filesystem_mutations: usize,
 }
 
 impl SandboxTelemetry {
@@ -50,10 +55,8 @@ impl SandboxTelemetry {
             || !self.process_exec_attempts.is_empty()
             || !self.sensitive_path_accesses.is_empty()
             || !self.canary_accesses.is_empty()
-            || self
-                .filesystem_mutations
-                .iter()
-                .any(|value| !value.expected_runtime_artifact)
+            || self.suspicious_filesystem_mutations > 0
+            || self.snapshot_overflow
     }
 }
 
@@ -70,12 +73,18 @@ struct SnapshotEntry {
     modified_ns: u128,
 }
 
+#[derive(Debug, Default)]
+struct Snapshot {
+    entries: BTreeMap<String, SnapshotEntry>,
+    overflow: bool,
+}
+
 #[derive(Debug)]
 pub struct Workspace {
     pub root: PathBuf,
     pub home: PathBuf,
     telemetry_root: PathBuf,
-    baseline: BTreeMap<String, SnapshotEntry>,
+    baseline: Snapshot,
 }
 
 impl Workspace {
@@ -140,14 +149,16 @@ impl Workspace {
         let current = snapshot_tree(&self.root)?;
         let mut telemetry = SandboxTelemetry {
             trace_available: trace_enabled,
+            snapshot_overflow: self.baseline.overflow || current.overflow,
             ..SandboxTelemetry::default()
         };
 
-        let mut paths: BTreeSet<String> = self.baseline.keys().cloned().collect();
-        paths.extend(current.keys().cloned());
+        let mut paths: BTreeSet<String> = self.baseline.entries.keys().cloned().collect();
+        paths.extend(current.entries.keys().cloned());
+        let mut mutations = Vec::new();
         for path in paths {
-            let before = self.baseline.get(&path);
-            let after = current.get(&path);
+            let before = self.baseline.entries.get(&path);
+            let after = current.entries.get(&path);
             let kind = match (before, after) {
                 (None, Some(_)) => Some("CREATED"),
                 (Some(_), None) => Some("DELETED"),
@@ -157,14 +168,25 @@ impl Workspace {
                 _ => None,
             };
             if let Some(kind) = kind {
-                telemetry.filesystem_mutations.push(FileMutation {
+                mutations.push(FileMutation {
                     expected_runtime_artifact: expected_runtime_artifact(&path),
                     path,
                     kind: kind.to_owned(),
                 });
             }
         }
-        telemetry.filesystem_mutations.truncate(MAX_TELEMETRY_ROWS);
+        telemetry.total_filesystem_mutations = mutations.len();
+        telemetry.suspicious_filesystem_mutations = mutations
+            .iter()
+            .filter(|mutation| !mutation.expected_runtime_artifact)
+            .count();
+        // Bounded evidence must never become bounded detection: retain unexpected
+        // mutations first, then fill the remaining report budget with expected
+        // runtime cache/artifact churn. Aggregate counts above preserve risk even
+        // when the evidence vector is truncated.
+        mutations.sort_by_key(|mutation| mutation.expected_runtime_artifact);
+        mutations.truncate(MAX_TELEMETRY_ROWS);
+        telemetry.filesystem_mutations = mutations;
 
         if trace_enabled {
             parse_trace_files(&self.telemetry_root, &mut telemetry)?;
@@ -178,6 +200,127 @@ impl Drop for Workspace {
         let _ = std::fs::remove_dir_all(&self.root);
         let _ = std::fs::remove_dir_all(&self.telemetry_root);
     }
+}
+
+/// Put a spawned behavioural command in its own host-side process group where
+/// the platform supports it. Bubblewrap creates additional namespaces/sessions
+/// internally, so teardown also enumerates descendants instead of relying on
+/// the process group alone.
+pub fn configure_process_group(command: &mut Command) {
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        command.process_group(0);
+    }
+}
+
+/// Terminate and reap the complete behavioural process tree without using
+/// unsafe signal syscalls in Layerfault itself. On Linux, descendants are
+/// enumerated from /proc and signalled explicitly; elsewhere Child::kill is the
+/// conservative fallback. This is used for timeout, cancellation and failed
+/// session startup.
+pub fn terminate_process_tree(child: &mut Child, grace: Duration) -> Result<()> {
+    if child.try_wait()?.is_some() {
+        return Ok(());
+    }
+    #[cfg(target_os = "linux")]
+    {
+        let root = child.id();
+        signal_linux_tree(root, "-TERM");
+        let started = Instant::now();
+        while started.elapsed() < grace {
+            if child.try_wait()?.is_some() {
+                // A dead parent can still leave descendants if an inner
+                // namespace/session escaped group signalling. Recheck /proc.
+                if linux_descendants(root).is_empty() {
+                    return Ok(());
+                }
+            }
+            if linux_descendants(root).is_empty() {
+                let _ = child.try_wait()?;
+                return Ok(());
+            }
+            std::thread::sleep(Duration::from_millis(25));
+        }
+        signal_linux_tree(root, "-KILL");
+        let kill_started = Instant::now();
+        while kill_started.elapsed() < Duration::from_secs(2) {
+            if child.try_wait()?.is_some() && linux_descendants(root).is_empty() {
+                return Ok(());
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        let _ = child.kill();
+        let _ = child.wait();
+        Ok(())
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = child.kill();
+        let _ = child.wait();
+        Ok(())
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn signal_linux_tree(root: u32, signal: &str) {
+    let mut pids = linux_descendants(root);
+    pids.push(root);
+    // Descendants first so a parent cannot immediately respawn a child after
+    // its child was terminated but before the parent receives the signal.
+    pids.sort_unstable_by(|a, b| b.cmp(a));
+    pids.dedup();
+    let Some(kill) = crate::sources::find_executable("kill") else {
+        return;
+    };
+    for pid in pids {
+        if let Ok(mut command) = crate::safeio::command_for_executable(&kill) {
+            let _ = command
+                .arg(signal)
+                .arg("--")
+                .arg(pid.to_string())
+                .env_clear()
+                .status();
+        }
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn linux_descendants(root: u32) -> Vec<u32> {
+    let mut parent_by_pid = BTreeMap::<u32, u32>::new();
+    let Ok(entries) = std::fs::read_dir("/proc") else {
+        return Vec::new();
+    };
+    for entry in entries.flatten() {
+        let Some(name) = entry.file_name().to_str().map(ToOwned::to_owned) else {
+            continue;
+        };
+        let Ok(pid) = name.parse::<u32>() else {
+            continue;
+        };
+        let Ok(stat) = std::fs::read_to_string(entry.path().join("stat")) else {
+            continue;
+        };
+        let Some(close) = stat.rfind(')') else {
+            continue;
+        };
+        let mut fields = stat[close + 1..].split_whitespace();
+        let _state = fields.next();
+        let Some(ppid) = fields.next().and_then(|value| value.parse::<u32>().ok()) else {
+            continue;
+        };
+        parent_by_pid.insert(pid, ppid);
+    }
+    let mut found = BTreeSet::new();
+    let mut frontier = vec![root];
+    while let Some(parent) = frontier.pop() {
+        for (&pid, &ppid) in &parent_by_pid {
+            if ppid == parent && found.insert(pid) {
+                frontier.push(pid);
+            }
+        }
+    }
+    found.into_iter().collect()
 }
 
 /// Return a sandbox launcher only when it can provide both a private filesystem
@@ -531,6 +674,7 @@ pub fn command_for(
         command = crate::safeio::command_for_executable(bwrap)?;
     }
     command.args(bwrap_args);
+    configure_process_group(&mut command);
 
     Ok(SandboxedCommand {
         command,
@@ -558,14 +702,16 @@ fn append_strace_args(command: &mut std::process::Command, workspace: &Workspace
         .arg(workspace.trace_prefix());
 }
 
-fn snapshot_tree(root: &Path) -> Result<BTreeMap<String, SnapshotEntry>> {
+fn snapshot_tree(root: &Path) -> Result<Snapshot> {
     let mut out = BTreeMap::new();
+    let mut overflow = false;
     for entry in walkdir::WalkDir::new(root)
         .follow_links(false)
         .into_iter()
         .filter_map(|entry| entry.ok())
     {
         if out.len() >= MAX_SNAPSHOT_FILES {
+            overflow = true;
             break;
         }
         if !entry.file_type().is_file() {
@@ -592,7 +738,10 @@ fn snapshot_tree(root: &Path) -> Result<BTreeMap<String, SnapshotEntry>> {
             },
         );
     }
-    Ok(out)
+    Ok(Snapshot {
+        entries: out,
+        overflow,
+    })
 }
 
 fn expected_runtime_artifact(path: &str) -> bool {
@@ -783,5 +932,60 @@ mod tests {
     fn expected_runtime_artifacts_are_separated_from_unexpected_mutations() {
         assert!(expected_runtime_artifact("home/.cache/huggingface/x"));
         assert!(!expected_runtime_artifact("workspace/dropper.sh"));
+    }
+
+    #[test]
+    fn snapshot_overflow_is_explicit() -> Result<()> {
+        let root = std::env::temp_dir().join(format!(
+            "layerfault-snapshot-overflow-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root)?;
+        for index in 0..=MAX_SNAPSHOT_FILES {
+            std::fs::write(root.join(format!("f-{index:05}")), b"x")?;
+        }
+        let snapshot = snapshot_tree(&root)?;
+        assert!(snapshot.overflow);
+        assert!(snapshot.entries.len() <= MAX_SNAPSHOT_FILES);
+        let _ = std::fs::remove_dir_all(root);
+        Ok(())
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn timeout_teardown_kills_sigterm_ignoring_descendant() -> Result<()> {
+        let root =
+            std::env::temp_dir().join(format!("layerfault-process-tree-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root)?;
+        let pidfile = root.join("child.pid");
+        let mut command = Command::new("sh");
+        command.arg("-c").arg(format!(
+            "trap '' TERM; (trap '' TERM; while :; do sleep 1; done) & echo $! > '{}'; while :; do sleep 1; done",
+            pidfile.display()
+        ));
+        configure_process_group(&mut command);
+        let mut child = command.spawn()?;
+        let started = Instant::now();
+        while !pidfile.is_file() && started.elapsed() < Duration::from_secs(2) {
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        let descendant: u32 = std::fs::read_to_string(&pidfile)?.trim().parse()?;
+        terminate_process_tree(&mut child, Duration::from_millis(100))?;
+        assert!(child.try_wait()?.is_some());
+        let proc_stat = std::fs::read_to_string(format!("/proc/{descendant}/stat")).ok();
+        if let Some(stat) = proc_stat {
+            let state = stat
+                .rsplit_once(')')
+                .and_then(|(_, tail)| tail.split_whitespace().next());
+            assert_eq!(
+                state,
+                Some("Z"),
+                "descendant remained live after teardown: {stat}"
+            );
+        }
+        let _ = std::fs::remove_dir_all(root);
+        Ok(())
     }
 }

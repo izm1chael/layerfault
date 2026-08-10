@@ -123,3 +123,10 @@ path = "fuzz_targets/sources_directory.rs"
 test = false
 doc = false
 bench = false
+
+[[bin]]
+name = "pickle"
+path = "fuzz_targets/pickle.rs"
+test = false
+doc = false
+bench = false

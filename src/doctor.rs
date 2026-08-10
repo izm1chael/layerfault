@@ -97,9 +97,9 @@ pub fn run() -> Vec<DoctorCheck> {
             "not-ready"
         }
         .to_owned(),
-        detail: sources::find_executable("llama-cli")
+        detail: sources::find_executable("llama-server")
             .map(|path| path.display().to_string())
-            .unwrap_or_else(|| "llama-cli not found".to_owned()),
+            .unwrap_or_else(|| "llama-server not found".to_owned()),
     });
 
     for (name, kind) in [
@@ -194,6 +194,7 @@ pub fn capabilities() -> CapabilityReport {
         "prlimit",
         "strace",
         "llama-cli",
+        "llama-server",
         "nvidia-smi",
         "rocm-smi",
     ] {
@@ -261,7 +262,8 @@ pub fn capabilities() -> CapabilityReport {
         static_analysis: true,
         active_sandbox,
         custom_code_sandbox,
-        llama_active_analysis: active_sandbox && tools.get("llama-cli").copied().unwrap_or(false),
+        llama_active_analysis: active_sandbox
+            && tools.get("llama-server").copied().unwrap_or(false),
         transformers_active_analysis: active_sandbox && python_ready,
         managed_python_runtime: managed_python.map(|path| path.display().to_string()),
         tools,

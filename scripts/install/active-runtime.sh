@@ -99,7 +99,7 @@ EOF
   chmod 0644 /etc/profile.d/layerfault-runtime.sh
 fi
 
-if [[ "$LLAMA" == "auto" ]] && ! command -v llama-cli >/dev/null 2>&1; then
+if [[ "$LLAMA" == "auto" ]] && ! command -v llama-server >/dev/null 2>&1; then
   echo "Attempting distribution-managed llama.cpp installation for GGUF active analysis..."
   if command -v apt-get >/dev/null 2>&1 && apt-cache show llama.cpp >/dev/null 2>&1; then
     DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends llama.cpp || true
@@ -111,10 +111,10 @@ if [[ "$LLAMA" == "auto" ]] && ! command -v llama-cli >/dev/null 2>&1; then
     pacman -S --noconfirm llama.cpp || true
   fi
 fi
-if command -v llama-cli >/dev/null 2>&1; then
-  echo "llama-cli detected: $(command -v llama-cli)"
+if command -v llama-server >/dev/null 2>&1; then
+  echo "llama-server detected: $(command -v llama-server)"
 else
-  echo "NOTE: llama-cli was not found. GGUF active analysis remains unavailable until a trusted local llama.cpp runtime is installed."
+  echo "NOTE: llama-server was not found. Persistent GGUF active analysis remains unavailable until a trusted local llama.cpp server runtime is installed."
 fi
 
 echo "Active runtime installed."

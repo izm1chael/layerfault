@@ -49,8 +49,34 @@ fn sqlite_job_queue_is_idempotent_and_reclaims_ready_jobs() {
     assert_eq!(a, b);
     let job = db.claim("test-worker", 60).expect("claim").expect("job");
     assert_eq!(job.id, a);
-    db.succeed(&job.id).expect("succeed");
+    assert!(db.succeed(&job).expect("succeed"));
     assert!(db.claim("test-worker", 60).expect("empty claim").is_none());
+    drop(db);
+    let _ = std::fs::remove_file(path);
+}
+
+#[test]
+fn sqlite_job_lease_is_fenced_by_owner_and_token() {
+    let path = temp_path("jobs-fencing.sqlite");
+    let _ = std::fs::remove_file(&path);
+    let url = format!("sqlite:{}", path.display());
+    let mut db = layerfault::platform::db::PlatformDb::connect(&url).expect("open sqlite");
+    db.migrate().expect("migrate");
+    let id = db
+        .enqueue("hub-review", "fenced-key", &serde_json::json!({"x":1}), 10)
+        .expect("enqueue");
+    let job = db.claim("worker-a", 60).expect("claim").expect("job");
+    assert_eq!(job.id, id);
+    assert!(!db
+        .renew_lease(&job.id, "worker-a", "wrong-token", 60)
+        .expect("wrong token renewal"));
+    assert!(db
+        .renew_lease(&job.id, &job.lease_owner, &job.lease_token, 60)
+        .expect("owned renewal"));
+    let mut stale = job.clone();
+    stale.lease_token = "stale-token".to_owned();
+    assert!(!db.succeed(&stale).expect("stale completion"));
+    assert!(db.succeed(&job).expect("owned completion"));
     drop(db);
     let _ = std::fs::remove_file(path);
 }

@@ -573,6 +573,7 @@ pub fn format_from_path(path: &Path) -> ArtifactFormat {
     {
         "gguf" => ArtifactFormat::Gguf,
         "safetensors" => ArtifactFormat::Safetensors,
+        "pkl" | "pickle" | "joblib" | "pt" | "pth" | "ckpt" => ArtifactFormat::Pickle,
         _ => ArtifactFormat::Unknown,
     }
 }

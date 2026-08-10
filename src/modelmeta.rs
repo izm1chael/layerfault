@@ -170,6 +170,7 @@ pub fn snapshot_artifact(path: &Path) -> Result<ModelSnapshot> {
             bail!("a Safetensors index must be snapshotted as part of its package directory")
         }
         ArtifactFormat::Onnx
+        | ArtifactFormat::Pickle
         | ArtifactFormat::TensorFlowSavedModel
         | ArtifactFormat::TensorFlowCheckpoint
         | ArtifactFormat::TensorFlowLite

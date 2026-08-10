@@ -64,7 +64,11 @@ fi
 checksum_file="$TMP/SHA256SUMS"
 fetch_checksums() {
   [[ -s "$checksum_file" ]] && return 0
-  curl -fL "${download_base}/SHA256SUMS" -o "$checksum_file"
+  if ! curl -fL "${download_base}/SHA256SUMS" -o "$checksum_file"; then
+    echo "No published Layerfault release was found at ${download_base}." >&2
+    echo "Publish a release first, or use --local-binary with a built executable." >&2
+    exit 1
+  fi
 }
 
 verify_download() {

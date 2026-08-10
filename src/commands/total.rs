@@ -2,7 +2,7 @@ use crate::{
     DatasetArgs, DatasetCommand, HubArgs, HubCommand, NewsletterCommand, PlatformArgs,
     PlatformCommand, ResearchArgs, ResearchCommand,
 };
-use anyhow::{anyhow, bail, Result};
+use anyhow::{anyhow, bail, Context, Result};
 use serde_json::json;
 use std::path::Path;
 
@@ -524,32 +524,75 @@ fn direct_hub_review(
             metadata.commit_sha
         );
     }
-    let root = staging.map(Path::to_path_buf).unwrap_or_else(|| {
-        std::env::temp_dir().join(format!("layerfault-hub-review-{}", std::process::id()))
-    });
-    if root.exists() && staging.is_none() {
-        let _ = std::fs::remove_dir_all(&root);
-    }
+    let root = if let Some(staging) = staging {
+        staging.to_path_buf()
+    } else {
+        let nonce = format!(
+            "{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        );
+        let root = std::env::temp_dir().join(format!("layerfault-hub-review-{nonce}"));
+        std::fs::create_dir(&root).with_context(|| {
+            format!(
+                "unable to reserve Hub review workspace '{}'",
+                root.display()
+            )
+        })?;
+        root
+    };
     layerfault::paths::ensure_private_dir(&root)?;
-    let candidates: Vec<_> = metadata
+    const MAX_REVIEW_FILES: usize = 256;
+    const MAX_REVIEW_BYTES: u64 = 20 * 1024 * 1024 * 1024;
+    let relevant: Vec<_> = metadata
         .files
         .iter()
-        .filter(|f| hub_review_member(&f.path))
-        .take(128)
+        .filter(|f| layerfault::hub::is_security_relevant_member(&f.path))
         .collect();
+    let mut candidates = Vec::new();
+    let mut declared = 0u64;
+    let mut omitted = Vec::new();
+    for file in &relevant {
+        let too_many = candidates.len() >= MAX_REVIEW_FILES;
+        let too_large = file.size.is_some_and(|size| {
+            size > MAX_REVIEW_BYTES || declared.saturating_add(size) > MAX_REVIEW_BYTES
+        });
+        if too_many || too_large {
+            if omitted.len() < 32 {
+                omitted.push(file.path.clone());
+            }
+            continue;
+        }
+        declared = declared.saturating_add(file.size.unwrap_or(0));
+        candidates.push(*file);
+    }
     let mut downloads = Vec::new();
-    let mut budget = 20 * 1024 * 1024 * 1024u64;
+    let mut errors = Vec::new();
+    let mut budget = MAX_REVIEW_BYTES;
+    let mut incomplete = candidates.len() < relevant.len();
     for file in candidates {
         if budget == 0 {
+            incomplete = true;
             break;
         }
         let cap = file.size.unwrap_or(budget).min(budget);
         if cap == 0 {
+            incomplete = true;
             continue;
         }
-        let result = client.download(repo, revision, &file.path, &root, Some(cap))?;
-        budget = budget.saturating_sub(result.bytes);
-        downloads.push(result);
+        match client.download(repo, revision, &file.path, &root, Some(cap)) {
+            Ok(result) => {
+                budget = budget.saturating_sub(result.bytes);
+                downloads.push(result);
+            }
+            Err(error) => {
+                incomplete = true;
+                errors.push(format!("{}: {}", file.path, error));
+            }
+        }
     }
     let static_report = layerfault::package::inspect(&root)?;
     let block = static_report.blocking();
@@ -559,38 +602,36 @@ fn direct_hub_review(
         .any(|f| f.status == layerfault::scanner::ScanStatus::Warn);
     let decision = if block {
         "BLOCK"
-    } else if warn {
+    } else if warn || incomplete {
         "WARN"
     } else {
         "PASS"
     };
-    let report = json!({"schema_version":"1.0","source":"huggingface","repo":repo,"revision":revision,"metadata":metadata,"downloads":downloads,"static_package":static_report,"final_decision":decision,"boundary":"This is a bounded review of the exact pinned Hub revision. PASS does not prove absence of hidden behaviour."});
+    let downloaded_members = downloads.len();
+    let report = json!({
+        "schema_version":"1.0",
+        "source":"huggingface",
+        "repo":repo,
+        "revision":revision,
+        "metadata":metadata,
+        "downloads":downloads,
+        "coverage": {
+            "complete": !incomplete,
+            "security_relevant_members": relevant.len(),
+            "downloaded_members": downloaded_members,
+            "omitted_examples": omitted,
+            "download_errors": errors,
+            "max_files": MAX_REVIEW_FILES,
+            "max_bytes": MAX_REVIEW_BYTES
+        },
+        "static_package":static_report,
+        "final_decision":decision,
+        "boundary":"This is a bounded review of the exact pinned Hub revision. WARN/INCOMPLETE is forced whenever security-relevant members could not be covered; PASS does not prove absence of hidden behaviour."
+    });
     if staging.is_none() {
         let _ = std::fs::remove_dir_all(&root);
     }
     Ok(report)
-}
-fn hub_review_member(path: &str) -> bool {
-    let l = path.to_ascii_lowercase();
-    [
-        ".gguf",
-        ".safetensors",
-        ".onnx",
-        ".tflite",
-        ".keras",
-        ".h5",
-        ".hdf5",
-        "saved_model.pb",
-        "config.json",
-        "tokenizer.json",
-        "tokenizer_config.json",
-        "generation_config.json",
-        "adapter_config.json",
-        "special_tokens_map.json",
-        ".safetensors.index.json",
-    ]
-    .iter()
-    .any(|s| l.ends_with(s))
 }
 fn emit_research(
     report: &layerfault::research::TriggerSearchResult,

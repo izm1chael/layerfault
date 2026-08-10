@@ -27,6 +27,34 @@ pub fn run_transformers(
     limits: super::BehaviourLimits,
     active: super::ActiveExecutionOptions,
 ) -> Result<super::BehaviourReport> {
+    let deadline = super::CommandDeadline::new(limits.timeout_seconds);
+    run_transformers_deadline(
+        model,
+        base,
+        runtime_path,
+        suite_path,
+        seed,
+        limits,
+        active,
+        &deadline,
+        "model",
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn run_transformers_deadline(
+    model: &Path,
+    base: Option<&Path>,
+    runtime_path: Option<&Path>,
+    suite_path: Option<&Path>,
+    seed: u64,
+    limits: super::BehaviourLimits,
+    active: super::ActiveExecutionOptions,
+    deadline: &super::CommandDeadline,
+    phase_label: &str,
+) -> Result<super::BehaviourReport> {
+    let heartbeat = super::ProgressHeartbeat::start(phase_label);
+    heartbeat.update(format!("phase={phase_label} static-admission"));
     super::sandbox::require_external_execution_stack()?;
     if active.allow_static_blocked || active.execute_custom_code {
         super::sandbox::require_high_risk_observation_stack()?;
@@ -135,25 +163,49 @@ pub fn run_transformers(
         command.arg("--trust-remote-code");
     }
 
+    if deadline.expired() {
+        bail!("behaviour command hard total timeout expired before Transformers model load");
+    }
+    let admitted_runtime_sha256 = hash_path(&executable)?;
+    let admitted_runtime_version = version_string(&executable);
+    // Version discovery is part of admission; byte-bind the executable again
+    // because invoking --version is a separate filesystem/open boundary.
+    if hash_path(&executable)? != admitted_runtime_sha256 {
+        bail!("Python runtime executable changed during version admission");
+    }
+    heartbeat.update(format!("phase={phase_label} model-loading"));
     let started = Instant::now();
+    // Revalidate the exact executable bytes immediately before launch.
+    if hash_path(&executable)? != admitted_runtime_sha256 {
+        bail!("Python runtime executable changed immediately before guarded launch");
+    }
     let mut child = command.spawn().with_context(|| {
         format!(
             "unable to start sandboxed Python runtime '{}'",
             executable.display()
         )
     })?;
-    let mut stdin = child
-        .stdin
-        .take()
-        .ok_or_else(|| anyhow!("Python runtime stdin pipe missing"))?;
-    let stdout = child
-        .stdout
-        .take()
-        .ok_or_else(|| anyhow!("Python runtime stdout pipe missing"))?;
-    let stderr = child
-        .stderr
-        .take()
-        .ok_or_else(|| anyhow!("Python runtime stderr pipe missing"))?;
+    let mut stdin = match child.stdin.take() {
+        Some(value) => value,
+        None => {
+            let _ = super::sandbox::terminate_process_tree(&mut child, Duration::from_secs(1));
+            bail!("Python runtime stdin pipe missing");
+        }
+    };
+    let stdout = match child.stdout.take() {
+        Some(value) => value,
+        None => {
+            let _ = super::sandbox::terminate_process_tree(&mut child, Duration::from_secs(1));
+            bail!("Python runtime stdout pipe missing");
+        }
+    };
+    let stderr = match child.stderr.take() {
+        Some(value) => value,
+        None => {
+            let _ = super::sandbox::terminate_process_tree(&mut child, Duration::from_secs(1));
+            bail!("Python runtime stderr pipe missing");
+        }
+    };
 
     let (line_tx, line_rx) = mpsc::channel();
     std::thread::spawn(move || {
@@ -175,7 +227,7 @@ pub fn run_transformers(
     });
     let (stderr_tx, stderr_rx) = mpsc::channel();
     std::thread::spawn(move || {
-        let _ = stderr_tx.send(read_capped(stderr, MAX_RUNNER_LOG_BYTES));
+        let _ = stderr_tx.send(read_capped_drain(stderr, MAX_RUNNER_LOG_BYTES));
     });
 
     let runtime = super::RuntimeIdentity {
@@ -185,8 +237,8 @@ pub fn run_transformers(
             "transformers-python".to_owned()
         },
         executable: executable.display().to_string(),
-        executable_sha256: format!("sha256:{}", hash_path(&executable)?),
-        version: version_string(&executable),
+        executable_sha256: format!("sha256:{admitted_runtime_sha256}"),
+        version: admitted_runtime_version,
         sandbox: super::sandbox::capabilities(wrapper.as_ref()),
     };
 
@@ -194,7 +246,7 @@ pub fn run_transformers(
     let mut request_id = 0_u64;
     let mut timed_out = false;
     let mut session_error: Option<String> = None;
-    match recv_protocol(&line_rx, Duration::from_secs(limits.timeout_seconds.max(1))) {
+    match recv_protocol(&line_rx, deadline.remaining()) {
         Ok(ready) => {
             if !ready
                 .get("ready")
@@ -216,11 +268,32 @@ pub fn run_transformers(
         }
     }
 
+    if session_error.is_none() {
+        heartbeat.update(format!("phase={phase_label} model-loaded"));
+    }
+    let planned = suite
+        .probes
+        .iter()
+        .take(limits.max_prompts)
+        .map(|probe| probe.repeat.max(1).min(limits.repeat_count.max(1)))
+        .sum::<usize>();
+    let mut probe_index = 0usize;
+
     'probes: {
         if session_error.is_none() {
             for probe in suite.probes.iter().take(limits.max_prompts) {
                 let repeat = probe.repeat.max(1).min(limits.repeat_count.max(1));
                 for repeat_index in 0..repeat {
+                    if deadline.expired() {
+                        timed_out = true;
+                        session_error = Some("behaviour command hard total timeout expired before Transformers probe".to_owned());
+                        break 'probes;
+                    }
+                    probe_index = probe_index.saturating_add(1);
+                    heartbeat.update(format!(
+                        "phase={phase_label} probe={probe_index}/{planned} id={}",
+                        probe.id
+                    ));
                     let system = super::probes::render(&probe.system, &canary_a, &canary_b);
                     let prompt = super::probes::render(&probe.prompt, &canary_a, &canary_b);
                     let combined =
@@ -235,8 +308,17 @@ pub fn run_transformers(
                         "seed":seed.saturating_add(repeat_index as u64),
                         "max_tokens":limits.max_tokens,
                     });
-                    if let Err(error) = writeln!(stdin, "{}", serde_json::to_string(&request)?)
-                        .and_then(|_| stdin.flush())
+                    let request_line = match serde_json::to_string(&request) {
+                        Ok(value) => value,
+                        Err(error) => {
+                            session_error = Some(format!(
+                                "unable to serialize Transformers probe request: {error}"
+                            ));
+                            break 'probes;
+                        }
+                    };
+                    if let Err(error) =
+                        writeln!(stdin, "{request_line}").and_then(|_| stdin.flush())
                     {
                         session_error = Some(format!(
                             "unable to write Transformers probe request: {error}"
@@ -244,10 +326,7 @@ pub fn run_transformers(
                         break 'probes;
                     }
                     let request_started = Instant::now();
-                    let response = match recv_protocol(
-                        &line_rx,
-                        Duration::from_secs(limits.timeout_seconds.max(1)),
-                    ) {
+                    let response = match recv_protocol(&line_rx, deadline.remaining()) {
                         Ok(value) => value,
                         Err(error) => {
                             timed_out = true;
@@ -301,21 +380,21 @@ pub fn run_transformers(
     }
 
     if session_error.is_none() {
-        let _ = writeln!(stdin, "{}", serde_json::to_string(&json!({"op":"quit"}))?);
+        let _ = writeln!(stdin, "{{\"op\":\"quit\"}}");
         let _ = stdin.flush();
     }
     drop(stdin);
-    if session_error.is_some() {
-        let _ = child.kill();
+    heartbeat.update(format!("phase={phase_label} teardown"));
+    if session_error.is_some() || deadline.expired() {
+        let _ = super::sandbox::terminate_process_tree(&mut child, Duration::from_secs(2));
     }
-    let deadline = Duration::from_secs(10);
     let wait_started = Instant::now();
     let status = loop {
         if let Some(status) = child.try_wait()? {
             break status;
         }
-        if wait_started.elapsed() >= deadline {
-            let _ = child.kill();
+        if wait_started.elapsed() >= Duration::from_secs(2) || deadline.expired() {
+            super::sandbox::terminate_process_tree(&mut child, Duration::from_secs(2))?;
             break child.wait()?;
         }
         std::thread::sleep(Duration::from_millis(20));
@@ -391,7 +470,8 @@ pub fn compare_transformers(
     limits: super::BehaviourLimits,
     active: super::ActiveExecutionOptions,
 ) -> Result<super::DifferentialReport> {
-    let base_report = run_transformers(
+    let deadline = super::CommandDeadline::new(limits.timeout_seconds);
+    let base_report = run_transformers_deadline(
         base,
         None,
         runtime_path,
@@ -399,13 +479,18 @@ pub fn compare_transformers(
         seed,
         limits.clone(),
         active,
+        &deadline,
+        "base",
     )?;
+    if deadline.expired() {
+        bail!("behaviour comparison hard total timeout expired after base Transformers model");
+    }
     let derived_base = derived
         .is_dir()
         .then(|| derived.join("adapter_config.json"))
         .filter(|path| path.is_file())
         .map(|_| base);
-    let derived_report = run_transformers(
+    let derived_report = run_transformers_deadline(
         derived,
         derived_base,
         runtime_path,
@@ -413,6 +498,8 @@ pub fn compare_transformers(
         seed,
         limits,
         active,
+        &deadline,
+        "derived",
     )?;
     super::compare_reports(base_report, derived_report)
 }
@@ -471,7 +558,7 @@ fn recv_protocol(
     }
 }
 
-fn read_capped<R: Read>(mut reader: R, cap: usize) -> Result<Vec<u8>> {
+fn read_capped_drain<R: Read>(mut reader: R, cap: usize) -> Result<Vec<u8>> {
     let mut out = Vec::new();
     let mut buf = [0_u8; 8192];
     loop {
@@ -479,10 +566,10 @@ fn read_capped<R: Read>(mut reader: R, cap: usize) -> Result<Vec<u8>> {
         if read == 0 {
             break;
         }
-        if out.len().saturating_add(read) > cap {
-            bail!("Transformers runner stderr exceeded safety cap");
+        if out.len() < cap {
+            let retain = (cap - out.len()).min(read);
+            out.extend_from_slice(&buf[..retain]);
         }
-        out.extend_from_slice(&buf[..read]);
     }
     Ok(out)
 }

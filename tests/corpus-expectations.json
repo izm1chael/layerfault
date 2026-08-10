@@ -7,21 +7,24 @@
       "case": "01-pytorchTest",
       "operation": "inspect-package",
       "decision": "BLOCK",
-      "exit_code": 3
+      "exit_code": 3,
+      "required_rule_prefixes": ["LF-PICKLE-"]
     },
     {
       "group": "core",
       "case": "01-pytorchTest",
       "operation": "pipeline",
       "decision": "BLOCK",
-      "exit_code": 3
+      "exit_code": 3,
+      "required_rule_prefixes": ["LF-PICKLE-"]
     },
     {
       "group": "core",
       "case": "01-pytorchTest",
       "operation": "review-quick",
       "decision": "BLOCK",
-      "exit_code": 3
+      "exit_code": 3,
+      "required_rule_prefixes": ["LF-PICKLE-"]
     },
     {
       "group": "core",
@@ -49,42 +52,48 @@
       "case": "03-picklescan-bypass",
       "operation": "inspect-package",
       "decision": "BLOCK",
-      "exit_code": 3
+      "exit_code": 3,
+      "required_rule_prefixes": ["LF-PICKLE-"]
     },
     {
       "group": "core",
       "case": "03-picklescan-bypass",
       "operation": "pipeline",
       "decision": "BLOCK",
-      "exit_code": 3
+      "exit_code": 3,
+      "required_rule_prefixes": ["LF-PICKLE-"]
     },
     {
       "group": "core",
       "case": "03-picklescan-bypass",
       "operation": "review-quick",
       "decision": "BLOCK",
-      "exit_code": 3
+      "exit_code": 3,
+      "required_rule_prefixes": ["LF-PICKLE-"]
     },
     {
       "group": "core",
       "case": "04-picklescan-bypass-alt",
       "operation": "inspect-package",
       "decision": "BLOCK",
-      "exit_code": 3
+      "exit_code": 3,
+      "required_rule_prefixes": ["LF-PICKLE-"]
     },
     {
       "group": "core",
       "case": "04-picklescan-bypass-alt",
       "operation": "pipeline",
       "decision": "BLOCK",
-      "exit_code": 3
+      "exit_code": 3,
+      "required_rule_prefixes": ["LF-PICKLE-"]
     },
     {
       "group": "core",
       "case": "04-picklescan-bypass-alt",
       "operation": "review-quick",
       "decision": "BLOCK",
-      "exit_code": 3
+      "exit_code": 3,
+      "required_rule_prefixes": ["LF-PICKLE-"]
     },
     {
       "group": "core",
@@ -322,63 +331,72 @@
       "case": "18-gguf-writer-pickle-bypass",
       "operation": "inspect-package",
       "decision": "BLOCK",
-      "exit_code": 3
+      "exit_code": 3,
+      "required_rule_prefixes": ["LF-PICKLE-"]
     },
     {
       "group": "extended",
       "case": "18-gguf-writer-pickle-bypass",
       "operation": "pipeline",
       "decision": "BLOCK",
-      "exit_code": 3
+      "exit_code": 3,
+      "required_rule_prefixes": ["LF-PICKLE-"]
     },
     {
       "group": "extended",
       "case": "18-gguf-writer-pickle-bypass",
       "operation": "review-quick",
       "decision": "BLOCK",
-      "exit_code": 3
+      "exit_code": 3,
+      "required_rule_prefixes": ["LF-PICKLE-"]
     },
     {
       "group": "extended",
       "case": "19-modelscan-selfcontained-pickle-bypass",
       "operation": "inspect-package",
       "decision": "BLOCK",
-      "exit_code": 3
+      "exit_code": 3,
+      "required_rule_prefixes": ["LF-PICKLE-"]
     },
     {
       "group": "extended",
       "case": "19-modelscan-selfcontained-pickle-bypass",
       "operation": "pipeline",
       "decision": "BLOCK",
-      "exit_code": 3
+      "exit_code": 3,
+      "required_rule_prefixes": ["LF-PICKLE-"]
     },
     {
       "group": "extended",
       "case": "19-modelscan-selfcontained-pickle-bypass",
       "operation": "review-quick",
       "decision": "BLOCK",
-      "exit_code": 3
+      "exit_code": 3,
+      "required_rule_prefixes": ["LF-PICKLE-"]
     },
     {
       "group": "extended",
       "case": "22-joblib-double-compression",
       "operation": "inspect-package",
       "decision": "BLOCK",
-      "exit_code": 3
+      "exit_code": 3,
+      "required_rule_prefixes": ["LF-PICKLE-"]
     },
     {
       "group": "extended",
       "case": "22-joblib-double-compression",
       "operation": "pipeline",
       "decision": "BLOCK",
-      "exit_code": 3
+      "exit_code": 3,
+      "required_rule_prefixes": ["LF-PICKLE-"]
     },
     {
       "group": "extended",
       "case": "22-joblib-double-compression",
       "operation": "review-quick",
       "decision": "BLOCK",
-      "exit_code": 3
+      "exit_code": 3,
+      "required_rule_prefixes": ["LF-PICKLE-"]
     },
     {
       "group": "extended",
@@ -552,43 +570,43 @@
       "group": "comparison",
       "case": "qwen25-05b-base-to-q4",
       "operation": "compare-quantization",
-      "decision": "BLOCK",
-      "exit_code": 3
+      "decision": "WARN",
+      "exit_code": 1
     },
     {
       "group": "comparison",
       "case": "qwen25-05b-base-to-q4",
       "operation": "review-quick-quantization",
-      "decision": "BLOCK",
-      "exit_code": 3
+      "decision": "WARN",
+      "exit_code": 1
     },
     {
       "group": "comparison",
       "case": "qwen25-3b-base-to-q4",
       "operation": "compare-quantization",
-      "decision": "BLOCK",
-      "exit_code": 3
+      "decision": "WARN",
+      "exit_code": 1
     },
     {
       "group": "comparison",
       "case": "qwen25-3b-base-to-q4",
       "operation": "review-quick-quantization",
-      "decision": "BLOCK",
-      "exit_code": 3
+      "decision": "WARN",
+      "exit_code": 1
     },
     {
       "group": "comparison",
       "case": "smollm2-360m-SmolLM2-360M-Instruct-Q2_K",
       "operation": "compare-quantization",
-      "decision": "BLOCK",
-      "exit_code": 3
+      "decision": "WARN",
+      "exit_code": 1
     },
     {
       "group": "comparison",
       "case": "smollm2-360m-SmolLM2-360M-Instruct-Q2_K",
       "operation": "review-quick-quantization",
-      "decision": "BLOCK",
-      "exit_code": 3
+      "decision": "WARN",
+      "exit_code": 1
     }
   ]
 }

@@ -174,6 +174,7 @@ pub(crate) fn run_guarded_llama(args: RunArgs, _serve: bool) -> Result<()> {
         artifact_run_decision(&result, args.override_reason.as_deref()),
         serde_json::to_value(&result)?,
     )?;
+    advisory::revalidate_runtime_identity(&runtime.runtime)?;
     let code = sources::run_llama_with(
         Path::new(&runtime.runtime.executable),
         staged.path(),

@@ -136,7 +136,7 @@ fn nested_compressed_joblib_blocks_at_cli_package_boundary() {
     .expect("write compressed fixture");
 
     let output = run(&["inspect", root.to_str().unwrap(), "--json"]);
-    assert_eq!(output.status.code(), Some(3));
+    assert_eq!(output.status.code(), Some(1));
     let value: Value = serde_json::from_slice(&output.stdout).expect("inspect JSON");
     assert!(value["findings"]
         .as_array()
@@ -146,8 +146,9 @@ fn nested_compressed_joblib_blocks_at_cli_package_boundary() {
                 .as_array()
                 .is_some_and(|matches| matches.iter().any(|m| {
                     m.as_str()
-                        .is_some_and(|text| text.contains("LF-SERIALIZATION-UNSAFE"))
-                })))));
+                        .is_some_and(|text| text.contains("LF-PICKLE-OPAQUE-COMPRESSED"))
+                }))
+                && item["status"] == "Warn")));
 
     let _ = fs::remove_dir_all(root);
 }

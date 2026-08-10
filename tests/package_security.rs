@@ -46,7 +46,7 @@ fn package_blocks_pickle_and_warns_custom_code() -> Result<()> {
     assert!(report.findings.iter().any(|f| f
         .matches
         .iter()
-        .any(|m| m.contains("LF-SERIALIZATION-UNSAFE"))
+        .any(|m| m.contains("LF-PICKLE-MALFORMED"))
         && f.status == ScanStatus::Fail));
     let _ = fs::remove_dir_all(root);
     Ok(())
@@ -59,6 +59,7 @@ fn bundled_advisory_catalog_blocks_known_vulnerable_runtime() -> Result<()> {
     let info = RuntimeInfo {
         runtime: RuntimeKind::Ollama,
         executable: "fixture".into(),
+        executable_sha256: "sha256:synthetic".into(),
         raw_version: "ollama version is 0.17.0".into(),
         parsed_version: Some("0.17.0".into()),
     };
@@ -68,5 +69,53 @@ fn bundled_advisory_catalog_blocks_known_vulnerable_runtime() -> Result<()> {
         .findings
         .iter()
         .any(|f| f.matches.iter().any(|m| m.contains("CVE-2026-7482"))));
+    Ok(())
+}
+
+#[test]
+fn pickle_structure_verdict_tiers_flow_through_package_inspection() -> Result<()> {
+    let cases: &[(&str, &[u8], ScanStatus, &str)] = &[
+        (
+            "safe",
+            b"ccollections\nOrderedDict\n.",
+            ScanStatus::Pass,
+            "LF-PICKLE-SAFE-GLOBALS",
+        ),
+        (
+            "danger",
+            b"cos\nsystem\n)R.",
+            ScanStatus::Fail,
+            "LF-PICKLE-DANGEROUS-GLOBAL",
+        ),
+        (
+            "unknown",
+            b"cacme.model\nCustomTensor\n.",
+            ScanStatus::Warn,
+            "LF-PICKLE-UNKNOWN-GLOBAL",
+        ),
+        (
+            "malformed",
+            b"\x80\x04cfoo\nbar",
+            ScanStatus::Fail,
+            "LF-PICKLE-MALFORMED",
+        ),
+    ];
+    for (name, bytes, status, rule) in cases {
+        let root = std::env::temp_dir().join(format!(
+            "layerfault-pickle-tier-{name}-{}",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(&root)?;
+        fs::write(root.join("model.pkl"), bytes)?;
+        let report = package::inspect(&root)?;
+        assert!(
+            report.findings.iter().any(|finding| {
+                finding.status == *status && finding.matches.iter().any(|m| m.contains(rule))
+            }),
+            "missing {rule} for {name}"
+        );
+        let _ = fs::remove_dir_all(root);
+    }
     Ok(())
 }

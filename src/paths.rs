@@ -1,5 +1,6 @@
 use anyhow::{anyhow, Context, Result};
 use std::fs;
+use std::io::Write;
 use std::path::{Path, PathBuf};
 
 pub fn config_dir() -> Result<PathBuf> {
@@ -79,27 +80,39 @@ pub fn write_private(path: &Path, bytes: &[u8]) -> Result<()> {
         .ok_or_else(|| anyhow!("Path '{}' has no parent", path.display()))?;
     ensure_private_dir(parent)?;
 
-    let tmp = parent.join(format!(
-        ".{}.tmp-{}",
+    // NamedTempFile reserves a fresh inode with exclusive creation. Its persist
+    // operation uses the platform's atomic replacement primitive, including
+    // MoveFileExW with REPLACE_EXISTING on Windows.
+    let prefix = format!(
+        ".{}.tmp-",
         path.file_name()
             .and_then(|value| value.to_str())
-            .unwrap_or("layerfault"),
-        std::process::id()
-    ));
-    fs::write(&tmp, bytes)
-        .with_context(|| format!("Unable to write temporary file '{}'", tmp.display()))?;
-
+            .unwrap_or("layerfault")
+    );
+    let mut tmp = tempfile::Builder::new()
+        .prefix(&prefix)
+        .tempfile_in(parent)
+        .with_context(|| {
+            format!(
+                "Unable to reserve private temporary file for '{}'",
+                path.display()
+            )
+        })?;
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        fs::set_permissions(&tmp, fs::Permissions::from_mode(0o600))
-            .with_context(|| format!("Unable to secure '{}'", tmp.display()))?;
+        tmp.as_file()
+            .set_permissions(fs::Permissions::from_mode(0o600))?;
     }
-
-    if path.exists() {
-        fs::remove_file(path).with_context(|| format!("Unable to replace '{}'", path.display()))?;
-    }
-    fs::rename(&tmp, path).with_context(|| format!("Unable to install '{}'", path.display()))?;
+    tmp.as_file_mut()
+        .write_all(bytes)
+        .with_context(|| format!("Unable to write temporary file for '{}'", path.display()))?;
+    tmp.as_file()
+        .sync_all()
+        .with_context(|| format!("Unable to sync temporary file for '{}'", path.display()))?;
+    tmp.persist(path)
+        .map_err(|error| error.error)
+        .with_context(|| format!("Unable to atomically install '{}'", path.display()))?;
     Ok(())
 }
 
@@ -131,4 +144,43 @@ pub fn secret_from_env(name: &str) -> Result<Option<String>> {
     Ok(std::env::var(name)
         .ok()
         .filter(|value| !value.trim().is_empty()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn private_write_replaces_existing_file() -> Result<()> {
+        let root =
+            std::env::temp_dir().join(format!("layerfault-write-replace-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(&root)?;
+        let output = root.join("report.json");
+        write_private(&output, b"first")?;
+        write_private(&output, b"second")?;
+        assert_eq!(fs::read(&output)?, b"second");
+        let _ = fs::remove_dir_all(root);
+        Ok(())
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn private_write_replaces_symlink_without_following_it() -> Result<()> {
+        use std::os::unix::fs::symlink;
+        let root =
+            std::env::temp_dir().join(format!("layerfault-write-private-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(&root)?;
+        let victim = root.join("victim");
+        let output = root.join("report.json");
+        fs::write(&victim, b"do-not-touch")?;
+        symlink(&victim, &output)?;
+        write_private(&output, b"new-evidence")?;
+        assert_eq!(fs::read(&victim)?, b"do-not-touch");
+        assert_eq!(fs::read(&output)?, b"new-evidence");
+        assert!(!fs::symlink_metadata(&output)?.file_type().is_symlink());
+        let _ = fs::remove_dir_all(root);
+        Ok(())
+    }
 }

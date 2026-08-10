@@ -1,5 +1,6 @@
 {
   "schema_version": 1,
+  "description": "Performance contracts cover warm-cache ratios for large-model operations. Pickle correctness and rule identity are enforced by corpus-expectations.json, so no pickle-specific timing rule is required.",
   "ratio_rules": [
     {"group":"large","case":"44-qwen25-3b-base-sharded","cold":"fingerprint","warm":["inspect-package","scan-dir","review-quick"],"max_ratio":0.10},
     {"group":"large","case":"45-qwen25-3b-q4-gguf","cold":"fingerprint","warm":["inspect-package","scan-dir","review-quick"],"max_ratio":0.10},

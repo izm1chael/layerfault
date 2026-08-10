@@ -1610,4 +1610,34 @@ mod tests {
         assert!(parse_jobs("0").is_err());
         assert!(parse_jobs("65").is_err());
     }
+
+    #[test]
+    fn behaviour_cli_enforces_mutation_cap_end_to_end() {
+        fn parsed_mutation_count(requested: &str) -> usize {
+            let cli = Cli::try_parse_from([
+                "layerfault",
+                "behaviour",
+                "fixture.gguf",
+                "--profile",
+                "standard",
+                "--max-mutations",
+                requested,
+            ])
+            .expect("parse behaviour command");
+            let Some(Command::Behaviour(args)) = cli.command else {
+                panic!("expected behaviour command");
+            };
+            let limits =
+                commands::vnext::resolve_behaviour_limits(&args).expect("resolve behaviour limits");
+            let original =
+                layerfault::behaviour::probes::load_suite(None).expect("load bundled probe suite");
+            let original_count = original.probes.len();
+            let expanded =
+                layerfault::behaviour::probes::expand_mutations(original, limits.max_mutations);
+            expanded.probes.len() - original_count
+        }
+
+        assert_eq!(parsed_mutation_count("7"), 7);
+        assert_eq!(parsed_mutation_count("10000"), 32);
+    }
 }

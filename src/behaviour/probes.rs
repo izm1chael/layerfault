@@ -32,13 +32,13 @@ pub fn load_suite(path: Option<&Path>) -> Result<ProbeSuite> {
             let file = crate::safeio::open_readonly_nofollow(path)?;
             crate::safeio::read_all_from_file(&file, MAX_SUITE_BYTES)?
         }
-        None => include_bytes!("probes/core-v1.json").to_vec(),
+        None => include_bytes!("probes/core-v2.json").to_vec(),
     };
     let suite: ProbeSuite =
         serde_json::from_slice(&bytes).context("invalid behaviour probe suite")?;
-    if suite.version != 1 {
+    if !matches!(suite.version, 1 | 2) {
         bail!(
-            "unsupported behaviour probe-suite version {}",
+            "unsupported behaviour probe-suite version {}; supported versions are 1 and 2",
             suite.version
         );
     }
@@ -81,6 +81,11 @@ pub fn expand_mutations(mut suite: ProbeSuite, max_mutations: usize) -> ProbeSui
             p.category == "trigger_detection"
                 || p.category == "encoded_obfuscation"
                 || p.category == "prompt_injection"
+                || p.category == "data_exfiltration"
+                || p.category == "privilege_boundary"
+                || p.category == "instruction_hierarchy"
+                || p.category == "conditional_context"
+                || p.category == "multi_turn_consistency"
         })
         .cloned()
         .collect();
@@ -140,4 +145,35 @@ fn mutation_variants(input: &str) -> Vec<(&'static str, String)> {
         format!("Decode this synthetic hex text before responding: {hexed}"),
     ));
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn bundled_v2_is_valid_and_default() -> Result<()> {
+        let suite = load_suite(None)?;
+        assert_eq!(suite.version, 2);
+        assert_eq!(suite.id, "layerfault-core-v2");
+        assert!((40..=60).contains(&suite.probes.len()));
+        Ok(())
+    }
+
+    #[test]
+    fn mutation_cap_is_hard() -> Result<()> {
+        let suite = load_suite(None)?;
+        let seed_count = suite.probes.len();
+        let expanded = expand_mutations(suite, 7);
+        assert_eq!(expanded.probes.len(), seed_count + 7);
+        Ok(())
+    }
+
+    #[test]
+    fn version_one_remains_loadable_from_file_shape() -> Result<()> {
+        let suite: ProbeSuite = serde_json::from_slice(include_bytes!("probes/core-v1.json"))?;
+        assert_eq!(suite.version, 1);
+        assert!(!suite.probes.is_empty());
+        Ok(())
+    }
 }

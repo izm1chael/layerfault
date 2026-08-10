@@ -171,14 +171,32 @@ pub fn compare_snapshots(
             "Inspect the template content and verify the change is expected.",
         ));
     }
-    if !tensors.added.is_empty() || !tensors.removed.is_empty() || !tensors.shape_changed.is_empty()
-    {
+    let tensor_topology_changed = !tensors.added.is_empty()
+        || !tensors.removed.is_empty()
+        || !tensors.shape_changed.is_empty();
+    let tensor_schema_comparable = base.format == derived.format;
+    if tensor_topology_changed {
+        let (rule, title, why, impact) = if tensor_schema_comparable {
+            (
+                "LF-DERIVE-SCHEMA-MISMATCH",
+                "Tensor topology changed",
+                "Unexpected topology change can contradict quantization, LoRA-merge or simple conversion claims.",
+                "The derived artifact may contain undeclared architecture or parameter changes.",
+            )
+        } else {
+            (
+                "LF-DERIVE-SCHEMA-CROSS-FORMAT",
+                "Cross-format tensor topology is not directly comparable",
+                "Different serialization formats can rename, fuse, split or reorder tensors even when the transformation is legitimate; raw tensor-name drift is therefore uncertainty rather than a security contradiction.",
+                "Layerfault cannot prove tensor-for-tensor equivalence from structural names alone across these formats.",
+            )
+        };
         findings.push(finding(
-            "LF-DERIVE-SCHEMA-MISMATCH", "derived_integrity", "WARN", "HIGH",
-            "Tensor topology changed", "Tensor names or shapes differ between base and derived snapshots.",
-            "Unexpected topology change can contradict quantization, LoRA-merge or simple conversion claims.",
-            vec![format!("added={:?}", tensors.added), format!("removed={:?}", tensors.removed), format!("shape_changed={:?}", tensors.shape_changed)],
-            "The derived artifact may contain undeclared architecture or parameter changes.",
+            rule, "derived_integrity", "WARN", "HIGH",
+            title, "Tensor names or shapes differ between base and derived snapshots.",
+            why,
+            vec![format!("base_format={}", base.format), format!("derived_format={}", derived.format), format!("added={:?}", tensors.added), format!("removed={:?}", tensors.removed), format!("shape_changed={:?}", tensors.shape_changed)],
+            impact,
             "Confirm the transformation type and compare against the publisher's reproducible build record.",
         ));
     }
@@ -201,11 +219,21 @@ pub fn compare_snapshots(
                         "Quantization-only claim changed the chat template",
                     ));
                 }
-                if !tensors.added.is_empty()
-                    || !tensors.removed.is_empty()
-                    || !tensors.shape_changed.is_empty()
-                {
+                if tensor_topology_changed && tensor_schema_comparable {
                     contradicted = true;
+                } else if tensor_topology_changed {
+                    findings.push(finding(
+                        "LF-LINEAGE-QUANTIZATION-CROSS-FORMAT",
+                        "lineage",
+                        "WARN",
+                        "MEDIUM",
+                        "Quantization crosses serialization formats",
+                        "The quantization claim compares tensor schemas represented by different serialization formats.",
+                        "Expected format conversion can change tensor naming/layout, so this evidence cannot by itself prove or contradict the quantization claim.",
+                        vec![format!("base_format={}", base.format), format!("derived_format={}", derived.format)],
+                        "Lineage remains review-required unless stronger reproducibility/provenance evidence binds the transformation.",
+                        "Use the quantization reproducibility check or signed transformation evidence before treating the derivative as verified.",
+                    ));
                 }
             }
             TransformationType::LoraAdapter => {
@@ -404,5 +432,72 @@ fn finding(
         evidence,
         potential_impact: impact.to_owned(),
         recommendation: recommendation.to_owned(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::modelmeta::{
+        ArchitectureSummary, GenerationConfigSummary, ModelIdentity, ModelTargetKind,
+    };
+
+    fn snapshot(format: &str, tensor: &str) -> ModelSnapshot {
+        ModelSnapshot {
+            target: format!("fixture-{format}"),
+            kind: ModelTargetKind::Artifact,
+            format: format.to_owned(),
+            identity: ModelIdentity {
+                canonical: format!("fixture:{format}:{tensor}"),
+                artifact_sha256: None,
+                package_fingerprint: None,
+            },
+            architecture: ArchitectureSummary {
+                architecture: Some("llama".to_owned()),
+                layer_count: Some(4),
+                hidden_size: Some(128),
+                attention_heads: Some(4),
+                kv_heads: Some(4),
+                ..Default::default()
+            },
+            tokenizer: None,
+            template: None,
+            generation: Some(GenerationConfigSummary::default()),
+            tensors: vec![TensorSummary {
+                name: tensor.to_owned(),
+                shape: vec![128, 128],
+                dtype: "F16".to_owned(),
+                byte_len: None,
+            }],
+            tensor_schema_hash: tensor.to_owned(),
+            component_hashes: BTreeMap::new(),
+            package_members: Vec::new(),
+            claims: BTreeMap::new(),
+        }
+    }
+
+    #[test]
+    fn cross_format_quantization_tensor_naming_drift_does_not_contradict_lineage() {
+        let report = compare_snapshots(
+            snapshot("safetensors", "model.layers.0.weight"),
+            snapshot("gguf", "blk.0.weight"),
+            Some(TransformationType::Quantization),
+            None,
+        );
+        assert_ne!(report.lineage, LineageState::Contradicted);
+        assert!(report.findings.iter().any(|finding| finding.rule_id
+            == "LF-LINEAGE-QUANTIZATION-CROSS-FORMAT"
+            && finding.status == "WARN"));
+    }
+
+    #[test]
+    fn same_format_quantization_topology_change_still_contradicts() {
+        let report = compare_snapshots(
+            snapshot("safetensors", "a"),
+            snapshot("safetensors", "b"),
+            Some(TransformationType::Quantization),
+            None,
+        );
+        assert_eq!(report.lineage, LineageState::Contradicted);
     }
 }

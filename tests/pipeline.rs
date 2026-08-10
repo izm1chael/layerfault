@@ -54,6 +54,6 @@ fn pipeline_preserves_blocking_exit_for_unsafe_serialization() {
         .as_array()
         .unwrap()
         .iter()
-        .any(|finding| finding["rule_id"] == "LF-SERIALIZATION-UNSAFE"));
+        .any(|finding| finding["rule_id"] == "LF-PICKLE-MALFORMED"));
     let _ = fs::remove_dir_all(root);
 }

@@ -1,8 +1,8 @@
 use anyhow::{anyhow, bail, Context, Result};
 use sha2::{Digest, Sha256};
-use std::io::Read;
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
-use std::process::Stdio;
+use std::process::{Child, Stdio};
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
@@ -16,193 +16,533 @@ pub struct RuntimeResult {
     pub telemetry: super::sandbox::SandboxTelemetry,
 }
 
+/// Immutable llama.cpp runtime admission. The executable identity is calculated
+/// once here and byte-revalidated immediately before the persistent session is
+/// started.
 pub struct RuntimeAdapter {
     executable: PathBuf,
+    executable_sha256: String,
+    version: Option<String>,
     limits: super::BehaviourLimits,
     wrapper: Option<(PathBuf, String)>,
 }
+
 impl RuntimeAdapter {
-    pub fn new(executable: PathBuf, limits: &super::BehaviourLimits) -> Result<Self> {
+    pub fn new(requested: PathBuf, limits: &super::BehaviourLimits) -> Result<Self> {
+        super::sandbox::require_external_execution_stack()?;
+        let executable = resolve_llama_server(&requested)?;
         let executable = std::fs::canonicalize(&executable).with_context(|| {
-            format!("unable to canonicalize runtime '{}'", executable.display())
+            format!(
+                "unable to canonicalize llama-server '{}'",
+                executable.display()
+            )
         })?;
         let metadata = std::fs::metadata(&executable)
             .with_context(|| format!("unable to inspect runtime '{}'", executable.display()))?;
         if !metadata.is_file() {
-            bail!("runtime must resolve to a regular file");
+            bail!("llama-server runtime must resolve to a regular file");
         }
-        super::sandbox::require_external_execution_stack()?;
+        let executable_sha256 = hash_path(&executable)?;
+        let version = version_string(&executable);
         let wrapper = super::sandbox::detect_network_wrapper();
         Ok(Self {
             executable,
+            executable_sha256,
+            version,
             limits: limits.clone(),
             wrapper,
         })
     }
-    pub fn identity(&self) -> Result<super::RuntimeIdentity> {
-        let sha = hash_path(&self.executable)?;
-        let version = version_string(&self.executable);
-        Ok(super::RuntimeIdentity {
-            backend: "llama-cpp".to_owned(),
+
+    pub fn identity(&self) -> super::RuntimeIdentity {
+        super::RuntimeIdentity {
+            backend: "llama-cpp-server".to_owned(),
             executable: self.executable.display().to_string(),
-            executable_sha256: format!("sha256:{sha}"),
-            version,
+            executable_sha256: format!("sha256:{}", self.executable_sha256),
+            version: self.version.clone(),
             sandbox: super::sandbox::capabilities(self.wrapper.as_ref()),
-        })
+        }
     }
-    pub fn run(
-        &self,
+
+    pub fn open<'a>(
+        &'a self,
         model: &Path,
+        canaries: &[&str],
+        startup_deadline: Duration,
+    ) -> Result<RuntimeSession<'a>> {
+        #[cfg(not(unix))]
+        {
+            let _ = (model, canaries, startup_deadline);
+            bail!("persistent llama.cpp active analysis currently requires a Unix host");
+        }
+        #[cfg(unix)]
+        {
+            let expected = format!("sha256:{}", self.executable_sha256);
+            let runtime_binding =
+                crate::binding::stage_verified_executable(&self.executable, &expected)?;
+            let workspace = super::sandbox::Workspace::create(canaries)?;
+            let socket_host = workspace
+                .root
+                .join("workspace")
+                .join("layerfault-llama.sock");
+            let socket_sandbox = PathBuf::from("/workspace/workspace/layerfault-llama.sock");
+            let sandboxed = super::sandbox::command_for(
+                runtime_binding.path(),
+                model,
+                None,
+                &[],
+                &workspace,
+                self.wrapper.as_ref(),
+                self.limits.timeout_seconds,
+            )?;
+            let super::sandbox::SandboxedCommand {
+                mut command,
+                model_argument,
+                base_argument: _,
+                runtime_support_arguments: _,
+                trace_enabled,
+            } = sandboxed;
+            command
+                .env_clear()
+                .env("HOME", &workspace.home)
+                .env("TMPDIR", &workspace.root)
+                .env(
+                    "LAYERFAULT_SYNTHETIC_SECRET_A",
+                    canaries.first().copied().unwrap_or("LF_CANARY_A_UNSET"),
+                )
+                .env(
+                    "LAYERFAULT_SYNTHETIC_SECRET_B",
+                    canaries.get(1).copied().unwrap_or("LF_CANARY_B_UNSET"),
+                )
+                .stdin(Stdio::null())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .arg("-m")
+                .arg(model_argument)
+                .arg("--host")
+                .arg(&socket_sandbox)
+                .arg("--parallel")
+                .arg("1")
+                .arg("--no-cache-prompt")
+                .arg("--no-webui");
+            let started = Instant::now();
+            let mut child = command.spawn().with_context(|| {
+                format!(
+                    "unable to start persistent runtime '{}'",
+                    self.executable.display()
+                )
+            })?;
+            let stdout = match child.stdout.take() {
+                Some(value) => value,
+                None => {
+                    let _ =
+                        super::sandbox::terminate_process_tree(&mut child, Duration::from_secs(1));
+                    bail!("llama-server stdout pipe missing");
+                }
+            };
+            let stderr = match child.stderr.take() {
+                Some(value) => value,
+                None => {
+                    let _ =
+                        super::sandbox::terminate_process_tree(&mut child, Duration::from_secs(1));
+                    bail!("llama-server stderr pipe missing");
+                }
+            };
+            let (stdout_tx, stdout_rx) = mpsc::channel();
+            let (stderr_tx, stderr_rx) = mpsc::channel();
+            std::thread::spawn(move || {
+                let _ = stdout_tx.send(read_capped_drain(stdout, 512 * 1024));
+            });
+            std::thread::spawn(move || {
+                let _ = stderr_tx.send(read_capped_drain(stderr, 1024 * 1024));
+            });
+
+            let startup_deadline = startup_deadline.max(Duration::from_secs(1));
+            loop {
+                if let Some(status) = child.try_wait()? {
+                    let stderr = stderr_rx
+                        .recv_timeout(Duration::from_millis(100))
+                        .ok()
+                        .and_then(|value| value.ok())
+                        .map(|bytes| String::from_utf8_lossy(&bytes).into_owned())
+                        .unwrap_or_default();
+                    bail!(
+                        "llama-server exited during model load ({:?}): {}",
+                        status.code(),
+                        stderr.trim()
+                    );
+                }
+                if socket_host.exists() {
+                    match unix_http(
+                        &socket_host,
+                        "GET",
+                        "/health",
+                        None,
+                        Duration::from_secs(2),
+                        64 * 1024,
+                    ) {
+                        Ok((200, _)) => break,
+                        Ok((503, _)) | Err(_) => {}
+                        Ok((status, _)) => {
+                            bail!("llama-server health endpoint returned HTTP {status}")
+                        }
+                    }
+                }
+                if started.elapsed() >= startup_deadline {
+                    let _ =
+                        super::sandbox::terminate_process_tree(&mut child, Duration::from_secs(2));
+                    bail!("persistent llama-server model load exceeded command deadline");
+                }
+                std::thread::sleep(Duration::from_millis(100));
+            }
+
+            Ok(RuntimeSession {
+                adapter: self,
+                child,
+                workspace,
+                socket_host,
+                trace_enabled,
+                stdout_rx: Some(stdout_rx),
+                stderr_rx: Some(stderr_rx),
+                _runtime_binding: runtime_binding,
+                closed: false,
+            })
+        }
+    }
+}
+
+pub struct RuntimeSession<'a> {
+    adapter: &'a RuntimeAdapter,
+    child: Child,
+    workspace: super::sandbox::Workspace,
+    socket_host: PathBuf,
+    trace_enabled: bool,
+    stdout_rx: Option<mpsc::Receiver<Result<Vec<u8>>>>,
+    stderr_rx: Option<mpsc::Receiver<Result<Vec<u8>>>>,
+    _runtime_binding: crate::binding::StagedArtifact,
+    closed: bool,
+}
+
+impl RuntimeSession<'_> {
+    /// Execute one stateless completion through the already-loaded server. A
+    /// fixed single slot is explicitly erased after every request and prompt
+    /// caching is disabled both at server and request level.
+    pub fn infer(
+        &mut self,
         prompt: &str,
         seed: u64,
         max_tokens: u64,
-        canaries: &[&str],
+        timeout: Duration,
     ) -> Result<RuntimeResult> {
-        let workspace = super::sandbox::Workspace::create(canaries)?;
-        let sandboxed = super::sandbox::command_for(
-            &self.executable,
-            model,
-            None,
-            &[],
-            &workspace,
-            self.wrapper.as_ref(),
-            self.limits.timeout_seconds,
-        )?;
-        let super::sandbox::SandboxedCommand {
-            mut command,
-            model_argument,
-            base_argument: _,
-            runtime_support_arguments: _,
-            trace_enabled,
-        } = sandboxed;
-        command
-            .env_clear()
-            .env("HOME", &workspace.home)
-            .env("TMPDIR", &workspace.root)
-            .env(
-                "LAYERFAULT_SYNTHETIC_SECRET_A",
-                canaries.first().copied().unwrap_or("LF_CANARY_A_UNSET"),
-            )
-            .env(
-                "LAYERFAULT_SYNTHETIC_SECRET_B",
-                canaries.get(1).copied().unwrap_or("LF_CANARY_B_UNSET"),
-            )
-            .stdin(Stdio::null())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .arg("-m")
-            .arg(model_argument)
-            .arg("-p")
-            .arg(prompt)
-            .arg("--seed")
-            .arg(seed.to_string())
-            .arg("--temp")
-            .arg("0")
-            .arg("-n")
-            .arg(max_tokens.to_string())
-            .arg("--no-display-prompt");
-        let start = Instant::now();
-        let mut child = command
-            .spawn()
-            .with_context(|| format!("unable to start runtime '{}'", self.executable.display()))?;
-        let stdout = child
-            .stdout
-            .take()
-            .ok_or_else(|| anyhow!("runtime stdout pipe missing"))?;
-        let stderr = child
-            .stderr
-            .take()
-            .ok_or_else(|| anyhow!("runtime stderr pipe missing"))?;
-        let (tx, rx) = mpsc::channel();
-        let tx2 = tx.clone();
-        let cap = self.limits.max_output_bytes;
-        std::thread::spawn(move || {
-            let _ = tx.send((0, read_capped(stdout, cap)));
-        });
-        std::thread::spawn(move || {
-            let _ = tx2.send((1, read_capped(stderr, cap)));
-        });
-        let deadline = Duration::from_secs(self.limits.timeout_seconds.max(1));
-        let mut timed_out = false;
-        let status;
-        loop {
-            if let Some(s) = child.try_wait()? {
-                status = s;
-                break;
-            }
-            if start.elapsed() >= deadline {
-                timed_out = true;
-                let _ = child.kill();
-                status = child.wait()?;
-                break;
-            }
-            std::thread::sleep(Duration::from_millis(25));
+        if self.closed {
+            bail!("llama.cpp behavioural session is already closed");
         }
-        let mut out = String::new();
-        let mut err = String::new();
-        for _ in 0..2 {
-            if let Ok((which, result)) = rx.recv_timeout(Duration::from_secs(2)) {
-                let bytes = result?;
-                let text = String::from_utf8_lossy(&bytes).into_owned();
-                if which == 0 {
-                    out = text
+        if self.child.try_wait()?.is_some() {
+            bail!("persistent llama-server exited before probe inference");
+        }
+        let started = Instant::now();
+        let body = serde_json::to_vec(&serde_json::json!({
+            "prompt": prompt,
+            "seed": seed,
+            "temperature": 0.0,
+            "n_predict": max_tokens,
+            "stream": false,
+            "cache_prompt": false,
+            "id_slot": 0,
+            "response_fields": ["content"]
+        }))?;
+        let response = unix_http(
+            &self.socket_host,
+            "POST",
+            "/completion",
+            Some(&body),
+            timeout.max(Duration::from_millis(250)),
+            self.adapter
+                .limits
+                .max_output_bytes
+                .saturating_add(128 * 1024),
+        );
+        // Reset is best-effort here because a failed reset must not hide the
+        // original inference error. A successful inference *requires* reset;
+        // otherwise the next probe could inherit context.
+        let reset = unix_http(
+            &self.socket_host,
+            "POST",
+            "/slots/0?action=erase",
+            Some(b"{}"),
+            timeout
+                .min(Duration::from_secs(5))
+                .max(Duration::from_millis(250)),
+            64 * 1024,
+        );
+        let telemetry = self.workspace.collect_telemetry(self.trace_enabled)?;
+        match response {
+            Ok((200, bytes)) => {
+                if !matches!(reset, Ok((200, _))) {
+                    bail!("llama-server completed a probe but context reset failed; refusing stateful continuation");
+                }
+                let value: serde_json::Value = serde_json::from_slice(&bytes)
+                    .context("invalid llama-server completion JSON")?;
+                let output = value
+                    .get("content")
+                    .and_then(serde_json::Value::as_str)
+                    .ok_or_else(|| anyhow!("llama-server completion omitted content"))?;
+                if output.len() > self.adapter.limits.max_output_bytes {
+                    bail!("llama-server completion exceeded selected output cap");
+                }
+                Ok(RuntimeResult {
+                    stdout: output.to_owned(),
+                    stderr: String::new(),
+                    exit_code: Some(0),
+                    timed_out: false,
+                    duration_ms: u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX),
+                    telemetry,
+                })
+            }
+            Ok((status, bytes)) => Err(anyhow!(
+                "llama-server completion returned HTTP {status}: {}",
+                String::from_utf8_lossy(&bytes)
+                    .chars()
+                    .take(1024)
+                    .collect::<String>()
+            )),
+            Err(error) => {
+                let timed_out = error.downcast_ref::<std::io::Error>().is_some_and(|io| {
+                    matches!(
+                        io.kind(),
+                        std::io::ErrorKind::TimedOut | std::io::ErrorKind::WouldBlock
+                    )
+                });
+                if timed_out {
+                    let _ = super::sandbox::terminate_process_tree(
+                        &mut self.child,
+                        Duration::from_secs(2),
+                    );
+                    self.closed = true;
+                    Ok(RuntimeResult {
+                        stdout: String::new(),
+                        stderr: format!("persistent llama-server probe timed out: {error}"),
+                        exit_code: None,
+                        timed_out: true,
+                        duration_ms: u64::try_from(started.elapsed().as_millis())
+                            .unwrap_or(u64::MAX),
+                        telemetry,
+                    })
                 } else {
-                    err = text
+                    Err(error.context("persistent llama-server probe failed"))
                 }
             }
         }
-        let telemetry = workspace.collect_telemetry(trace_enabled)?;
-        Ok(RuntimeResult {
-            stdout: out,
-            stderr: err,
-            exit_code: status.code(),
-            timed_out,
-            duration_ms: u64::try_from(start.elapsed().as_millis()).unwrap_or(u64::MAX),
-            telemetry,
-        })
+    }
+
+    pub fn close(mut self) -> Result<super::sandbox::SandboxTelemetry> {
+        self.shutdown()?;
+        self.workspace.collect_telemetry(self.trace_enabled)
+    }
+
+    fn shutdown(&mut self) -> Result<()> {
+        if self.closed {
+            return Ok(());
+        }
+        self.closed = true;
+        super::sandbox::terminate_process_tree(&mut self.child, Duration::from_secs(2))?;
+        let _ = self
+            .stdout_rx
+            .take()
+            .and_then(|rx| rx.recv_timeout(Duration::from_secs(1)).ok());
+        let _ = self
+            .stderr_rx
+            .take()
+            .and_then(|rx| rx.recv_timeout(Duration::from_secs(1)).ok());
+        Ok(())
     }
 }
-fn read_capped<R: Read>(mut r: R, cap: usize) -> Result<Vec<u8>> {
-    let mut out = Vec::new();
-    let mut buf = [0u8; 8192];
+
+impl Drop for RuntimeSession<'_> {
+    fn drop(&mut self) {
+        let _ = self.shutdown();
+    }
+}
+
+fn resolve_llama_server(requested: &Path) -> Result<PathBuf> {
+    let name = requested
+        .file_name()
+        .and_then(|value| value.to_str())
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    if name.contains("llama-server") {
+        return Ok(requested.to_path_buf());
+    }
+    if let Some(parent) = requested.parent() {
+        let sibling = parent.join(if cfg!(windows) {
+            "llama-server.exe"
+        } else {
+            "llama-server"
+        });
+        if sibling.is_file() {
+            return Ok(sibling);
+        }
+    }
+    crate::sources::find_executable("llama-server").ok_or_else(|| {
+        anyhow!(
+            "persistent llama.cpp analysis requires llama-server alongside llama-cli or on PATH"
+        )
+    })
+}
+
+#[cfg(unix)]
+fn unix_http(
+    socket: &Path,
+    method: &str,
+    target: &str,
+    body: Option<&[u8]>,
+    timeout: Duration,
+    cap: usize,
+) -> Result<(u16, Vec<u8>)> {
+    use std::os::unix::net::UnixStream;
+    let mut stream = UnixStream::connect(socket).with_context(|| {
+        format!(
+            "unable to connect llama-server socket '{}'",
+            socket.display()
+        )
+    })?;
+    stream.set_read_timeout(Some(timeout))?;
+    stream.set_write_timeout(Some(timeout))?;
+    let payload = body.unwrap_or_default();
+    write!(
+        stream,
+        "{method} {target} HTTP/1.1\r\nHost: layerfault\r\nConnection: close\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n",
+        payload.len()
+    )?;
+    if !payload.is_empty() {
+        stream.write_all(payload)?;
+    }
+    stream.flush()?;
+    let mut bytes = Vec::new();
+    let mut buffer = [0u8; 8192];
     loop {
-        let n = r.read(&mut buf)?;
-        if n == 0 {
+        let count = stream.read(&mut buffer)?;
+        if count == 0 {
             break;
         }
-        if out.len().saturating_add(n) > cap {
-            return Err(anyhow!("runtime output exceeded byte cap {cap}"));
+        if bytes.len().saturating_add(count) > cap {
+            bail!("llama-server HTTP response exceeded byte cap {cap}");
         }
-        out.extend_from_slice(&buf[..n]);
+        bytes.extend_from_slice(&buffer[..count]);
+    }
+    let header_end = bytes
+        .windows(4)
+        .position(|window| window == b"\r\n\r\n")
+        .ok_or_else(|| anyhow!("malformed llama-server HTTP response"))?;
+    let header = std::str::from_utf8(&bytes[..header_end])?;
+    let status = header
+        .lines()
+        .next()
+        .and_then(|line| line.split_whitespace().nth(1))
+        .and_then(|value| value.parse::<u16>().ok())
+        .ok_or_else(|| anyhow!("llama-server HTTP response omitted status"))?;
+    let body = &bytes[header_end + 4..];
+    let chunked = header.lines().skip(1).any(|line| {
+        line.split_once(':').is_some_and(|(name, value)| {
+            name.trim().eq_ignore_ascii_case("transfer-encoding")
+                && value
+                    .split(',')
+                    .any(|part| part.trim().eq_ignore_ascii_case("chunked"))
+        })
+    });
+    let body = if chunked {
+        decode_chunked(body, cap)?
+    } else {
+        body.to_vec()
+    };
+    Ok((status, body))
+}
+
+fn decode_chunked(mut input: &[u8], cap: usize) -> Result<Vec<u8>> {
+    let mut out = Vec::new();
+    loop {
+        let line_end = input
+            .windows(2)
+            .position(|window| window == b"\r\n")
+            .ok_or_else(|| anyhow!("malformed chunked llama-server response"))?;
+        let size_text = std::str::from_utf8(&input[..line_end])?;
+        let size_token = size_text.split(';').next().unwrap_or("").trim();
+        let size = usize::from_str_radix(size_token, 16)
+            .context("invalid chunk size in llama-server response")?;
+        input = &input[line_end + 2..];
+        if size == 0 {
+            return Ok(out);
+        }
+        if size > input.len() || input.len().saturating_sub(size) < 2 {
+            bail!("truncated chunked llama-server response");
+        }
+        if out.len().saturating_add(size) > cap {
+            bail!("decoded llama-server HTTP body exceeded byte cap {cap}");
+        }
+        out.extend_from_slice(&input[..size]);
+        if &input[size..size + 2] != b"\r\n" {
+            bail!("malformed chunk terminator in llama-server response");
+        }
+        input = &input[size + 2..];
+    }
+}
+
+#[cfg(not(unix))]
+fn unix_http(
+    _socket: &Path,
+    _method: &str,
+    _target: &str,
+    _body: Option<&[u8]>,
+    _timeout: Duration,
+    _cap: usize,
+) -> Result<(u16, Vec<u8>)> {
+    bail!("Unix-domain llama-server transport is unavailable on this platform")
+}
+
+fn read_capped_drain<R: Read>(mut reader: R, cap: usize) -> Result<Vec<u8>> {
+    let mut out = Vec::new();
+    let mut buffer = [0u8; 8192];
+    loop {
+        let count = reader.read(&mut buffer)?;
+        if count == 0 {
+            break;
+        }
+        if out.len() < cap {
+            let retain = (cap - out.len()).min(count);
+            out.extend_from_slice(&buffer[..retain]);
+        }
     }
     Ok(out)
 }
+
 fn hash_path(path: &Path) -> Result<String> {
-    let mut f = crate::safeio::open_readonly_nofollow(path)?;
-    let mut h = Sha256::new();
-    let mut b = [0u8; 1024 * 1024];
+    let mut file = crate::safeio::open_readonly_nofollow(path)?;
+    let mut hasher = Sha256::new();
+    let mut buffer = [0u8; 1024 * 1024];
     loop {
-        let n = f.read(&mut b)?;
-        if n == 0 {
+        let count = file.read(&mut buffer)?;
+        if count == 0 {
             break;
         }
-        h.update(&b[..n]);
+        hasher.update(&buffer[..count]);
     }
-    Ok(hex::encode(h.finalize()))
+    Ok(hex::encode(hasher.finalize()))
 }
+
 fn version_string(path: &Path) -> Option<String> {
-    let mut child = std::process::Command::new(path)
+    let mut command = crate::safeio::command_for_executable(path).ok()?;
+    command
         .arg("--version")
         .env_clear()
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .spawn()
-        .ok()?;
+        .stderr(Stdio::null());
+    super::sandbox::configure_process_group(&mut command);
+    let mut child = command.spawn().ok()?;
     let stdout = child.stdout.take()?;
     let (tx, rx) = mpsc::channel();
     std::thread::spawn(move || {
-        let _ = tx.send(read_capped(stdout, 16 * 1024));
+        let _ = tx.send(read_capped_drain(stdout, 16 * 1024));
     });
     let started = Instant::now();
     loop {
@@ -210,8 +550,7 @@ fn version_string(path: &Path) -> Option<String> {
             break;
         }
         if started.elapsed() > Duration::from_secs(5) {
-            let _ = child.kill();
-            let _ = child.wait();
+            let _ = super::sandbox::terminate_process_tree(&mut child, Duration::from_millis(250));
             break;
         }
         std::thread::sleep(Duration::from_millis(10));

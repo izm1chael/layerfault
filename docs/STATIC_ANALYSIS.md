@@ -62,7 +62,7 @@ The 34 current `nosemgrep` annotations are intentionally narrow and rule-specifi
 
 ## Cache and bounded-analysis review
 
-Digest reuse and scanner-evidence reuse intentionally have separate minimum-size controls. Scanner evidence can be expensive to derive even for artifacts smaller than the digest-cache threshold, so the default evidence threshold is lower. Reuse is still identity-guarded and scanner-contract-versioned; `--no-cache` bypasses both paths.
+Digest reuse and scanner-evidence reuse intentionally have separate minimum-size controls. Scanner evidence can be expensive to derive even for artifacts smaller than the digest-cache threshold, so the default evidence threshold is lower. Reuse is identity-guarded and scanner-contract-versioned. Unix identities include device, inode, and change time; Windows and other platforms without that identity perform a full-file digest revalidation before reuse. `--no-cache` bypasses both paths.
 
 Large package text/config members are no longer skipped by byte size. Security inspection is streamed with bounded overlap/evidence, and targeted Hugging Face loader metadata is parsed incrementally. This avoids treating a normal large tokenizer vocabulary as generic prompt text while still removing the old fixed-size coverage cliff.
 

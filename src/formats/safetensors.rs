@@ -10,9 +10,10 @@ use std::io::{Read, Seek, SeekFrom};
 use std::path::{Component, Path};
 use std::time::Instant;
 
-pub const MAX_HEADER_BYTES: u64 = 100 * 1024 * 1024;
-pub const MAX_TENSORS: usize = 1_000_000;
+pub const MAX_HEADER_BYTES: u64 = 32 * 1024 * 1024;
+pub const MAX_TENSORS: usize = 250_000;
 pub const MAX_DIMENSIONS: usize = 32;
+const MAX_METADATA_ENTRIES: usize = 10_000;
 
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct SafetensorsSummary {
@@ -341,7 +342,7 @@ pub fn inventory_file(file: &File, file_len: u64) -> Result<SafetensorsInventory
             let object = value
                 .as_object()
                 .ok_or_else(|| anyhow!("__metadata__ must be an object"))?;
-            if object.len() > 100_000 {
+            if object.len() > MAX_METADATA_ENTRIES {
                 bail!("__metadata__ contains too many entries");
             }
             for (key, value) in object {
@@ -524,6 +525,7 @@ fn elapsed(started: Instant) -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
     use std::fs;
 
     fn fixture(header: &str, data: &[u8]) -> Vec<u8> {
@@ -565,6 +567,19 @@ mod tests {
         fs::write(&path, &bytes)?;
         let file = crate::safeio::open_readonly_nofollow(&path)?;
         assert!(validate_file(&file, bytes.len() as u64).is_err());
+        let _ = fs::remove_file(path);
+        Ok(())
+    }
+
+    #[test]
+    fn rejects_header_above_memory_budget_before_allocation() -> Result<()> {
+        let path = std::env::temp_dir().join(format!(
+            "layerfault-safe-cap-{}.safetensors",
+            std::process::id()
+        ));
+        fs::write(&path, (MAX_HEADER_BYTES + 1).to_le_bytes())?;
+        let file = crate::safeio::open_readonly_nofollow(&path)?;
+        assert!(validate_file(&file, 8).is_err());
         let _ = fs::remove_file(path);
         Ok(())
     }
