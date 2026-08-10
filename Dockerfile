@@ -1,11 +1,15 @@
 # syntax=docker/dockerfile:1.7
-FROM rust:1.88-bookworm AS build
+FROM rust:1.97.1-trixie AS build
 WORKDIR /src
 COPY Cargo.toml Cargo.lock build.rs ./
 COPY src ./src
+COPY advisories ./advisories
+COPY schemas ./schemas
+COPY policies ./policies
+COPY vendor ./vendor
 RUN cargo build --locked --release
 
-FROM debian:bookworm-slim
+FROM debian:trixie-slim
 RUN useradd --system --uid 65532 --create-home layerfault \
     && apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates bubblewrap \
