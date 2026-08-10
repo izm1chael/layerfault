@@ -1,6 +1,7 @@
 use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
+use std::fs::File;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command};
 use std::time::{Duration, Instant};
@@ -28,6 +29,10 @@ pub struct SandboxCapabilities {
     pub capabilities_dropped: bool,
     pub resource_limits: bool,
     pub address_space_limit_bytes: Option<u64>,
+    /// Seccomp is deliberately not enabled: the supported ML runtimes have a
+    /// broad, version-dependent syscall surface. Namespace, mount, capability,
+    /// and rlimit isolation remain mandatory and are reported separately.
+    pub seccomp_filter: bool,
     pub syscall_trace: bool,
     pub syscall_trace_mechanism: Option<String>,
 }
@@ -354,6 +359,7 @@ pub fn capabilities(wrapper: Option<&(PathBuf, String)>) -> SandboxCapabilities 
         capabilities_dropped: strong,
         resource_limits: limits,
         address_space_limit_bytes: limits.then(configured_address_space_limit_bytes),
+        seccomp_filter: false,
         syscall_trace: trace,
         syscall_trace_mechanism: trace.then_some("strace-file-process-network".to_owned()),
     }
@@ -394,14 +400,16 @@ fn configured_memory_budget_bytes() -> u64 {
 }
 
 fn configured_address_space_limit_bytes() -> u64 {
-    if let Ok(value) = std::env::var("LAYERFAULT_BEHAVIOUR_ADDRESS_SPACE_MB") {
+    let budget = if let Ok(value) = std::env::var("LAYERFAULT_BEHAVIOUR_ADDRESS_SPACE_MB") {
         if let Ok(mb) = value.parse::<u64>() {
-            return mb
-                .clamp(MIN_ADDRESS_SPACE_LIMIT_MB, MAX_ADDRESS_SPACE_LIMIT_MB)
-                .saturating_mul(1024 * 1024);
+            mb.clamp(MIN_ADDRESS_SPACE_LIMIT_MB, MAX_ADDRESS_SPACE_LIMIT_MB)
+                .saturating_mul(1024 * 1024)
+        } else {
+            configured_memory_budget_bytes()
         }
-    }
-    let budget = configured_memory_budget_bytes();
+    } else {
+        configured_memory_budget_bytes()
+    };
     // RLIMIT_AS constrains virtual address space, not resident memory. Keep it
     // above the conservative physical-memory admission budget so runtimes such
     // as PyTorch can map shared libraries/arenas without being rejected purely
@@ -436,7 +444,10 @@ fn active_target_bytes(path: &Path) -> Result<u64> {
             );
         }
         if entry.file_type().is_symlink() {
-            continue;
+            bail!(
+                "active target contains symlink '{}', which is not allowed",
+                entry.path().display()
+            );
         }
         let metadata = entry.metadata()?;
         if metadata.is_file() {
@@ -446,13 +457,42 @@ fn active_target_bytes(path: &Path) -> Result<u64> {
     Ok(total)
 }
 
+#[cfg(unix)]
+fn pinned_active_target_bytes(file: &File, display_path: &Path) -> Result<u64> {
+    use std::os::fd::AsRawFd;
+
+    let metadata = file.metadata().with_context(|| {
+        format!(
+            "unable to inspect active target '{}'",
+            display_path.display()
+        )
+    })?;
+    if metadata.is_file() {
+        return Ok(metadata.len());
+    }
+    if !metadata.is_dir() {
+        bail!("active target must be a regular file or directory");
+    }
+    let descriptor_path = PathBuf::from(format!("/proc/self/fd/{}/.", file.as_raw_fd()));
+    active_target_bytes(&descriptor_path)
+}
+
+#[cfg(not(unix))]
+fn pinned_active_target_bytes(_file: &File, _display_path: &Path) -> Result<u64> {
+    bail!("descriptor-pinned behavioural sandbox inputs require Unix")
+}
+
 fn estimated_runtime_memory_bytes(
     runtime: &Path,
-    model: &Path,
-    base: Option<&Path>,
+    model: &File,
+    model_path: &Path,
+    base: Option<(&File, &Path)>,
 ) -> Result<u64> {
-    let model_bytes = active_target_bytes(model)?;
-    let base_bytes = base.map(active_target_bytes).transpose()?.unwrap_or(0);
+    let model_bytes = pinned_active_target_bytes(model, model_path)?;
+    let base_bytes = base
+        .map(|(file, path)| pinned_active_target_bytes(file, path))
+        .transpose()?
+        .unwrap_or(0);
     let weights = model_bytes.saturating_add(base_bytes);
     let runtime_name = runtime
         .file_name()
@@ -470,9 +510,14 @@ fn estimated_runtime_memory_bytes(
     Ok((weights.saturating_mul(numerator) / denominator).saturating_add(overhead))
 }
 
-fn ensure_active_target_fits(runtime: &Path, model: &Path, base: Option<&Path>) -> Result<()> {
+fn ensure_active_target_fits(
+    runtime: &Path,
+    model: &File,
+    model_path: &Path,
+    base: Option<(&File, &Path)>,
+) -> Result<()> {
     let budget = configured_memory_budget_bytes();
-    let estimate = estimated_runtime_memory_bytes(runtime, model, base)?;
+    let estimate = estimated_runtime_memory_bytes(runtime, model, model_path, base)?;
     if estimate > budget {
         bail!(
             "active analysis skipped: estimated runtime memory {:.1} GiB exceeds safe host budget {:.1} GiB; static analysis remains available (override with LAYERFAULT_BEHAVIOUR_MEMORY_MB only when the host can safely support it)",
@@ -489,6 +534,36 @@ pub struct SandboxedCommand {
     pub base_argument: Option<PathBuf>,
     pub runtime_support_arguments: Vec<PathBuf>,
     pub trace_enabled: bool,
+    pub pinned_inputs: Vec<File>,
+}
+
+#[cfg(unix)]
+fn pin_active_path(path: &Path) -> Result<File> {
+    let file = File::open(path)
+        .with_context(|| format!("unable to pin active path '{}'", path.display()))?;
+    // Clearing CLOEXEC is required because prlimit/strace may exec before
+    // bwrap consumes the descriptor; `SandboxedCommand` keeps it alive.
+    let mut flags = rustix::io::fcntl_getfd(&file)?;
+    flags.remove(rustix::io::FdFlags::CLOEXEC);
+    rustix::io::fcntl_setfd(&file, flags)
+        .context("unable to make pinned sandbox input inheritable")?;
+    Ok(file)
+}
+
+#[cfg(not(unix))]
+fn pin_active_path(_path: &Path) -> Result<File> {
+    bail!("descriptor-pinned behavioural sandbox inputs require Unix")
+}
+
+#[cfg(unix)]
+fn pinned_fd(file: &File) -> std::ffi::OsString {
+    use std::os::fd::AsRawFd;
+    file.as_raw_fd().to_string().into()
+}
+
+#[cfg(not(unix))]
+fn pinned_fd(_file: &File) -> std::ffi::OsString {
+    "unsupported".into()
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -510,14 +585,23 @@ pub fn command_for(
 
     let canonical_runtime = std::fs::canonicalize(runtime)
         .with_context(|| format!("unable to canonicalize runtime '{}'", runtime.display()))?;
-    ensure_active_target_fits(&canonical_runtime, model, base)?;
     let canonical_model = std::fs::canonicalize(model)
         .with_context(|| format!("unable to canonicalize model '{}'", model.display()))?;
     let canonical_base = base
         .map(std::fs::canonicalize)
         .transpose()
         .context("unable to canonicalize behavioural base model")?;
+    let pinned_runtime = pin_active_path(&canonical_runtime)?;
+    let pinned_model = pin_active_path(&canonical_model)?;
+    let pinned_base = canonical_base.as_deref().map(pin_active_path).transpose()?;
+    ensure_active_target_fits(
+        &canonical_runtime,
+        &pinned_model,
+        &canonical_model,
+        pinned_base.as_ref().zip(canonical_base.as_deref()),
+    )?;
     let mut canonical_runtime_support = Vec::new();
+    let mut pinned_runtime_support = Vec::new();
     for path in runtime_support {
         let canonical = std::fs::canonicalize(path).with_context(|| {
             format!(
@@ -532,6 +616,11 @@ pub fn command_for(
             );
         }
         canonical_runtime_support.push(canonical);
+        pinned_runtime_support.push(pin_active_path(
+            canonical_runtime_support
+                .last()
+                .expect("path was just pushed"),
+        )?);
     }
 
     let model_argument = if canonical_model.is_dir() {
@@ -570,32 +659,32 @@ pub fn command_for(
         "/workspace".into(),
         "--dir".into(),
         "/model".into(),
-        "--ro-bind".into(),
-        canonical_model.as_os_str().to_owned(),
+        "--ro-bind-fd".into(),
+        pinned_fd(&pinned_model),
         model_argument.as_os_str().to_owned(),
-        "--ro-bind".into(),
-        canonical_runtime.as_os_str().to_owned(),
+        "--ro-bind-fd".into(),
+        pinned_fd(&pinned_runtime),
         "/runtime".into(),
     ];
-    if let (Some(base), Some(argument)) = (canonical_base.as_ref(), base_argument.as_ref()) {
+    if let (Some(base), Some(argument)) = (pinned_base.as_ref(), base_argument.as_ref()) {
         bwrap_args.extend([
             "--dir".into(),
             "/base".into(),
-            "--ro-bind".into(),
-            base.as_os_str().to_owned(),
+            "--ro-bind-fd".into(),
+            pinned_fd(base),
             argument.as_os_str().to_owned(),
         ]);
     }
     let mut runtime_support_arguments = Vec::new();
     if !canonical_runtime_support.is_empty() {
         bwrap_args.extend(["--dir".into(), "/runtime-support".into()]);
-        for (index, support) in canonical_runtime_support.iter().enumerate() {
+        for (index, support) in pinned_runtime_support.iter().enumerate() {
             let argument = PathBuf::from(format!("/runtime-support/{index}"));
             bwrap_args.extend([
                 "--dir".into(),
                 argument.as_os_str().to_owned(),
-                "--ro-bind".into(),
-                support.as_os_str().to_owned(),
+                "--ro-bind-fd".into(),
+                pinned_fd(support),
                 argument.as_os_str().to_owned(),
             ]);
             runtime_support_arguments.push(argument);
@@ -659,7 +748,6 @@ pub fn command_for(
             .arg(format!("--as={}", configured_address_space_limit_bytes()))
             .arg("--fsize=67108864")
             .arg("--nofile=256")
-            .arg("--nproc=128")
             .arg("--core=0")
             .arg("--");
         if let Some(strace_path) = trace.as_ref() {
@@ -676,12 +764,18 @@ pub fn command_for(
     command.args(bwrap_args);
     configure_process_group(&mut command);
 
+    let mut pinned_inputs = vec![pinned_runtime, pinned_model];
+    if let Some(base) = pinned_base {
+        pinned_inputs.push(base);
+    }
+    pinned_inputs.extend(pinned_runtime_support);
     Ok(SandboxedCommand {
         command,
         model_argument,
         base_argument,
         runtime_support_arguments,
         trace_enabled: trace.is_some(),
+        pinned_inputs,
     })
 }
 
@@ -835,12 +929,7 @@ fn classify_trace_line(line: &str, telemetry: &mut SandboxTelemetry) {
     ]
     .iter()
     .any(|call| lower.contains(call));
-    let protected_target = ["/model/", "/base/", "/etc/", "/root/", "/usr/", "/lib/"]
-        .iter()
-        .any(|path| lower.contains(path));
-    if (write_like || mutate_like)
-        && protected_target
-        && telemetry.filesystem_write_attempts.len() < MAX_TELEMETRY_ROWS
+    if (write_like || mutate_like) && telemetry.filesystem_write_attempts.len() < MAX_TELEMETRY_ROWS
     {
         telemetry.filesystem_write_attempts.push(excerpt(line));
     }
@@ -891,6 +980,40 @@ fn excerpt(value: &str) -> String {
 mod tests {
     use super::*;
 
+    #[cfg(unix)]
+    #[test]
+    fn active_target_preflight_rejects_nested_symlinks() -> Result<()> {
+        use std::os::unix::fs::symlink;
+
+        let root = tempfile::tempdir()?;
+        let outside = tempfile::NamedTempFile::new()?;
+        symlink(outside.path(), root.path().join("weights.bin"))?;
+        let error = active_target_bytes(root.path()).unwrap_err();
+        assert!(error.to_string().contains("contains symlink"));
+        let pinned = pin_active_path(root.path())?;
+        let error = pinned_active_target_bytes(&pinned, root.path()).unwrap_err();
+        assert!(error.to_string().contains("contains symlink"));
+        Ok(())
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn pinned_active_input_survives_path_replacement() -> Result<()> {
+        use std::io::{Read as _, Seek as _, SeekFrom};
+
+        let root = tempfile::tempdir()?;
+        let path = root.path().join("model.bin");
+        std::fs::write(&path, b"admitted")?;
+        let mut pinned = pin_active_path(&path)?;
+        std::fs::rename(&path, root.path().join("old.bin"))?;
+        std::fs::write(&path, b"replacement")?;
+        pinned.seek(SeekFrom::Start(0))?;
+        let mut bytes = Vec::new();
+        pinned.read_to_end(&mut bytes)?;
+        assert_eq!(bytes, b"admitted");
+        Ok(())
+    }
+
     #[test]
     fn trace_classification_detects_network_exec_and_canary_access() {
         let mut telemetry = SandboxTelemetry::default();
@@ -907,10 +1030,18 @@ mod tests {
             r#"openat(AT_FDCWD, "/model/package/config.json", O_WRONLY|O_TRUNC) = -1 EROFS"#,
             &mut telemetry,
         );
+        classify_trace_line(
+            r#"openat(AT_FDCWD, "/proc/self/mem", O_WRONLY) = -1 EACCES"#,
+            &mut telemetry,
+        );
+        classify_trace_line(
+            r#"openat(AT_FDCWD, "/tmp/dropper", O_WRONLY|O_CREAT) = 4"#,
+            &mut telemetry,
+        );
         assert_eq!(telemetry.network_attempts.len(), 1);
         assert_eq!(telemetry.process_exec_attempts.len(), 1);
         assert_eq!(telemetry.canary_accesses.len(), 1);
-        assert_eq!(telemetry.filesystem_write_attempts.len(), 1);
+        assert_eq!(telemetry.filesystem_write_attempts.len(), 3);
     }
 
     #[test]

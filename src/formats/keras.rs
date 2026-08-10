@@ -61,8 +61,9 @@ pub fn inspect(file: &File) -> Result<KerasArchiveSummary> {
             if entry.size() > MAX_CONFIG {
                 bail!("Keras config.json exceeds cap");
             }
-            let mut text = String::new();
-            entry.read_to_string(&mut text)?;
+            let declared_len = entry.size();
+            let bytes = read_config_bounded(&mut entry, declared_len)?;
+            let text = String::from_utf8(bytes).context("Keras config.json is not UTF-8")?;
             let value: serde_json::Value =
                 serde_json::from_str(&text).context("invalid Keras config.json")?;
             collect_custom(&value, &mut custom);
@@ -81,6 +82,20 @@ pub fn inspect(file: &File) -> Result<KerasArchiveSummary> {
         has_weights,
     })
 }
+
+fn read_config_bounded(reader: &mut impl Read, declared_len: u64) -> Result<Vec<u8>> {
+    let capacity =
+        usize::try_from(declared_len).context("Keras config.json size does not fit usize")?;
+    let mut bytes = Vec::with_capacity(capacity);
+    reader
+        .take(declared_len.saturating_add(1))
+        .read_to_end(&mut bytes)?;
+    if bytes.len() as u64 != declared_len {
+        bail!("Keras config.json size differs from ZIP metadata");
+    }
+    Ok(bytes)
+}
+
 pub fn scan(
     file: &File,
     _len: u64,
@@ -172,5 +187,25 @@ fn mk(
         detail: Some(detail),
         matches,
         duration_ms: u64::try_from(st.elapsed().as_millis()).unwrap_or(u64::MAX),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn config_read_rejects_more_data_than_zip_metadata_declares() {
+        let mut input = std::io::Cursor::new(b"{}trailing".as_slice());
+        let error = read_config_bounded(&mut input, 2).unwrap_err();
+        assert!(error.to_string().contains("size differs from ZIP metadata"));
+        assert_eq!(input.position(), 3);
+    }
+
+    #[test]
+    fn config_read_accepts_exact_declared_size() -> Result<()> {
+        let mut input = std::io::Cursor::new(b"{}".as_slice());
+        assert_eq!(read_config_bounded(&mut input, 2)?, b"{}");
+        Ok(())
     }
 }

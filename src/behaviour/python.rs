@@ -129,6 +129,7 @@ fn run_transformers_deadline(
         base_argument,
         runtime_support_arguments,
         trace_enabled,
+        pinned_inputs: _pinned_inputs,
     } = sandboxed;
     command
         .env_clear()

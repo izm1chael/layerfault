@@ -24,10 +24,10 @@ pub fn inspect(file: &File, len: u64) -> Result<TfliteSummary> {
         bail!("missing TFL3 FlatBuffer identifier");
     }
     let root = u32::from_le_bytes(h[0..4].try_into().unwrap_or([0; 4]));
-    if root < 8 || u64::from(root) + 4 > len {
+    let read_len = len.min(MAX_PREFIX);
+    if root < 8 || u64::from(root) + 4 > read_len {
         bail!("invalid TFLite root table offset");
     }
-    let read_len = len.min(MAX_PREFIX);
     let mut bytes = vec![0u8; usize::try_from(read_len).unwrap_or(0)];
     f.seek(SeekFrom::Start(0))?;
     f.read_exact(&mut bytes)?;
@@ -153,5 +153,27 @@ fn mk(
         detail: Some(detail),
         matches,
         duration_ms: u64::try_from(st.elapsed().as_millis()).unwrap_or(u64::MAX),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Write as _;
+
+    #[test]
+    fn root_offset_is_bounded_by_the_parsed_prefix() -> Result<()> {
+        let mut file = tempfile::tempfile()?;
+        let root = u32::try_from(MAX_PREFIX + 8)?;
+        file.write_all(&root.to_le_bytes())?;
+        file.write_all(b"TFL3")?;
+        file.write_all(&[0; 4])?;
+        file.set_len(MAX_PREFIX + 4096)?;
+        file.seek(SeekFrom::Start(0))?;
+        let error = inspect(&file, MAX_PREFIX + 4096).unwrap_err();
+        assert!(error
+            .to_string()
+            .contains("invalid TFLite root table offset"));
+        Ok(())
     }
 }

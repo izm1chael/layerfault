@@ -71,10 +71,9 @@ pub struct HfRepoAudit {
 }
 
 pub fn discover_lmstudio() -> Result<Vec<SourceArtifact>> {
-    if find_executable("lms").is_none() {
-        return Err(anyhow!("LM Studio CLI 'lms' was not found in PATH"));
-    }
-    let output = Command::new("lms")
+    let binary = find_executable("lms")
+        .ok_or_else(|| anyhow!("LM Studio CLI 'lms' was not found in PATH"))?;
+    let output = Command::new(&binary)
         .args(["ls", "--json", "--detailed"])
         .output()
         .context("Unable to execute 'lms ls --json --detailed'")?;
@@ -540,13 +539,17 @@ pub fn find_executable(name: &str) -> Option<PathBuf> {
     for dir in std::env::split_paths(&path) {
         let candidate = dir.join(name);
         if candidate.is_file() {
-            return Some(candidate);
+            if let Ok(resolved) = std::fs::canonicalize(candidate) {
+                return Some(resolved);
+            }
         }
         #[cfg(windows)]
         {
             let exe = dir.join(format!("{name}.exe"));
             if exe.is_file() {
-                return Some(exe);
+                if let Ok(resolved) = std::fs::canonicalize(exe) {
+                    return Some(resolved);
+                }
             }
         }
     }

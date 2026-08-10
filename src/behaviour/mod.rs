@@ -676,6 +676,7 @@ pub fn run_embedded(
             capabilities_dropped: false,
             resource_limits: false,
             address_space_limit_bytes: None,
+            seccomp_filter: false,
             syscall_trace: false,
             syscall_trace_mechanism: None,
         },

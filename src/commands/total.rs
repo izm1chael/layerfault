@@ -524,25 +524,15 @@ fn direct_hub_review(
             metadata.commit_sha
         );
     }
+    let temporary;
     let root = if let Some(staging) = staging {
         staging.to_path_buf()
     } else {
-        let nonce = format!(
-            "{}-{}",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_nanos()
-        );
-        let root = std::env::temp_dir().join(format!("layerfault-hub-review-{nonce}"));
-        std::fs::create_dir(&root).with_context(|| {
-            format!(
-                "unable to reserve Hub review workspace '{}'",
-                root.display()
-            )
-        })?;
-        root
+        temporary = tempfile::Builder::new()
+            .prefix("layerfault-hub-review-")
+            .tempdir()
+            .context("unable to reserve Hub review workspace")?;
+        temporary.path().to_path_buf()
     };
     layerfault::paths::ensure_private_dir(&root)?;
     const MAX_REVIEW_FILES: usize = 256;

@@ -11,6 +11,7 @@ use std::path::{Path, PathBuf};
 const MAX_FIELDS: u64 = 5_000_000;
 const MAX_STRING: u64 = 4 * 1024 * 1024;
 const MAX_DEPTH: usize = 32;
+const PROTO_READ_BUFFER: usize = 8 * 1024;
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct OnnxExternalData {
@@ -616,6 +617,9 @@ struct Proto {
     end: u64,
     depth: usize,
     fields: u64,
+    buffer: [u8; PROTO_READ_BUFFER],
+    buffer_start: u64,
+    buffer_len: usize,
 }
 
 impl Proto {
@@ -632,6 +636,9 @@ impl Proto {
             end,
             depth,
             fields: 0,
+            buffer: [0; PROTO_READ_BUFFER],
+            buffer_start: start,
+            buffer_len: 0,
         })
     }
 
@@ -680,11 +687,22 @@ impl Proto {
         if self.pos >= self.end {
             bail!("truncated protobuf");
         }
-        self.file.seek(SeekFrom::Start(self.pos))?;
-        let mut byte = [0u8; 1];
-        self.file.read_exact(&mut byte)?;
+        let buffered_end = self.buffer_start.saturating_add(self.buffer_len as u64);
+        if self.pos < self.buffer_start || self.pos >= buffered_end {
+            self.file.seek(SeekFrom::Start(self.pos))?;
+            let remaining = usize::try_from((self.end - self.pos).min(PROTO_READ_BUFFER as u64))
+                .context("protobuf buffer size does not fit usize")?;
+            self.buffer_len = self.file.read(&mut self.buffer[..remaining])?;
+            self.buffer_start = self.pos;
+            if self.buffer_len == 0 {
+                bail!("truncated protobuf");
+            }
+        }
+        let index = usize::try_from(self.pos - self.buffer_start)
+            .context("protobuf buffer offset does not fit usize")?;
+        let byte = self.buffer[index];
         self.pos += 1;
-        Ok(byte[0])
+        Ok(byte)
     }
 
     fn string(&mut self, len: u64) -> Result<String> {
@@ -707,6 +725,7 @@ impl Proto {
         let mut bytes = vec![0u8; usize::try_from(len).context("protobuf field too large")?];
         self.file.read_exact(&mut bytes)?;
         self.pos = end;
+        self.buffer_len = 0;
         Ok(bytes)
     }
 

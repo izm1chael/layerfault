@@ -101,6 +101,7 @@ impl RuntimeAdapter {
                 base_argument: _,
                 runtime_support_arguments: _,
                 trace_enabled,
+                pinned_inputs: _pinned_inputs,
             } = sandboxed;
             command
                 .env_clear()
