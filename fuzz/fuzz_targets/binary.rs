@@ -18,4 +18,11 @@ fuzz_target!(|data: &[u8]| {
         "sha256:fuzz",
         "application/vnd.layerfault.fuzz",
     );
+    let _ = layerfault::scanner::BinaryScanner::parse_metadata(&file, data.len() as u64);
+    let _ = layerfault::scanner::BinaryScanner::inspect_file_capabilities(
+        &file,
+        data.len() as u64,
+        "sha256:fuzz",
+        "fuzz_binary",
+    );
 });

@@ -575,6 +575,7 @@ fn scan_package_file(
     }
 
     let executable_prefix = prefix(file, 8)?;
+    let mut native_metadata = None;
     if crate::scanner::BinaryScanner::looks_executable_prefix(&executable_prefix) {
         let binary = crate::scanner::BinaryScanner::scan_file(
             file,
@@ -585,9 +586,33 @@ fn scan_package_file(
         if binary.status == ScanStatus::Fail {
             out.push(binary);
         }
+        if let Ok((meta, capability_findings)) =
+            crate::scanner::BinaryScanner::inspect_file_capabilities(file, size, digest, rel)
+        {
+            native_metadata = meta;
+            out.extend(capability_findings);
+        }
     }
 
     if is_native_or_script(&ext, &lower) {
+        let facts = if let Some(ref meta) = native_metadata {
+            serde_json::json!({
+                "package_relative_path": rel,
+                "extension": ext,
+                "size": size,
+                "sha256": digest,
+                "metadata": meta,
+                "condition": "executable or custom-code member in a model package",
+            })
+        } else {
+            serde_json::json!({
+                "package_relative_path": rel,
+                "extension": ext,
+                "size": size,
+                "sha256": digest,
+                "condition": "executable or custom-code member in a model package",
+            })
+        };
         out.push(
             finding(
                 digest,
@@ -599,16 +624,7 @@ fn scan_package_file(
                 format!("Package contains executable/custom-code artifact '{rel}'; weight-only packages normally do not require executable content"),
             )
             .subject(subject.clone())
-            .evidence(file_member(
-                subject.clone(),
-                serde_json::json!({
-                    "package_relative_path": rel,
-                    "extension": ext,
-                    "size": size,
-                    "sha256": digest,
-                    "condition": "executable or custom-code member in a model package",
-                }),
-            ))
+            .evidence(file_member(subject.clone(), facts))
             .finish(),
         );
     }
@@ -1412,35 +1428,32 @@ fn correlate_custom_code(
         }
         package_remote_trust |= item.remote_trust;
     }
-    if modules.is_empty() {
-        return;
-    }
-
-    for module in modules {
-        let module_path = format!("{}.py", module.replace('.', "/"));
-        let Some(entry) = files
-            .iter()
-            .find(|entry| entry.relative_path.eq_ignore_ascii_case(&module_path))
-        else {
-            continue;
-        };
-        let Some(item) = evidence.iter().find(|item| {
-            item.relative_path
-                .eq_ignore_ascii_case(&entry.relative_path)
-        }) else {
-            continue;
-        };
-        let Some(operation) = item.module_scope_operation else {
-            continue;
-        };
-        let trust_context = if package_remote_trust {
-            "; package metadata also sets trust_remote_code=true"
-        } else {
-            "; this code becomes importable when the caller enables trust_remote_code at runtime"
-        };
-        let digest = entry.sha256.as_deref().unwrap_or("module");
-        let subject = member_subject(&entry.relative_path, digest, Some(entry.size));
-        findings.push(
+    if !modules.is_empty() {
+        for module in modules {
+            let module_path = format!("{}.py", module.replace('.', "/"));
+            let Some(entry) = files
+                .iter()
+                .find(|entry| entry.relative_path.eq_ignore_ascii_case(&module_path))
+            else {
+                continue;
+            };
+            let Some(item) = evidence.iter().find(|item| {
+                item.relative_path
+                    .eq_ignore_ascii_case(&entry.relative_path)
+            }) else {
+                continue;
+            };
+            let Some(operation) = item.module_scope_operation else {
+                continue;
+            };
+            let trust_context = if package_remote_trust {
+                "; package metadata also sets trust_remote_code=true"
+            } else {
+                "; this code becomes importable when the caller enables trust_remote_code at runtime"
+            };
+            let digest = entry.sha256.as_deref().unwrap_or("module");
+            let subject = member_subject(&entry.relative_path, digest, Some(entry.size));
+            findings.push(
             finding(
                 digest,
                 CheckType::PackageSecurity,
@@ -1468,6 +1481,89 @@ fn correlate_custom_code(
             ))
             .finish(),
         );
+        }
+    }
+
+    // Python to native binary capability correlation
+    let py_native_loads: Vec<_> = findings
+        .iter()
+        .filter(|f| f.matches.iter().any(|m| m.contains("LF-PY-NATIVE-LOAD")))
+        .cloned()
+        .collect();
+
+    for py_finding in py_native_loads {
+        let py_rel = py_finding
+            .subject
+            .as_ref()
+            .and_then(|s| s.package_relative_path.as_deref())
+            .unwrap_or("")
+            .to_owned();
+        if py_rel.is_empty() {
+            continue;
+        }
+
+        for ev in &py_finding.evidence {
+            if let Some(ref structured) = ev.structured {
+                let call_target = structured["call_target"]
+                    .as_str()
+                    .unwrap_or("native_loader");
+                let command_evidence = structured["command_evidence"].as_str();
+
+                if let Some(target_arg) = command_evidence {
+                    let cleaned_arg = target_arg.trim_matches(&['\'', '"', ' ', '.'][..]);
+                    let basename = std::path::Path::new(cleaned_arg)
+                        .file_name()
+                        .and_then(|s| s.to_str())
+                        .unwrap_or(cleaned_arg);
+
+                    if let Some(native_entry) = files.iter().find(|e| {
+                        let e_base = std::path::Path::new(&e.relative_path)
+                            .file_name()
+                            .and_then(|s| s.to_str())
+                            .unwrap_or(&e.relative_path);
+                        e_base.eq_ignore_ascii_case(basename)
+                            || e.relative_path.eq_ignore_ascii_case(cleaned_arg)
+                    }) {
+                        let native_rel = &native_entry.relative_path;
+                        let native_digest = native_entry.sha256.as_deref().unwrap_or("native");
+
+                        let py_subject =
+                            member_subject(&py_rel, py_finding.layer_digest.as_str(), None);
+                        let native_subject =
+                            member_subject(native_rel, native_digest, Some(native_entry.size));
+
+                        let detail = format!(
+                            "Python script '{py_rel}' loads native library '{native_rel}' via '{call_target}'; native library possesses capability imports"
+                        );
+
+                        findings.push(
+                            finding(
+                                py_finding.layer_digest.as_str(),
+                                CheckType::PackageSecurity,
+                                ScanStatus::Warn,
+                                FindingClass::ContentIndicator,
+                                Confidence::High,
+                                "LF-CORR-CUSTOM-LOADER-NATIVE",
+                                detail,
+                            )
+                            .subject(py_subject.clone())
+                            .evidence(crate::finding_evidence::path_relationship(
+                                py_subject,
+                                &format!("{py_rel} -> {call_target} -> {native_rel}"),
+                                serde_json::json!({
+                                    "python_script": py_rel,
+                                    "loader_call": call_target,
+                                    "native_library": native_rel,
+                                    "target_arg": target_arg,
+                                    "target_subject": native_subject.canonical_name(),
+                                }),
+                            ))
+                            .finish(),
+                        );
+                    }
+                }
+            }
+        }
     }
 }
 

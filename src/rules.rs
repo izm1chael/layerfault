@@ -166,11 +166,17 @@ pub const RULES: &[RuleSpec] = &[
         "LF-KERAS-HDF5-LIMIT",
         "A parse budget limit is a coverage fact, not a position in the artifact",
     ),
-    // -- Embedded executables ----------------------------------------------
+    // -- Embedded executables and native binary static capability analysis --
     required("T12-001"),
     required("T12-002"),
     required("T12-003"),
     required("T12-004"),
+    required("LF-NATIVE-WX-SECTION"),
+    required("LF-NATIVE-RPATH"),
+    required("LF-NATIVE-EXEC-CAPABILITY"),
+    required("LF-NATIVE-NETWORK-CAPABILITY"),
+    required("LF-NATIVE-DYNAMIC-LOAD"),
+    required("LF-CORR-CUSTOM-LOADER-NATIVE"),
     // -- Heuristics --------------------------------------------------------
     required("LF-HEUR-DECODED-MATCH"),
     // -- Integrity and local attestation -----------------------------------
