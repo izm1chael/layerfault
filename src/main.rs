@@ -1454,24 +1454,11 @@ fn print_actionable_findings(findings: &[layerfault::scanner::LayerScanResult]) 
 }
 
 fn artifact_report_exit(result: &artifact::ArtifactReport) -> i32 {
-    let mut warning = false;
-    for finding in &result.results {
-        match finding.status {
-            layerfault::scanner::ScanStatus::Fail
-                if finding.check_type == layerfault::scanner::CheckType::IntegrityHash =>
-            {
-                return 2
-            }
-            layerfault::scanner::ScanStatus::Fail => return 3,
-            layerfault::scanner::ScanStatus::Warn => warning = true,
-            layerfault::scanner::ScanStatus::Pass => {}
-        }
-    }
-    if warning {
-        1
-    } else {
-        0
-    }
+    let scanner =
+        layerfault::decision::SecurityDecision::scanner_finding_exit_code(result.results.iter());
+    layerfault::decision::SecurityDecision::combine_scanner_and_policy_exit_code(
+        scanner, false, false,
+    )
 }
 
 fn print_store_audit(store: &audit::StoreAudit) {

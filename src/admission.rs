@@ -130,36 +130,20 @@ pub fn inspect_and_evaluate(
 }
 
 pub fn exit_code(admissions: &[ArtifactAdmission]) -> i32 {
-    let mut integrity = false;
-    let mut blocking = false;
-    let mut warning = false;
-    let mut policy_block = false;
-    for admission in admissions {
-        for result in &admission.report.results {
-            match result.status {
-                ScanStatus::Fail if result.check_type == CheckType::IntegrityHash => {
-                    integrity = true
-                }
-                ScanStatus::Fail => blocking = true,
-                ScanStatus::Warn => warning = true,
-                ScanStatus::Pass => {}
-            }
-        }
-        match admission.policy.action {
-            PolicyAction::Block => policy_block = true,
-            PolicyAction::Warn => warning = true,
-            PolicyAction::Allow => {}
-        }
-    }
-    if integrity {
-        2
-    } else if blocking {
-        3
-    } else if policy_block {
-        4
-    } else if warning {
-        1
-    } else {
-        0
-    }
+    let scanner = crate::decision::SecurityDecision::scanner_finding_exit_code(
+        admissions
+            .iter()
+            .flat_map(|admission| admission.report.results.iter()),
+    );
+    let policy_block = admissions
+        .iter()
+        .any(|admission| admission.policy.action == PolicyAction::Block);
+    let policy_warn = admissions
+        .iter()
+        .any(|admission| admission.policy.action == PolicyAction::Warn);
+    crate::decision::SecurityDecision::combine_scanner_and_policy_exit_code(
+        scanner,
+        policy_block,
+        policy_warn,
+    )
 }

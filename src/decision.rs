@@ -66,6 +66,55 @@ impl SecurityDecision {
         }
     }
 
+    /// Canonical scanner-level exit tier for a set of findings, independent of
+    /// any policy decision: 0=clean, 1=warn, 2=integrity/corruption (bytes
+    /// could not be trusted, e.g. digest/size mismatch), 3=other
+    /// security-relevant Fail (BLOCK). An `IntegrityHash` Fail takes priority
+    /// over any other Fail because corrupted/unreadable bytes make every
+    /// other finding about those bytes unreliable.
+    pub fn scanner_finding_exit_code<'a>(
+        findings: impl IntoIterator<Item = &'a crate::scanner::LayerScanResult>,
+    ) -> i32 {
+        use crate::scanner::{CheckType, ScanStatus};
+        let mut warn = false;
+        let mut blocking = false;
+        for finding in findings {
+            match finding.status {
+                ScanStatus::Fail if finding.check_type == CheckType::IntegrityHash => return 2,
+                ScanStatus::Fail => blocking = true,
+                ScanStatus::Warn => warn = true,
+                ScanStatus::Pass => {}
+            }
+        }
+        if blocking {
+            3
+        } else {
+            i32::from(warn)
+        }
+    }
+
+    /// Combine a `scanner_finding_exit_code` result with an aggregate policy
+    /// decision using the canonical CLI exit-code contract. A scanner-level
+    /// integrity error (2) or Fail (3) always wins, since those describe the
+    /// artifact bytes themselves; only once the scanner is clean does the
+    /// policy verdict (Block=4, Warn=1) get a say.
+    pub fn combine_scanner_and_policy_exit_code(
+        scanner_code: i32,
+        policy_block: bool,
+        policy_warn: bool,
+    ) -> i32 {
+        if matches!(scanner_code, 2 | 3) {
+            return scanner_code;
+        }
+        if policy_block {
+            return 4;
+        }
+        if policy_warn || scanner_code == 1 {
+            return 1;
+        }
+        0
+    }
+
     pub const fn from_differential_behaviour_state(
         state: crate::transformation::DifferentialBehaviourState,
     ) -> Self {
@@ -90,6 +139,23 @@ impl std::fmt::Display for SecurityDecision {
 #[cfg(test)]
 mod tests {
     use super::SecurityDecision;
+
+    fn finding(
+        check_type: crate::scanner::CheckType,
+        status: crate::scanner::ScanStatus,
+    ) -> crate::scanner::LayerScanResult {
+        crate::scanner::LayerScanResult {
+            layer_digest: "sha256:test".to_owned(),
+            media_type: "application/test".to_owned(),
+            check_type,
+            status,
+            finding_class: crate::scanner::FindingClass::Integrity,
+            confidence: crate::scanner::Confidence::High,
+            detail: None,
+            matches: Vec::new(),
+            duration_ms: 0,
+        }
+    }
 
     #[test]
     fn decisions_are_monotonic() {
@@ -118,6 +184,22 @@ mod tests {
                 crate::transformation::DifferentialBehaviourState::CapabilityChange
             ),
             SecurityDecision::Warn
+        );
+    }
+
+    #[test]
+    fn integrity_exit_tier_is_independent_of_finding_order() {
+        use crate::scanner::{CheckType, ScanStatus};
+
+        let ordinary = finding(CheckType::OnnxStructure, ScanStatus::Fail);
+        let integrity = finding(CheckType::IntegrityHash, ScanStatus::Fail);
+        assert_eq!(
+            SecurityDecision::scanner_finding_exit_code([&ordinary, &integrity]),
+            2
+        );
+        assert_eq!(
+            SecurityDecision::scanner_finding_exit_code([&integrity, &ordinary]),
+            2
         );
     }
 }

@@ -432,52 +432,26 @@ fn scan_error(digest: &str, media_type: &str, detail: String) -> LayerScanResult
 }
 
 pub fn scanner_exit_code(reports: &[EvaluatedReport]) -> i32 {
-    let results = reports
-        .iter()
-        .flat_map(|report| report.report.results.iter());
-    let mut integrity_fail = false;
-    let mut other_fail = false;
-    let mut warn = false;
-    for result in results {
-        match result.status {
-            ScanStatus::Fail if result.check_type == CheckType::IntegrityHash => {
-                integrity_fail = true
-            }
-            ScanStatus::Fail => other_fail = true,
-            ScanStatus::Warn => warn = true,
-            ScanStatus::Pass => {}
-        }
-    }
-    if integrity_fail {
-        2
-    } else if other_fail {
-        3
-    } else if warn {
-        1
-    } else {
-        0
-    }
+    crate::decision::SecurityDecision::scanner_finding_exit_code(
+        reports
+            .iter()
+            .flat_map(|report| report.report.results.iter()),
+    )
 }
 
 pub fn policy_exit_code(reports: &[EvaluatedReport]) -> i32 {
     let scanner = scanner_exit_code(reports);
-    if scanner == 2 || scanner == 3 {
-        return scanner;
-    }
-    if reports
+    let policy_block = reports
         .iter()
-        .any(|report| report.policy.action == PolicyAction::Block)
-    {
-        4
-    } else if reports
+        .any(|report| report.policy.action == PolicyAction::Block);
+    let policy_warn = reports
         .iter()
-        .any(|report| report.policy.action == PolicyAction::Warn)
-        || scanner == 1
-    {
-        1
-    } else {
-        0
-    }
+        .any(|report| report.policy.action == PolicyAction::Warn);
+    crate::decision::SecurityDecision::combine_scanner_and_policy_exit_code(
+        scanner,
+        policy_block,
+        policy_warn,
+    )
 }
 
 pub fn default_jobs() -> usize {

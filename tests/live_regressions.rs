@@ -33,6 +33,62 @@ fn run(args: &[&str]) -> Output {
         .expect("run Layerfault")
 }
 
+fn varint(mut value: u64) -> Vec<u8> {
+    let mut out = Vec::new();
+    loop {
+        let byte = (value & 0x7F) as u8;
+        value >>= 7;
+        if value != 0 {
+            out.push(byte | 0x80);
+        } else {
+            out.push(byte);
+            return out;
+        }
+    }
+}
+
+fn field_varint(no: u64, value: u64) -> Vec<u8> {
+    let mut out = varint(no << 3);
+    out.extend(varint(value));
+    out
+}
+
+fn field_bytes(no: u64, payload: &[u8]) -> Vec<u8> {
+    let mut out = varint((no << 3) | 2);
+    out.extend(varint(payload.len() as u64));
+    out.extend_from_slice(payload);
+    out
+}
+
+fn kv(key: &str, value: &str) -> Vec<u8> {
+    let mut out = field_bytes(1, key.as_bytes());
+    out.extend(field_bytes(2, value.as_bytes()));
+    out
+}
+
+/// Builds a minimal ONNX ModelProto with a single external-data initializer
+/// whose declared offset (999999) is far past the four-byte sidecar's EOF.
+/// Mirrors scripts/lab-dev/setup-layerfault-lab-deep.sh case
+/// 71-generated-onnx-external-offset, which surfaced a divergence where
+/// `pipeline`/`inspect`/`scan-dir`/`verify-package`/`verify-file` returned
+/// exit 2 (INTEGRITY_OR_ERROR) while `review --profile quick` correctly
+/// returned exit 3 (BLOCK) for the identical LF-ONNX-EXTERNAL-RANGE finding.
+fn write_onnx_external_offset_overflow(dir: &Path) {
+    let mut external = field_bytes(13, &kv("location", "weights.bin"));
+    external.extend(field_bytes(13, &kv("offset", "999999")));
+    external.extend(field_bytes(13, &kv("length", "8")));
+    external.extend(field_varint(14, 1));
+
+    let mut graph = field_bytes(2, b"layerfault-fixture");
+    graph.extend(field_bytes(5, &external));
+
+    let mut model = field_varint(1, 8);
+    model.extend(field_bytes(7, &graph));
+
+    fs::write(dir.join("model.onnx"), model).expect("write ONNX fixture");
+    fs::write(dir.join("weights.bin"), b"LF00").expect("write external sidecar fixture");
+}
+
 #[test]
 fn review_quick_exit_matches_clean_final_decision() {
     let root = temp_dir("review-clean");
@@ -224,6 +280,80 @@ fn compare_block_decision_has_block_exit_code() {
     assert_eq!(value["final_decision"], "BLOCK");
     let _ = fs::remove_dir_all(base);
     let _ = fs::remove_dir_all(derived);
+}
+
+#[test]
+fn onnx_external_range_blocks_consistently_across_every_cli_surface() {
+    let root = temp_dir("onnx-external-range");
+    let _ = fs::remove_dir_all(&root);
+    fs::create_dir_all(&root).expect("create package");
+    write_onnx_external_offset_overflow(&root);
+    let model_path = root.join("model.onnx");
+
+    let assert_block = |label: &str, output: &Output| {
+        assert_eq!(
+            output.status.code(),
+            Some(3),
+            "{label} expected BLOCK (exit 3); stdout={} stderr={}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    };
+
+    assert_block(
+        "inspect (package dir)",
+        &run(&["inspect", root.to_str().unwrap(), "--json"]),
+    );
+    assert_block(
+        "scan-dir",
+        &run(&["scan-dir", root.to_str().unwrap(), "--json"]),
+    );
+    assert_block(
+        "verify-package",
+        &run(&[
+            "verify-package",
+            root.to_str().unwrap(),
+            "--policy",
+            "workstation",
+            "--json",
+        ]),
+    );
+    assert_block(
+        "pipeline",
+        &run(&[
+            "pipeline",
+            root.to_str().unwrap(),
+            "--policy",
+            "workstation",
+            "--json",
+        ]),
+    );
+    assert_block(
+        "review --profile quick",
+        &run(&[
+            "review",
+            root.to_str().unwrap(),
+            "--profile",
+            "quick",
+            "--json",
+        ]),
+    );
+    assert_block(
+        "inspect (single artifact)",
+        &run(&["inspect", model_path.to_str().unwrap(), "--json"]),
+    );
+    assert_block(
+        "verify-file",
+        &run(&[
+            "verify-file",
+            model_path.to_str().unwrap(),
+            "--policy",
+            "workstation",
+            "--json",
+        ]),
+    );
+
+    let _ = fs::remove_dir_all(root);
 }
 
 #[test]

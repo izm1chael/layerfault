@@ -463,25 +463,13 @@ fn package_report_exit(
     report: &package::PackageReport,
     decision: Option<&policy::PolicyDecision>,
 ) -> i32 {
-    let mut warn = false;
-    for finding in &report.findings {
-        match finding.status {
-            layerfault::scanner::ScanStatus::Fail
-                if finding.check_type == layerfault::scanner::CheckType::IntegrityHash =>
-            {
-                return 2
-            }
-            layerfault::scanner::ScanStatus::Fail => return 3,
-            layerfault::scanner::ScanStatus::Warn => warn = true,
-            layerfault::scanner::ScanStatus::Pass => {}
-        }
-    }
-    if decision.is_some_and(|value| value.action == policy::PolicyAction::Block) {
-        return 4;
-    }
-    if decision.is_some_and(|value| value.action == policy::PolicyAction::Warn) || warn {
-        1
-    } else {
-        0
-    }
+    let scanner =
+        layerfault::decision::SecurityDecision::scanner_finding_exit_code(report.findings.iter());
+    let policy_block = decision.is_some_and(|value| value.action == policy::PolicyAction::Block);
+    let policy_warn = decision.is_some_and(|value| value.action == policy::PolicyAction::Warn);
+    layerfault::decision::SecurityDecision::combine_scanner_and_policy_exit_code(
+        scanner,
+        policy_block,
+        policy_warn,
+    )
 }
