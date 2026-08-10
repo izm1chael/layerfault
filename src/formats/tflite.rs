@@ -11,6 +11,7 @@ pub struct TfliteSummary {
     pub operator_code_count: Option<u32>,
     pub subgraph_count: Option<u32>,
     pub buffer_count: Option<u32>,
+    pub associated_files: Vec<String>,
 }
 pub fn inspect(file: &File, len: u64) -> Result<TfliteSummary> {
     if len < 12 {
@@ -40,12 +41,14 @@ pub fn inspect(file: &File, len: u64) -> Result<TfliteSummary> {
     let op = table_vector_len(&bytes, root_usize, 1)?;
     let sub = table_vector_len(&bytes, root_usize, 2)?;
     let buffers = table_vector_len(&bytes, root_usize, 4)?;
+    let associated_files = associated_file_names(&f, len)?;
     Ok(TfliteSummary {
         schema_version: version,
         root_offset: root,
         operator_code_count: op,
         subgraph_count: sub,
         buffer_count: buffers,
+        associated_files,
     })
 }
 pub fn scan(
@@ -56,17 +59,28 @@ pub fn scan(
 ) -> Result<crate::scanner::LayerScanResult> {
     let st = std::time::Instant::now();
     match inspect(file, len) {
-        Ok(s) => Ok(mk(
+        Ok(s) => {
+            let associated = !s.associated_files.is_empty();
+            Ok(mk(
             digest,
             media,
-            crate::scanner::ScanStatus::Pass,
+            if associated {
+                crate::scanner::ScanStatus::Warn
+            } else {
+                crate::scanner::ScanStatus::Pass
+            },
             format!(
-                "TFLite FlatBuffer validated: schema {}, {:?} subgraph(s), {:?} operator code(s)",
-                s.schema_version, s.subgraph_count, s.operator_code_count
+                "TFLite FlatBuffer validated: schema {}, {:?} subgraph(s), {:?} operator code(s), associated files {:?}",
+                s.schema_version, s.subgraph_count, s.operator_code_count, s.associated_files
             ),
-            vec![],
+            if associated {
+                vec!["[LF-TFLITE-ASSOCIATED-FILE] TFLite carries ZIP-appended authority metadata that must be integrity-bound with the model".to_owned()]
+            } else {
+                vec![]
+            },
             st,
-        )),
+        ))
+        }
         Err(e) => Ok(mk(
             digest,
             media,
@@ -76,6 +90,32 @@ pub fn scan(
             st,
         )),
     }
+}
+
+fn associated_file_names(file: &File, len: u64) -> Result<Vec<String>> {
+    // TFLite Model Metadata stores associated files in a ZIP archive appended
+    // to the FlatBuffer. Listing central-directory names does not decompress
+    // attacker-controlled content.
+    let mut probe = file.try_clone()?;
+    let tail_len = len.min(128 * 1024);
+    probe.seek(SeekFrom::Start(len.saturating_sub(tail_len)))?;
+    let mut tail = vec![0; usize::try_from(tail_len).unwrap_or(0)];
+    probe.read_exact(&mut tail)?;
+    if !tail.windows(4).any(|window| window == b"PK\x05\x06") {
+        return Ok(Vec::new());
+    }
+    let mut archive = zip::ZipArchive::new(file.try_clone()?)
+        .map_err(|error| anyhow::anyhow!("invalid TFLite associated-file ZIP: {error}"))?;
+    if archive.len() > 256 {
+        bail!("TFLite associated-file ZIP contains too many entries");
+    }
+    let mut names = Vec::with_capacity(archive.len());
+    for index in 0..archive.len() {
+        let entry = archive.by_index(index)?;
+        names.push(entry.name().chars().take(512).collect());
+    }
+    names.sort();
+    Ok(names)
 }
 fn table_field(buf: &[u8], table: usize, index: usize) -> Result<Option<usize>> {
     if table < 4 || table + 4 > buf.len() {
@@ -174,6 +214,38 @@ mod tests {
         assert!(error
             .to_string()
             .contains("invalid TFLite root table offset"));
+        Ok(())
+    }
+
+    #[test]
+    fn zip_appended_labels_are_reported_as_integrity_relevant() -> Result<()> {
+        let mut file = tempfile::tempfile()?;
+        let mut model = Vec::new();
+        model.extend_from_slice(&16_u32.to_le_bytes());
+        model.extend_from_slice(b"TFL3");
+        model.extend_from_slice(&6_u16.to_le_bytes());
+        model.extend_from_slice(&8_u16.to_le_bytes());
+        model.extend_from_slice(&4_u16.to_le_bytes());
+        model.extend_from_slice(&[0, 0]);
+        model.extend_from_slice(&8_i32.to_le_bytes());
+        model.extend_from_slice(&3_u32.to_le_bytes());
+        file.write_all(&model)?;
+        file.seek(SeekFrom::End(0))?;
+        {
+            let mut zip = zip::ZipWriter::new(file.try_clone()?);
+            zip.start_file("labels.txt", zip::write::SimpleFileOptions::default())?;
+            zip.write_all(b"safe\nunsafe\n")?;
+            zip.finish()?;
+        }
+        let len = file.metadata()?.len();
+        let summary = inspect(&file, len)?;
+        assert_eq!(summary.associated_files, vec!["labels.txt"]);
+        let result = scan(&file, len, "fixture", "application/tflite")?;
+        assert_eq!(result.status, crate::scanner::ScanStatus::Warn);
+        assert!(result
+            .matches
+            .iter()
+            .any(|value| value.contains("LF-TFLITE-ASSOCIATED-FILE")));
         Ok(())
     }
 }

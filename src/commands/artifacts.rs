@@ -467,7 +467,7 @@ fn package_report_exit(
     for finding in &report.findings {
         match finding.status {
             layerfault::scanner::ScanStatus::Fail
-                if finding.finding_class == layerfault::scanner::FindingClass::Integrity =>
+                if finding.check_type == layerfault::scanner::CheckType::IntegrityHash =>
             {
                 return 2
             }

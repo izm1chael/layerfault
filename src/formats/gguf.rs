@@ -34,6 +34,11 @@ pub enum Endian {
 pub struct GgufMetadataEntry {
     pub value_type: u32,
     pub digest: String,
+    /// Representation-neutral digest for a string array. The digest covers the
+    /// ordered UTF-8 values, not GGUF's container encoding, so callers can
+    /// compare tokenizer tables with other serialization formats.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub string_array_hash: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub string_value: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -212,6 +217,7 @@ impl<R: Read + Seek> GgufReader<R> {
 #[derive(Default)]
 struct CapturedValue {
     string_value: Option<String>,
+    string_array_hash: Option<String>,
     unsigned_value: Option<u64>,
     signed_value: Option<i64>,
     float_value: Option<f64>,
@@ -297,6 +303,7 @@ fn parse_reader<R: Read + Seek>(mut raw: R, file_len: u64) -> Result<GgufInvento
                 value_type,
                 digest: format!("sha256:{}", hex::encode(hasher.finalize())),
                 string_value: capture.string_value,
+                string_array_hash: capture.string_array_hash,
                 unsigned_value: capture.unsigned_value,
                 signed_value: capture.signed_value,
                 float_value: capture.float_value,
@@ -508,10 +515,14 @@ fn read_metadata_value<R: Read + Seek>(
             }
             hasher.update(element_type.to_le_bytes());
             hasher.update(count.to_le_bytes());
+            let mut ordered_strings = (element_type == 8).then(Sha256::new);
+            if let Some(semantic) = ordered_strings.as_mut() {
+                semantic.update(count.to_le_bytes());
+            }
             for _ in 0..count {
                 let mut child = Sha256::new();
                 child.update(element_type.to_le_bytes());
-                let _ = read_metadata_value(
+                let captured = read_metadata_value(
                     reader,
                     element_type,
                     depth + 1,
@@ -519,8 +530,18 @@ fn read_metadata_value<R: Read + Seek>(
                     text_collection,
                     &mut child,
                 )?;
+                if let Some(semantic) = ordered_strings.as_mut() {
+                    if let Some(value) = captured.string_value {
+                        semantic.update((value.len() as u64).to_le_bytes());
+                        semantic.update(value.as_bytes());
+                    } else {
+                        ordered_strings = None;
+                    }
+                }
                 hasher.update(child.finalize());
             }
+            out.string_array_hash =
+                ordered_strings.map(|semantic| hex::encode(semantic.finalize()));
         }
         10 => {
             let v = reader.read_u64()?;

@@ -607,6 +607,22 @@
       "operation": "review-quick-quantization",
       "decision": "WARN",
       "exit_code": 1
+    },
+    {
+      "group": "comparison",
+      "case": "generated-quantization-template-tamper",
+      "operation": "compare-quantization",
+      "decision": "BLOCK",
+      "exit_code": 3,
+      "required_rule_prefixes": ["LF-LINEAGE-QUANTIZATION-TEMPLATE"]
+    },
+    {
+      "group": "comparison",
+      "case": "generated-quantization-template-tamper",
+      "operation": "review-quick-quantization",
+      "decision": "BLOCK",
+      "exit_code": 3,
+      "required_rule_prefixes": ["LF-LINEAGE-QUANTIZATION-TEMPLATE"]
     }
   ]
 }

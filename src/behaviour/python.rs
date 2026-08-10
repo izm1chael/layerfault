@@ -365,6 +365,9 @@ fn run_transformers_deadline(
                     executions.push(super::ProbeExecution {
                         probe_id: probe.id.clone(),
                         category: probe.category.clone(),
+                        comparison_group: probe.comparison_group.clone(),
+                        comparison_role: probe.comparison_role.clone(),
+                        expected_boundary: probe.expected_boundary.clone(),
                         prompt_sha256: super::sha256(combined.as_bytes()),
                         response_sha256: super::sha256(output.as_bytes()),
                         response_excerpt: super::bounded_excerpt(output, 4096),
@@ -441,6 +444,9 @@ fn run_transformers_deadline(
     executions.push(super::ProbeExecution {
         probe_id: "runtime-side-effects".to_owned(),
         category: "runtime_side_effects".to_owned(),
+        comparison_group: None,
+        comparison_role: None,
+        expected_boundary: None,
         prompt_sha256: super::sha256(b"runtime-side-effects"),
         response_sha256: super::sha256(side_effect_detail.as_bytes()),
         response_excerpt: super::bounded_excerpt(&side_effect_detail, 4096),

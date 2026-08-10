@@ -112,6 +112,10 @@ pub(crate) fn runtime_evaluation_for_binary(
         } else {
             advisory::load_database(None)?
         };
+    if let Some(path) = security.runtime_path.as_deref() {
+        let runtime = advisory::detect_runtime_executable(kind, path)?;
+        return Ok(advisory::evaluate_info(runtime, &database, &bytes));
+    }
     match executable_name {
         Some(name) => advisory::evaluate_named(kind, name, &database, &bytes),
         None => {

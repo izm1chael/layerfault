@@ -14,6 +14,13 @@ Layerfault does not parse LM Studio private databases or modify them directly.
 
 Local artifacts are admitted before Layerfault invokes `llama-cli -m <path>` or `llama-server -m <path>`. Remaining runtime arguments are passed as discrete process arguments.
 
+High-assurance workflows should select the runtime explicitly with
+`--runtime-path PATH`. Non-interactive installations may instead set
+`LAYERFAULT_OLLAMA_RUNTIME`, `LAYERFAULT_LMSTUDIO_RUNTIME`, or
+`LAYERFAULT_LLAMA_RUNTIME`. Layerfault canonicalizes and fingerprints the
+selected executable and revalidates it before guarded launch. `PATH` discovery
+remains a convenience fallback when no explicit selection is supplied.
+
 ## Hugging Face cache
 
 Hugging Face support is offline cache auditing. Layerfault examines `models--*` repositories and their `refs`, `snapshots` and `blobs`, validates that snapshot symlinks resolve inside the repository blob store, identifies broken refs/detached snapshots/orphan blobs, and structurally inspects supported model artifacts.

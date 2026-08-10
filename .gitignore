@@ -15,4 +15,6 @@
 /fuzz/logs
 /fuzz/coverage-reports
 
-/scripts/lab-dev/
+/scripts/lab-dev/*
+!/scripts/lab-dev/layerfault-master-harness.sh
+!/scripts/lab-dev/setup-layerfault-lab-deep.sh

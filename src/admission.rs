@@ -137,7 +137,7 @@ pub fn exit_code(admissions: &[ArtifactAdmission]) -> i32 {
     for admission in admissions {
         for result in &admission.report.results {
             match result.status {
-                ScanStatus::Fail if result.finding_class == FindingClass::Integrity => {
+                ScanStatus::Fail if result.check_type == CheckType::IntegrityHash => {
                     integrity = true
                 }
                 ScanStatus::Fail => blocking = true,

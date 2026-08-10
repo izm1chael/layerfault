@@ -287,6 +287,9 @@ struct EvidenceWriteArgs {
 
 #[derive(clap::Args, Debug, Clone, Default)]
 struct RuntimeSecurityArgs {
+    /// Pin the exact runtime executable instead of discovering it through PATH.
+    #[arg(long, value_name = "PATH")]
+    runtime_path: Option<PathBuf>,
     /// Optional signed external advisory database. Built-in advisories are compiled into Layerfault.
     #[arg(long, requires_all = ["advisory_signature", "advisory_public_key"])]
     advisory_db: Option<PathBuf>,
@@ -1455,7 +1458,7 @@ fn artifact_report_exit(result: &artifact::ArtifactReport) -> i32 {
     for finding in &result.results {
         match finding.status {
             layerfault::scanner::ScanStatus::Fail
-                if finding.finding_class == layerfault::scanner::FindingClass::Integrity =>
+                if finding.check_type == layerfault::scanner::CheckType::IntegrityHash =>
             {
                 return 2
             }
@@ -1639,5 +1642,26 @@ mod tests {
 
         assert_eq!(parsed_mutation_count("7"), 7);
         assert_eq!(parsed_mutation_count("10000"), 32);
+    }
+
+    #[test]
+    fn guarded_workflow_accepts_explicit_runtime_path() {
+        let cli = Cli::try_parse_from([
+            "layerfault",
+            "run",
+            "fixture.gguf",
+            "--source",
+            "llama-cpp",
+            "--runtime-path",
+            "/opt/llama/llama-cli",
+        ])
+        .expect("parse guarded run");
+        let Some(Command::Run(args)) = cli.command else {
+            panic!("expected run command");
+        };
+        assert_eq!(
+            args.runtime_security.runtime_path.as_deref(),
+            Some(Path::new("/opt/llama/llama-cli"))
+        );
     }
 }

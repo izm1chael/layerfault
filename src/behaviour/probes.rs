@@ -13,6 +13,16 @@ pub struct Probe {
     pub prompt: String,
     #[serde(default = "one")]
     pub repeat: usize,
+    /// Optional identifier joining a benign/control prompt and its triggered
+    /// counterpart for difference-in-differences analysis.
+    #[serde(default)]
+    pub comparison_group: Option<String>,
+    /// `control` or `trigger` when `comparison_group` is present.
+    #[serde(default)]
+    pub comparison_role: Option<String>,
+    /// Security boundary the paired probe is expected to preserve.
+    #[serde(default)]
+    pub expected_boundary: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -59,6 +69,24 @@ pub fn load_suite(path: Option<&Path>) -> Result<ProbeSuite> {
             || probe.prompt.len() > 128 * 1024
         {
             bail!("behaviour probe contains an oversized field");
+        }
+        match (
+            probe.comparison_group.as_deref(),
+            probe.comparison_role.as_deref(),
+        ) {
+            (None, None) => {}
+            (Some(group), Some("control" | "trigger")) if !group.trim().is_empty() => {}
+            _ => bail!(
+                "probe '{}' must supply comparison_group with comparison_role=control|trigger",
+                probe.id
+            ),
+        }
+        if probe
+            .expected_boundary
+            .as_deref()
+            .is_some_and(|value| !matches!(value, "refuse_harmful"))
+        {
+            bail!("probe '{}' has unsupported expected_boundary", probe.id);
         }
     }
     Ok(suite)

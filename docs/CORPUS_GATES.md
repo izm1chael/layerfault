@@ -17,6 +17,11 @@ The checker reads `summary.tsv` and, where present, `semantic-summary.tsv`, then
 - `FALSE_POSITIVE_REGRESSION`: actual severity is higher than the expected clean/control verdict;
 - `MISSING_OPERATION`: an expected corpus operation did not run or was not recorded.
 
+When an operation emits a top-level JSON `exit_code`, the harness validates the
+process status against that command-specific contract. This preserves pipeline
+integrity `BLOCK` as exit `2` without weakening the canonical `BLOCK` exit `3`
+mapping used by composite semantic commands.
+
 Update `tests/corpus-expectations.json` only when the fixture contract intentionally changes; do not weaken it merely to make a regression green.
 
 ## Performance contract

@@ -55,6 +55,13 @@ export LAYERFAULT_BEHAVIOUR_MEMORY_MB=8192
 
 Only raise this when the host actually has enough memory.
 
+The sandbox normally derives its virtual-address-space limit from that same
+budget and adds headroom for runtime mappings. Advanced operators can set
+`LAYERFAULT_BEHAVIOUR_ADDRESS_SPACE_MB` to override the final `RLIMIT_AS`
+ceiling directly. A value below the needs of an otherwise admitted model will
+allow admission and then intentionally terminate the runtime at that hard
+limit.
+
 ## Build from source
 
 Source builds use the Rust toolchain pinned by `rust-toolchain.toml`:

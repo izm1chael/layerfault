@@ -151,6 +151,8 @@ pub fn compare_snapshots(
 
     let tokenizer_changed = base.tokenizer != derived.tokenizer;
     let template_changed = base.template != derived.template;
+    let tokenizer_semantics = semantic_tokenizer_change(&base, &derived);
+    let template_semantics = semantic_template_change(&base, &derived);
     if tokenizer_changed {
         findings.push(finding(
             "LF-TOKENIZER-CHANGED", "tokenizer", "WARN", "HIGH",
@@ -205,14 +207,14 @@ pub fn compare_snapshots(
     if let Some(claim) = claim {
         match claim {
             TransformationType::Quantization => {
-                if tokenizer_changed {
+                if tokenizer_semantics == SemanticChange::Changed {
                     contradicted = true;
                     findings.push(claim_contradiction(
                         "LF-LINEAGE-QUANTIZATION-TOKENIZER",
                         "Quantization-only claim changed the tokenizer",
                     ));
                 }
-                if template_changed {
+                if template_semantics == SemanticChange::Changed {
                     contradicted = true;
                     findings.push(claim_contradiction(
                         "LF-LINEAGE-QUANTIZATION-TEMPLATE",
@@ -233,6 +235,23 @@ pub fn compare_snapshots(
                         vec![format!("base_format={}", base.format), format!("derived_format={}", derived.format)],
                         "Lineage remains review-required unless stronger reproducibility/provenance evidence binds the transformation.",
                         "Use the quantization reproducibility check or signed transformation evidence before treating the derivative as verified.",
+                    ));
+                }
+                if !tensor_schema_comparable
+                    && (tokenizer_semantics == SemanticChange::Incomparable
+                        || template_semantics == SemanticChange::Incomparable)
+                {
+                    findings.push(finding(
+                        "LF-LINEAGE-QUANTIZATION-METADATA-INCOMPARABLE",
+                        "lineage",
+                        "WARN",
+                        "MEDIUM",
+                        "Cross-format tokenizer/template evidence is incomplete",
+                        "At least one semantic tokenizer or chat-template component was absent or could not be normalized across formats.",
+                        "Representation-specific file hashes are not proof of a semantic change, but incomplete normalized metadata prevents verification.",
+                        vec![format!("base_format={}", base.format), format!("derived_format={}", derived.format)],
+                        "The quantization remains review-required rather than falsely contradicted.",
+                        "Rebuild with a converter that preserves comparable tokenizer and template metadata, or supply signed reproducibility evidence.",
                     ));
                 }
             }
@@ -363,6 +382,103 @@ pub fn compare_snapshots(
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SemanticChange {
+    Same,
+    Changed,
+    Incomparable,
+}
+
+fn semantic_template_change(base: &ModelSnapshot, derived: &ModelSnapshot) -> SemanticChange {
+    if base.format == derived.format {
+        return if base.template == derived.template {
+            SemanticChange::Same
+        } else {
+            SemanticChange::Changed
+        };
+    }
+    match (
+        base.template
+            .as_ref()
+            .and_then(|value| value.exact_hash.as_ref()),
+        derived
+            .template
+            .as_ref()
+            .and_then(|value| value.exact_hash.as_ref()),
+    ) {
+        (Some(left), Some(right)) if left == right => SemanticChange::Same,
+        (Some(_), Some(_)) => SemanticChange::Changed,
+        (None, None) if base.template.is_none() && derived.template.is_none() => {
+            SemanticChange::Same
+        }
+        _ => SemanticChange::Incomparable,
+    }
+}
+
+fn semantic_tokenizer_change(base: &ModelSnapshot, derived: &ModelSnapshot) -> SemanticChange {
+    if base.format == derived.format {
+        return if base.tokenizer == derived.tokenizer {
+            SemanticChange::Same
+        } else {
+            SemanticChange::Changed
+        };
+    }
+    let (Some(left), Some(right)) = (base.tokenizer.as_ref(), derived.tokenizer.as_ref()) else {
+        return if base.tokenizer.is_none() && derived.tokenizer.is_none() {
+            SemanticChange::Same
+        } else {
+            SemanticChange::Incomparable
+        };
+    };
+    let pairs = [
+        (
+            left.vocabulary_hash.as_ref(),
+            right.vocabulary_hash.as_ref(),
+        ),
+        (left.merges_hash.as_ref(), right.merges_hash.as_ref()),
+    ];
+    let mut compared = 0usize;
+    for (a, b) in pairs {
+        if let (Some(a), Some(b)) = (a, b) {
+            compared += 1;
+            if a != b {
+                return SemanticChange::Changed;
+            }
+        }
+    }
+    let left_special = canonical_special_tokens(&left.special_tokens);
+    let right_special = canonical_special_tokens(&right.special_tokens);
+    if !left_special.is_empty() && !right_special.is_empty() {
+        compared += 1;
+        for role in left_special.keys().chain(right_special.keys()) {
+            if let (Some(a), Some(b)) = (left_special.get(role), right_special.get(role)) {
+                if a != b {
+                    return SemanticChange::Changed;
+                }
+            }
+        }
+    }
+    if compared == 0 {
+        SemanticChange::Incomparable
+    } else {
+        SemanticChange::Same
+    }
+}
+
+fn canonical_special_tokens(values: &BTreeMap<String, i64>) -> BTreeMap<String, i64> {
+    let mut out = BTreeMap::new();
+    for (key, value) in values {
+        let lower = key.to_ascii_lowercase();
+        for role in ["bos", "eos", "pad", "unk", "sep", "cls", "mask"] {
+            if lower == format!("{role}_token_id") || lower.ends_with(&format!(".{role}_token_id"))
+            {
+                out.insert(role.to_owned(), *value);
+            }
+        }
+    }
+    out
+}
+
 fn compare_tensors(base: &[TensorSummary], derived: &[TensorSummary]) -> TensorChangeSummary {
     let left: BTreeMap<_, _> = base.iter().map(|v| (v.name.as_str(), v)).collect();
     let right: BTreeMap<_, _> = derived.iter().map(|v| (v.name.as_str(), v)).collect();
@@ -440,6 +556,7 @@ mod tests {
     use super::*;
     use crate::modelmeta::{
         ArchitectureSummary, GenerationConfigSummary, ModelIdentity, ModelTargetKind,
+        TemplateSummary, TokenizerSummary,
     };
 
     fn snapshot(format: &str, tensor: &str) -> ModelSnapshot {
@@ -499,5 +616,80 @@ mod tests {
             None,
         );
         assert_eq!(report.lineage, LineageState::Contradicted);
+    }
+
+    #[test]
+    fn cross_format_quantization_uses_semantic_metadata_not_container_hashes() {
+        let mut base = snapshot("safetensors", "model.layers.0.weight");
+        let mut derived = snapshot("gguf", "blk.0.weight");
+        base.tokenizer = Some(TokenizerSummary {
+            vocabulary_hash: Some("vocab-semantic".to_owned()),
+            tokenizer_file_hash: Some("hf-container".to_owned()),
+            ..Default::default()
+        });
+        derived.tokenizer = Some(TokenizerSummary {
+            vocabulary_hash: Some("vocab-semantic".to_owned()),
+            tokenizer_file_hash: Some("gguf-container".to_owned()),
+            ..Default::default()
+        });
+        base.template = Some(TemplateSummary {
+            exact_hash: Some("template-semantic".to_owned()),
+            present: true,
+            source: Some("chat_template.jinja".to_owned()),
+        });
+        derived.template = Some(TemplateSummary {
+            exact_hash: Some("template-semantic".to_owned()),
+            present: true,
+            source: Some("gguf:tokenizer.chat_template".to_owned()),
+        });
+        let report = compare_snapshots(base, derived, Some(TransformationType::Quantization), None);
+        assert_ne!(report.lineage, LineageState::Contradicted);
+        assert!(!report.findings.iter().any(|finding| finding.rule_id
+            == "LF-LINEAGE-QUANTIZATION-TEMPLATE"
+            || finding.rule_id == "LF-LINEAGE-QUANTIZATION-TOKENIZER"));
+    }
+
+    #[test]
+    fn cross_format_quantization_blocks_semantic_template_change() {
+        let mut base = snapshot("safetensors", "model.layers.0.weight");
+        let mut derived = snapshot("gguf", "blk.0.weight");
+        base.template = Some(TemplateSummary {
+            exact_hash: Some("safe-template".to_owned()),
+            present: true,
+            source: None,
+        });
+        derived.template = Some(TemplateSummary {
+            exact_hash: Some("injected-template".to_owned()),
+            present: true,
+            source: None,
+        });
+        let report = compare_snapshots(base, derived, Some(TransformationType::Quantization), None);
+        assert_eq!(report.lineage, LineageState::Contradicted);
+        assert!(report
+            .findings
+            .iter()
+            .any(|finding| finding.rule_id == "LF-LINEAGE-QUANTIZATION-TEMPLATE"));
+    }
+
+    #[test]
+    fn cross_format_quantization_blocks_semantic_tokenizer_change() {
+        let mut base = snapshot("safetensors", "model.layers.0.weight");
+        let mut derived = snapshot("gguf", "blk.0.weight");
+        base.tokenizer = Some(TokenizerSummary {
+            vocabulary_hash: Some("same-vocabulary".to_owned()),
+            special_tokens: BTreeMap::from([("bos_token_id".to_owned(), 1)]),
+            ..Default::default()
+        });
+        derived.tokenizer = Some(TokenizerSummary {
+            vocabulary_hash: Some("same-vocabulary".to_owned()),
+            special_tokens: BTreeMap::from([("tokenizer.ggml.bos_token_id".to_owned(), 99)]),
+            ..Default::default()
+        });
+        let report = compare_snapshots(base, derived, Some(TransformationType::Quantization), None);
+        assert_eq!(report.lineage, LineageState::Contradicted);
+        assert!(report
+            .findings
+            .iter()
+            .any(|finding| finding.rule_id == "LF-LINEAGE-QUANTIZATION-TOKENIZER"));
     }
 }

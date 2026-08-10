@@ -535,6 +535,20 @@ pub fn run_llama_with(binary: &Path, path: &Path, args: &[String]) -> Result<i32
 }
 
 pub fn find_executable(name: &str) -> Option<PathBuf> {
+    let override_name = match name {
+        "ollama" => Some("LAYERFAULT_OLLAMA_RUNTIME"),
+        "lms" => Some("LAYERFAULT_LMSTUDIO_RUNTIME"),
+        "llama-cli" | "llama-server" | "main" => Some("LAYERFAULT_LLAMA_RUNTIME"),
+        _ => None,
+    };
+    if let Some(candidate) = override_name
+        .and_then(std::env::var_os)
+        .map(PathBuf::from)
+        .filter(|path| path.is_file())
+        .and_then(|path| std::fs::canonicalize(path).ok())
+    {
+        return Some(candidate);
+    }
     let path: OsString = std::env::var_os("PATH")?;
     for dir in std::env::split_paths(&path) {
         let candidate = dir.join(name);

@@ -477,8 +477,14 @@ fn tokenizer_from_gguf(inv: &gguf::GgufInventory) -> Option<TokenizerSummary> {
         return None;
     }
     Some(TokenizerSummary {
-        vocabulary_hash: relevant.get("tokenizer.ggml.tokens").cloned(),
-        merges_hash: relevant.get("tokenizer.ggml.merges").cloned(),
+        vocabulary_hash: inv
+            .metadata
+            .get("tokenizer.ggml.tokens")
+            .and_then(|value| value.string_array_hash.clone()),
+        merges_hash: inv
+            .metadata
+            .get("tokenizer.ggml.merges")
+            .and_then(|value| value.string_array_hash.clone()),
         special_tokens: special,
         added_tokens_hash: relevant.get("tokenizer.ggml.added_tokens").cloned(),
         tokenizer_file_hash: hash_json(&relevant).ok(),
@@ -489,7 +495,7 @@ fn tokenizer_from_gguf(inv: &gguf::GgufInventory) -> Option<TokenizerSummary> {
 fn template_from_gguf(inv: &gguf::GgufInventory) -> Option<TemplateSummary> {
     let value = inv.metadata.get("tokenizer.chat_template")?;
     Some(TemplateSummary {
-        exact_hash: Some(value.digest.clone()),
+        exact_hash: value.as_str().map(hash_text),
         present: true,
         source: Some("gguf:tokenizer.chat_template".to_owned()),
     })
@@ -560,10 +566,10 @@ fn tokenizer_from_package(
     if let Some(tokenizer) = tokenizer {
         if let Some(model) = tokenizer.get("model") {
             if let Some(vocab) = model.get("vocab") {
-                summary.vocabulary_hash = Some(hash_json(vocab)?);
+                summary.vocabulary_hash = ordered_vocabulary_hash(vocab);
             }
             if let Some(merges) = model.get("merges") {
-                summary.merges_hash = Some(hash_json(merges)?);
+                summary.merges_hash = ordered_string_array_hash(merges);
             }
         }
         if let Some(added) = tokenizer.get("added_tokens") {
@@ -597,21 +603,63 @@ fn template_from_package(
     tokenizer_cfg: Option<&Value>,
 ) -> Result<Option<TemplateSummary>> {
     let template_file = root.join("chat_template.jinja");
-    if let Some(hash) = hash_optional_file(&template_file)? {
+    if template_file.exists() {
+        let bytes = read_bounded(&template_file, MAX_CONFIG_BYTES)?;
         return Ok(Some(TemplateSummary {
-            exact_hash: Some(hash),
+            exact_hash: Some(hash_text(&String::from_utf8_lossy(&bytes))),
             present: true,
             source: Some("chat_template.jinja".to_owned()),
         }));
     }
     if let Some(template) = tokenizer_cfg.and_then(|v| v.get("chat_template")) {
         return Ok(Some(TemplateSummary {
-            exact_hash: Some(hash_json(template)?),
+            exact_hash: template.as_str().map(hash_text),
             present: true,
             source: Some("tokenizer_config.json:chat_template".to_owned()),
         }));
     }
     Ok(None)
+}
+
+fn ordered_vocabulary_hash(value: &Value) -> Option<String> {
+    let object = value.as_object()?;
+    let mut ordered = Vec::with_capacity(object.len());
+    for (token, id) in object {
+        ordered.push((id.as_u64()?, token.as_str()));
+    }
+    ordered.sort_by_key(|(id, _)| *id);
+    if ordered
+        .iter()
+        .enumerate()
+        .any(|(expected, (id, _))| *id != expected as u64)
+    {
+        return None;
+    }
+    Some(hash_ordered_strings(
+        ordered.into_iter().map(|(_, token)| token),
+    ))
+}
+
+fn ordered_string_array_hash(value: &Value) -> Option<String> {
+    let values = value.as_array()?;
+    let strings: Option<Vec<&str>> = values.iter().map(Value::as_str).collect();
+    Some(hash_ordered_strings(strings?))
+}
+
+fn hash_ordered_strings<'a>(values: impl IntoIterator<Item = &'a str>) -> String {
+    let values: Vec<&str> = values.into_iter().collect();
+    let mut hasher = Sha256::new();
+    hasher.update((values.len() as u64).to_le_bytes());
+    for value in values {
+        hasher.update((value.len() as u64).to_le_bytes());
+        hasher.update(value.as_bytes());
+    }
+    hex::encode(hasher.finalize())
+}
+
+fn hash_text(value: &str) -> String {
+    let normalized = value.replace("\r\n", "\n");
+    hex::encode(Sha256::digest(normalized.as_bytes()))
 }
 
 fn generation_from_package(

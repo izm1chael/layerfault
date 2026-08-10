@@ -52,6 +52,12 @@ Dynamic analysis is deliberately downstream of static admission and is not a sho
 
 `static admission -> explicit active-execution policy -> strong sandbox -> local runtime -> syscall/filesystem/output telemetry -> behavioural evaluation -> optional base/derived differential`.
 
+Cross-format lineage comparisons normalize effective tokenizer tables and chat
+template text before deciding whether a quantization claim is contradicted.
+Container/file hashes remain useful evidence but are not treated as semantic
+equivalence across HF/Safetensors and GGUF representations. Missing comparable
+metadata produces uncertainty/WARN rather than a false contradiction.
+
 External model execution uses a Bubblewrap-backed sandbox with a private home/workspace, no host network, private process/IPC/UTS namespaces, dropped capabilities, read-only model mounts, synthetic canary credentials, and bounded resource limits. When Layerfault is explicitly asked to execute a statically blocked package or Hugging Face custom loader code, syscall tracing and resource limiting are mandatory in addition to Bubblewrap; missing controls fail closed.
 
 GGUF execution uses an audited local llama.cpp CLI. Hugging Face/Safetensors/PEFT execution uses a local Python + Transformers runtime with offline/local-only loading. Custom Python model loaders require an explicit `--execute-custom-code` opt-in and remain confined to the strong external sandbox. Embedded inference remains available for supported trusted paths but is not eligible for blocked/custom-code overrides.
