@@ -176,6 +176,7 @@ pub fn inspect(root: &Path) -> Result<PackageReport> {
         });
         let evidence = capture_custom_code_evidence(&rel, &file)?;
         findings.extend(scan_package_file(
+            Some(&root),
             &path,
             &rel,
             &file,
@@ -385,6 +386,7 @@ pub fn inspect_member(display_path: &Path, content_path: &Path) -> Result<Vec<La
     let evidence = capture_custom_code_evidence(&rel, &file)?;
     let empty_auto_map = BTreeSet::new();
     let mut findings = scan_package_file(
+        None,
         display_path,
         &rel,
         &file,
@@ -436,7 +438,9 @@ fn package_fingerprint(files: &[PackageEntry]) -> String {
     format!("lfpkg:sha256:{}", hex::encode(hasher.finalize()))
 }
 
+#[allow(clippy::too_many_arguments)]
 fn scan_package_file(
+    package_root: Option<&Path>,
     path: &Path,
     rel: &str,
     file: &std::fs::File,
@@ -609,7 +613,12 @@ fn scan_package_file(
         );
     }
 
-    if ext == "py" && !is_documentation_path(rel) && !is_tokenizer_vocabulary_path(rel) {
+    let is_setup_py = lower.ends_with("setup.py");
+    if ext == "py"
+        && !is_setup_py
+        && !is_documentation_path(rel)
+        && !is_tokenizer_vocabulary_path(rel)
+    {
         let limits = crate::python_static::limits::PythonAnalysisLimits::default();
         if size as usize <= limits.max_source_bytes {
             let mut reader = file.try_clone()?;
@@ -633,6 +642,21 @@ fn scan_package_file(
                     }
                 }
             }
+        }
+    }
+
+    if let Some(kind) = crate::dependencies::classify_manifest(&lower, &ext) {
+        let mut reader = file.try_clone()?;
+        reader.seek(SeekFrom::Start(0))?;
+        if let Ok(dependency_findings) = crate::dependencies::inspect_member(
+            package_root,
+            rel,
+            &reader,
+            digest,
+            kind,
+            auto_map_modules,
+        ) {
+            out.extend(dependency_findings);
         }
     }
 
@@ -1524,6 +1548,8 @@ fn classify(path: &Path) -> &'static str {
         "native"
     } else if unsafe_serialization_name(&lower) || lower.ends_with("pytorch_model.bin") {
         "serialization"
+    } else if crate::dependencies::classify_manifest(&lower, &ext).is_some() {
+        "dependency-manifest"
     } else if matches!(ext.as_str(), "json" | "toml" | "yaml" | "yml") {
         "config"
     } else {

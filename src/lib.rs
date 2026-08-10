@@ -15,6 +15,7 @@ pub mod correlate;
 pub mod coverage;
 pub mod dataset;
 pub mod decision;
+pub mod dependencies;
 pub mod discovery;
 pub mod doctor;
 pub mod embedded;

@@ -55,6 +55,22 @@ const CAPABILITY_RULES: &[(&str, &str, &str)] = &[
         "LF-CORR-CUSTOM-LOADER-IMPORT",
         "import-time side effects",
     ),
+    (
+        "LF-PY-PACKAGE-INSTALL",
+        "LF-CORR-RUNTIME-INSTALL",
+        "package-manager invocation",
+    ),
+];
+
+/// Rules describing a setup.py install/build hook's own capability, correlated
+/// against the hook that carries it.
+const INSTALL_HOOK_CAPABILITY_RULES: &[&str] = &[
+    "LF-CODE-SUBPROCESS",
+    "LF-CODE-OS-SYSTEM",
+    "LF-CODE-NETWORK",
+    "LF-CODE-EVAL",
+    "LF-CODE-EXEC",
+    "LF-DEP-RUNTIME-INSTALL",
 ];
 
 const LIMITATION: &str = "Static analysis establishes the reference and the capability, \
@@ -71,7 +87,52 @@ pub fn correlate(findings: &[LayerScanResult]) -> Vec<FindingCorrelation> {
     out.extend(unsafe_serialization_chains(findings));
     out.extend(template_chains(findings));
     out.extend(native_extension_chains(findings));
+    out.extend(install_hook_capability_chains(findings));
     sort_correlations(&mut out);
+    out
+}
+
+/// A `setup.py` install/build hook (`LF-DEP-INSTALL-HOOK`) correlated with a
+/// process-execution/network/eval/install capability finding in the same
+/// file. Unlike `custom_loader_chains`, the correlation key here is "same
+/// subject", not a resolved configuration reference to a different module.
+fn install_hook_capability_chains(findings: &[LayerScanResult]) -> Vec<FindingCorrelation> {
+    let mut out = Vec::new();
+    for hook in findings
+        .iter()
+        .filter(|finding| matches_rule(finding, &["LF-DEP-INSTALL-HOOK"]))
+    {
+        let Some(member) = subject_name(hook) else {
+            continue;
+        };
+        for capability in findings.iter().filter(|finding| {
+            matches_rule(finding, INSTALL_HOOK_CAPABILITY_RULES)
+                && subject_name(finding) == Some(member)
+        }) {
+            let rule_id = crate::policy::rule_id(capability);
+            out.push(FindingCorrelation {
+                id: "LF-CORR-INSTALL-HOOK-CAPABILITY".to_owned(),
+                finding_ids: finding_ids(&[hook, capability]),
+                rule_ids: rule_ids(&[hook, capability]),
+                summary: format!(
+                    "'{member}' defines a custom setuptools/distutils install or build hook, and the same \
+                     file contains a {rule_id} capability. Install-time hooks run before a reviewer would \
+                     normally inspect runtime application code."
+                ),
+                confidence: Confidence::High,
+                evidence: vec![path_relationship(
+                    EvidenceSubject::member(member),
+                    "Install/build hook and code-execution capability observed in the same subject",
+                    serde_json::json!({ "member": member, "capability_rule": rule_id }),
+                )],
+                limitations: Some(
+                    "Layerfault has not established that this exact hook is invoked for a given install \
+                     command, or that the capability executes unconditionally within it."
+                        .to_owned(),
+                ),
+            });
+        }
+    }
     out
 }
 

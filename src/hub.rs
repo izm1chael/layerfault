@@ -21,6 +21,39 @@ const MAX_FILES: usize = 200_000;
 const MAX_DOWNLOAD_BYTES: u64 = 200 * 1024 * 1024 * 1024;
 const MAX_RETRIES: usize = 5;
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct HubLfsMetadata {
+    pub oid: String,
+    pub size: u64,
+    #[serde(default, rename = "pointerSize")]
+    pub pointer_size: Option<u64>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum IntegrityExpectationSource {
+    GitLfs,
+    GitBlob,
+    None,
+    UnsupportedAlgorithm,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct RemoteObjectExpectation {
+    pub sha256: Option<String>,
+    pub size: Option<u64>,
+    pub source: IntegrityExpectationSource,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum IntegrityResult {
+    Match,
+    Mismatch,
+    #[default]
+    ExpectationUnavailable,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HubFile {
     #[serde(rename = "rfilename")]
@@ -31,6 +64,88 @@ pub struct HubFile {
     pub blob_id: Option<String>,
     #[serde(default)]
     pub lfs: Option<serde_json::Value>,
+}
+
+impl HubFile {
+    pub fn lfs_metadata(&self) -> Result<Option<HubLfsMetadata>> {
+        let Some(val) = &self.lfs else {
+            return Ok(None);
+        };
+        if val.is_null() {
+            return Ok(None);
+        }
+        let meta: HubLfsMetadata = serde_json::from_value(val.clone())
+            .context("invalid LFS metadata structure in Hub file record")?;
+        Ok(Some(meta))
+    }
+
+    pub fn expectation(&self) -> Result<RemoteObjectExpectation> {
+        if let Some(lfs) = self.lfs_metadata()? {
+            let raw_oid = lfs.oid.trim();
+            if raw_oid.is_empty() {
+                bail!("LFS metadata carries an empty OID string");
+            }
+            let (alg, hex_part) = if let Some(stripped) = raw_oid.strip_prefix("sha256:") {
+                ("sha256", stripped)
+            } else if raw_oid.contains(':') {
+                return Ok(RemoteObjectExpectation {
+                    sha256: None,
+                    size: Some(lfs.size),
+                    source: IntegrityExpectationSource::UnsupportedAlgorithm,
+                });
+            } else {
+                ("sha256", raw_oid)
+            };
+
+            if alg != "sha256" {
+                return Ok(RemoteObjectExpectation {
+                    sha256: None,
+                    size: Some(lfs.size),
+                    source: IntegrityExpectationSource::UnsupportedAlgorithm,
+                });
+            }
+
+            if hex_part.len() != 64 || !hex_part.bytes().all(|b| b.is_ascii_hexdigit()) {
+                bail!("LFS OID '{raw_oid}' is not a valid 64-character hexadecimal SHA-256 digest");
+            }
+
+            if lfs.size > MAX_DOWNLOAD_BYTES {
+                bail!(
+                    "LFS declared size {} exceeds maximum configured download cap {}",
+                    lfs.size,
+                    MAX_DOWNLOAD_BYTES
+                );
+            }
+
+            if let Some(file_size) = self.size {
+                if file_size != lfs.size {
+                    bail!(
+                        "API file size ({file_size}) conflicts with LFS declared size ({})",
+                        lfs.size
+                    );
+                }
+            }
+
+            if let Some(pointer_size) = lfs.pointer_size {
+                if pointer_size == 0 || pointer_size > 4096 {
+                    bail!("LFS pointer_size {pointer_size} is outside safe bounds");
+                }
+            }
+
+            let normalized_sha = format!("sha256:{}", hex_part.to_ascii_lowercase());
+            return Ok(RemoteObjectExpectation {
+                sha256: Some(normalized_sha),
+                size: Some(lfs.size),
+                source: IntegrityExpectationSource::GitLfs,
+            });
+        }
+
+        Ok(RemoteObjectExpectation {
+            sha256: None,
+            size: self.size,
+            source: IntegrityExpectationSource::None,
+        })
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -76,6 +191,12 @@ pub struct DownloadResult {
     pub bytes: u64,
     pub sha256: String,
     pub elapsed_ms: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expected_sha256: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expected_bytes: Option<u64>,
+    #[serde(default)]
+    pub integrity_result: IntegrityResult,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -248,23 +369,41 @@ impl HubClient {
         Ok(CrawlPage { models, next })
     }
 
-    pub fn download(
+    pub fn download_verified(
         &self,
         repo: &str,
         revision: &str,
-        file: &str,
+        file: &HubFile,
         staging: &Path,
         max_bytes: Option<u64>,
     ) -> Result<DownloadResult> {
         validate_repo_id(repo)?;
         validate_commit_sha(revision)?;
-        validate_member_path(file)?;
+        validate_member_path(&file.path)?;
         crate::paths::ensure_private_dir(staging)?;
-        let max_bytes = max_bytes
+
+        let expectation = file.expectation().map_err(|err| {
+            anyhow!(
+                "LF-HF-LFS-METADATA-INVALID: member '{}' carries invalid LFS metadata: {err}",
+                file.path
+            )
+        })?;
+
+        let configured_cap = max_bytes
             .unwrap_or(MAX_DOWNLOAD_BYTES)
             .min(MAX_DOWNLOAD_BYTES);
-        let destination = safe_destination(staging, file)?;
-        ensure_safe_staging_parent(staging, file)?;
+
+        if let Some(expected_size) = expectation.size {
+            if expected_size > configured_cap {
+                bail!(
+                    "LF-HF-LFS-SIZE-MISMATCH: member '{}' declared size ({expected_size} bytes) exceeds configured maximum ({configured_cap} bytes)",
+                    file.path
+                );
+            }
+        }
+
+        let destination = safe_destination(staging, &file.path)?;
+        ensure_safe_staging_parent(staging, &file.path)?;
         let partial = destination.with_extension(format!(
             "{}.layerfault-part",
             destination
@@ -284,19 +423,29 @@ impl HubClient {
             }
             segments.push("resolve").push(revision);
             // nosemgrep: rust.actix.path-traversal.tainted-path.tainted-path
-            for component in Path::new(file).components() {
+            for component in Path::new(&file.path).components() {
                 if let Component::Normal(value) = component {
-                    // `file` passed validate_member_path before URL construction.
+                    // `file.path` passed validate_member_path before URL construction.
                     // nosemgrep: rust.actix.path-traversal.tainted-path.tainted-path
                     segments.push(&value.to_string_lossy());
                 }
             }
         }
         let started = Instant::now();
-        let mut response = self.get_following(url, max_bytes)?;
+        let mut response = self.get_following(url, configured_cap)?;
         if let Some(content_length) = response.content_length() {
-            if content_length > max_bytes {
-                bail!("Hub download is {content_length} bytes, above configured cap {max_bytes}");
+            if content_length > configured_cap {
+                bail!(
+                    "Hub download is {content_length} bytes, above configured cap {configured_cap}"
+                );
+            }
+            if let Some(expected_size) = expectation.size {
+                if content_length != expected_size {
+                    bail!(
+                        "LF-HF-LFS-SIZE-MISMATCH: member '{}' HTTP Content-Length header ({content_length}) differs from Hub declared size ({expected_size})",
+                        file.path
+                    );
+                }
             }
         }
         let mut output = OpenOptions::new()
@@ -312,7 +461,7 @@ impl HubClient {
         let mut hasher = Sha256::new();
         let mut buffer = [0_u8; 1024 * 1024];
         let mut total = 0_u64;
-        let result: Result<()> = (|| {
+        let download_res: Result<()> = (|| {
             loop {
                 let read = response.read(&mut buffer)?;
                 if read == 0 {
@@ -321,8 +470,8 @@ impl HubClient {
                 total = total
                     .checked_add(read as u64)
                     .ok_or_else(|| anyhow!("download byte count overflow"))?;
-                if total > max_bytes {
-                    bail!("Hub download exceeded configured byte cap {max_bytes}");
+                if total > configured_cap {
+                    bail!("Hub download exceeded configured byte cap {configured_cap}");
                 }
                 output.write_all(&buffer[..read])?;
                 hasher.update(&buffer[..read]);
@@ -330,26 +479,82 @@ impl HubClient {
             output.sync_all()?;
             Ok(())
         })();
-        if let Err(error) = result {
+        if let Err(error) = download_res {
             let _ = std::fs::remove_file(&partial);
             return Err(error);
         }
+
+        // Size expectation check
+        if let Some(expected_size) = expectation.size {
+            if total != expected_size {
+                let _ = std::fs::remove_file(&partial);
+                bail!(
+                    "LF-HF-LFS-SIZE-MISMATCH: member '{}' observed download size ({total} bytes) differs from Hub declared size ({expected_size} bytes)",
+                    file.path
+                );
+            }
+        }
+
+        let observed_sha256 = format!("sha256:{}", hex::encode(hasher.finalize()));
+
+        // Digest OID expectation check
+        if let Some(ref expected_oid) = expectation.sha256 {
+            if !constant_time_eq(observed_sha256.as_bytes(), expected_oid.as_bytes()) {
+                let _ = std::fs::remove_file(&partial);
+                bail!(
+                    "LF-HF-LFS-DIGEST-MISMATCH: member '{}' observed SHA-256 ({observed_sha256}) differs from Hub LFS OID ({expected_oid})",
+                    file.path
+                );
+            }
+        }
+
         if destination.exists() {
+            let _ = std::fs::remove_file(&partial);
             bail!(
                 "staging destination '{}' already exists",
                 destination.display()
             );
         }
-        std::fs::rename(&partial, &destination)?;
+        if let Err(err) = std::fs::rename(&partial, &destination) {
+            let _ = std::fs::remove_file(&partial);
+            return Err(err).context("unable to promote partial file to final staging destination");
+        }
+
+        let integrity_result = if expectation.sha256.is_some() || expectation.size.is_some() {
+            IntegrityResult::Match
+        } else {
+            IntegrityResult::ExpectationUnavailable
+        };
+
         Ok(DownloadResult {
             repo: repo.to_owned(),
             revision: revision.to_owned(),
-            file: file.to_owned(),
+            file: file.path.clone(),
             path: destination.display().to_string(),
             bytes: total,
-            sha256: format!("sha256:{}", hex::encode(hasher.finalize())),
+            sha256: observed_sha256,
             elapsed_ms: u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX),
+            expected_sha256: expectation.sha256,
+            expected_bytes: expectation.size,
+            integrity_result,
         })
+    }
+
+    pub fn download(
+        &self,
+        repo: &str,
+        revision: &str,
+        file: &str,
+        staging: &Path,
+        max_bytes: Option<u64>,
+    ) -> Result<DownloadResult> {
+        let hub_file = HubFile {
+            path: file.to_owned(),
+            size: None,
+            blob_id: None,
+            lfs: None,
+        };
+        self.download_verified(repo, revision, &hub_file, staging, max_bytes)
     }
 
     fn get_following(&self, mut url: Url, max_response_bytes: u64) -> Result<Response> {
@@ -686,5 +891,108 @@ mod tests {
         }
         assert!(!is_security_relevant_member("README.md"));
         assert!(!is_security_relevant_member("assets/logo.png"));
+    }
+
+    #[test]
+    fn lfs_expectation_valid_sha256() {
+        let file = HubFile {
+            path: "model.safetensors".to_owned(),
+            size: Some(1024),
+            blob_id: None,
+            lfs: Some(serde_json::json!({
+                "oid": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                "size": 1024,
+                "pointerSize": 128
+            })),
+        };
+        let exp = file.expectation().unwrap();
+        assert_eq!(
+            exp.sha256,
+            Some(
+                "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+                    .to_owned()
+            )
+        );
+        assert_eq!(exp.size, Some(1024));
+        assert_eq!(exp.source, IntegrityExpectationSource::GitLfs);
+    }
+
+    #[test]
+    fn lfs_expectation_normalizes_uppercase_hex() {
+        let file = HubFile {
+            path: "model.safetensors".to_owned(),
+            size: Some(1024),
+            blob_id: None,
+            lfs: Some(serde_json::json!({
+                "oid": "E3B0C44298FC1C149AFBF4C8996FB92427AE41E4649B934CA495991B7852B855",
+                "size": 1024
+            })),
+        };
+        let exp = file.expectation().unwrap();
+        assert_eq!(
+            exp.sha256,
+            Some(
+                "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+                    .to_owned()
+            )
+        );
+    }
+
+    #[test]
+    fn lfs_expectation_malformed_oid() {
+        let file = HubFile {
+            path: "model.safetensors".to_owned(),
+            size: Some(1024),
+            blob_id: None,
+            lfs: Some(serde_json::json!({
+                "oid": "sha256:invalid_hex_string",
+                "size": 1024
+            })),
+        };
+        assert!(file.expectation().is_err());
+    }
+
+    #[test]
+    fn lfs_expectation_unsupported_algorithm() {
+        let file = HubFile {
+            path: "model.safetensors".to_owned(),
+            size: Some(1024),
+            blob_id: None,
+            lfs: Some(serde_json::json!({
+                "oid": "sha512:abcdef123456",
+                "size": 1024
+            })),
+        };
+        let exp = file.expectation().unwrap();
+        assert_eq!(exp.sha256, None);
+        assert_eq!(exp.source, IntegrityExpectationSource::UnsupportedAlgorithm);
+    }
+
+    #[test]
+    fn lfs_expectation_size_conflict() {
+        let file = HubFile {
+            path: "model.safetensors".to_owned(),
+            size: Some(2048),
+            blob_id: None,
+            lfs: Some(serde_json::json!({
+                "oid": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                "size": 1024
+            })),
+        };
+        assert!(file.expectation().is_err());
+    }
+
+    #[test]
+    fn lfs_expectation_missing_lfs() {
+        let file = HubFile {
+            path: "model.safetensors".to_owned(),
+            size: Some(1024),
+            blob_id: None,
+            lfs: None,
+        };
+        let exp = file.expectation().unwrap();
+        assert_eq!(exp.sha256, None);
+        assert_eq!(exp.size, Some(1024));
+        assert_eq!(exp.source, IntegrityExpectationSource::None);
     }
 }

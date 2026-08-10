@@ -173,6 +173,17 @@ pub const RULES: &[RuleSpec] = &[
         "LF-INTEGRITY-VERIFIED",
         "PASS outcome recording that the recomputed digest matched",
     ),
+    required("LF-HF-LFS-DIGEST-MISMATCH"),
+    required("LF-HF-LFS-SIZE-MISMATCH"),
+    required("LF-HF-LFS-METADATA-INVALID"),
+    not_applicable(
+        "LF-HF-LFS-INTEGRITY",
+        "PASS outcome for verified remote LFS hash/size",
+    ),
+    not_applicable(
+        "LF-HF-REMOTE-HASH-UNAVAILABLE",
+        "Coverage reporting for members lacking remote hash expectations",
+    ),
     required("T13-001"),
     required("T13-002"),
     // -- Configuration thresholds ------------------------------------------
@@ -344,6 +355,26 @@ pub const RULES: &[RuleSpec] = &[
     required("LF-CORR-HF-LOADER-CREDENTIALS"),
     required("LF-CORR-HF-LOADER-FILESYSTEM"),
     required("LF-CORR-HF-LOADER-INSTALL"),
+    // -- Dependency and installation supply chain ----------------------------
+    required("LF-DEP-FLOATING"),
+    required("LF-DEP-DIRECT-URL"),
+    required("LF-DEP-VCS"),
+    required("LF-DEP-VCS-MUTABLE-REF"),
+    required("LF-DEP-LOCAL-PATH"),
+    required("LF-DEP-PATH-ESCAPE"),
+    required("LF-DEP-ALT-INDEX"),
+    required("LF-DEP-INSECURE-TRANSPORT"),
+    required("LF-DEP-BUILD-BACKEND"),
+    required("LF-DEP-INSTALL-HOOK"),
+    required("LF-DEP-RUNTIME-INSTALL"),
+    structured(
+        "LF-DEP-INCLUDE-MISSING",
+        "A missing include is a fact about the manifest tree, not a location inside a file that does not exist",
+    ),
+    structured(
+        "LF-DEP-ANALYSIS-INCOMPLETE",
+        "A parser-limit or malformed-manifest fact describes what could not be examined, not a position inside unparseable content",
+    ),
     // -- PASS-state identities ------------------------------------------------
     // These are the explicit rule id a detector reports when its condition
     // did not fire, so a clean scan still has a real, lookupable identity

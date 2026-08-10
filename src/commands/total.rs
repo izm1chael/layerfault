@@ -563,6 +563,7 @@ fn direct_hub_review(
     let mut errors = Vec::new();
     let mut budget = MAX_REVIEW_BYTES;
     let mut incomplete = candidates.len() < relevant.len();
+    let mut integrity_failures = 0usize;
     for file in candidates {
         if budget == 0 {
             incomplete = true;
@@ -573,14 +574,18 @@ fn direct_hub_review(
             incomplete = true;
             continue;
         }
-        match client.download(repo, revision, &file.path, &root, Some(cap)) {
+        match client.download_verified(repo, revision, file, &root, Some(cap)) {
             Ok(result) => {
                 budget = budget.saturating_sub(result.bytes);
                 downloads.push(result);
             }
             Err(error) => {
                 incomplete = true;
-                errors.push(format!("{}: {}", file.path, error));
+                let err_str = error.to_string();
+                if err_str.contains("LF-HF-LFS-") {
+                    integrity_failures += 1;
+                }
+                errors.push(format!("{}: {}", file.path, err_str));
             }
         }
     }
@@ -590,7 +595,7 @@ fn direct_hub_review(
         .findings
         .iter()
         .any(|f| f.status == layerfault::scanner::ScanStatus::Warn);
-    let decision = if block {
+    let decision = if block || integrity_failures > 0 {
         "BLOCK"
     } else if warn || incomplete {
         "WARN"
@@ -598,6 +603,28 @@ fn direct_hub_review(
         "PASS"
     };
     let downloaded_members = downloads.len();
+    let members_with_remote_hash_expectation = downloads
+        .iter()
+        .filter(|d| d.expected_sha256.is_some())
+        .count();
+    let members_hash_verified = downloads
+        .iter()
+        .filter(|d| {
+            d.expected_sha256.is_some()
+                && d.integrity_result == layerfault::hub::IntegrityResult::Match
+        })
+        .count();
+    let members_size_verified = downloads
+        .iter()
+        .filter(|d| {
+            d.expected_bytes.is_some()
+                && d.integrity_result == layerfault::hub::IntegrityResult::Match
+        })
+        .count();
+    let members_without_remote_hash_expectation = downloads
+        .iter()
+        .filter(|d| d.expected_sha256.is_none())
+        .count();
     let report = json!({
         "schema_version":"1.0",
         "source":"huggingface",
@@ -609,6 +636,12 @@ fn direct_hub_review(
             "complete": !incomplete,
             "security_relevant_members": relevant.len(),
             "downloaded_members": downloaded_members,
+            "members_downloaded": downloaded_members,
+            "members_with_remote_hash_expectation": members_with_remote_hash_expectation,
+            "members_hash_verified": members_hash_verified,
+            "members_size_verified": members_size_verified,
+            "members_without_remote_hash_expectation": members_without_remote_hash_expectation,
+            "integrity_failures": integrity_failures,
             "omitted_examples": omitted,
             "download_errors": errors,
             "max_files": MAX_REVIEW_FILES,
