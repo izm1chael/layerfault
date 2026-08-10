@@ -36,6 +36,11 @@ struct SignatureHit<'a> {
     signature: &'a Signature,
     context: String,
     decoded_via: Option<&'static str>,
+    /// Offset of the match within the text actually scanned (post-decode for
+    /// rescanned candidates). This is a position in the scanned text blob, not
+    /// necessarily the original artifact's file offset: decoding and Unicode
+    /// normalization both change the mapping back to raw file bytes.
+    text_offset: usize,
 }
 
 static SIGNATURES: &[Signature] = &[
@@ -516,6 +521,45 @@ lazy_static! {
         .expect("valid template import regex");
 }
 
+/// Every heuristic signature identity, in table order.
+///
+/// Exposed so [`crate::rules`] can describe the signature family without
+/// duplicating it, which would let the registry drift from the detector.
+pub fn signature_ids() -> Vec<&'static str> {
+    SIGNATURES.iter().map(|signature| signature.id).collect()
+}
+
+/// True when `rule_id` names a heuristic signature.
+pub fn is_signature_id(rule_id: &str) -> bool {
+    SIGNATURES
+        .iter()
+        .any(|signature| signature.id.eq_ignore_ascii_case(rule_id))
+}
+
+/// Resolve a heuristic signature identity to its `'static` table entry.
+pub fn signature_id_static(rule_id: &str) -> Option<&'static str> {
+    SIGNATURES
+        .iter()
+        .find(|signature| signature.id.eq_ignore_ascii_case(rule_id))
+        .map(|signature| signature.id)
+}
+
+/// Human description for a heuristic signature.
+pub fn signature_description(rule_id: &str) -> Option<&'static str> {
+    SIGNATURES
+        .iter()
+        .find(|signature| signature.id.eq_ignore_ascii_case(rule_id))
+        .map(|signature| signature.description)
+}
+
+/// Attack category for a heuristic signature.
+pub fn signature_category(rule_id: &str) -> Option<&'static str> {
+    SIGNATURES
+        .iter()
+        .find(|signature| signature.id.eq_ignore_ascii_case(rule_id))
+        .map(|signature| signature.category)
+}
+
 #[derive(Default)]
 struct ScanAccumulator {
     hits: Vec<SignatureHit<'static>>,
@@ -606,6 +650,7 @@ impl ScanAccumulator {
                     signature: compiled.signature,
                     context: redacted_context_window(content, matched.start(), matched.end()),
                     decoded_via,
+                    text_offset: matched.start(),
                 });
             }
         }
@@ -730,7 +775,47 @@ impl ScanAccumulator {
             )
         };
 
-        LayerScanResult {
+        let subject = crate::finding_evidence::EvidenceSubject::identity(layer_digest, media_type)
+            .with_sha256(Some(layer_digest.to_owned()));
+        // Multiple distinct signature families (T1-T14) can fire within one
+        // scanned blob; this finding aggregates them the way it always has.
+        // Evidence is still per-hit and per-rule via each record's own
+        // `description`, and `rule_id` below picks the first hit's signature
+        // for identity purposes, matching `policy::rule_id`'s pre-existing
+        // first-bracket convention.
+        let mut evidence: Vec<crate::finding_evidence::FindingEvidence> = self
+            .hits
+            .iter()
+            .map(|hit| {
+                let description = match hit.decoded_via {
+                    Some(encoding) => format!(
+                        "{} matched after bounded {} decode",
+                        hit.signature.description, encoding
+                    ),
+                    None => hit.signature.description.to_owned(),
+                };
+                crate::finding_evidence::FindingEvidence::new(
+                    crate::finding_evidence::EvidenceKind::SourceExcerpt,
+                    subject.clone(),
+                    &description,
+                )
+                .at(crate::finding_evidence::EvidenceLocation::ByteRange {
+                    offset: hit.text_offset as u64,
+                    length: hit.context.len() as u64,
+                })
+                .excerpt(&hit.context)
+                .matched(hit.signature.id)
+            })
+            .collect();
+        evidence.truncate(crate::finding_evidence::MAX_EVIDENCE_PER_FINDING);
+
+        let rule_id = self
+            .hits
+            .first()
+            .map(|hit| hit.signature.id.to_owned())
+            .unwrap_or_else(|| "LF-HEUR-CLEAR".to_owned());
+
+        let mut finding = LayerScanResult {
             layer_digest: layer_digest.to_owned(),
             media_type: media_type.to_owned(),
             check_type: CheckType::HeuristicSignature,
@@ -740,7 +825,11 @@ impl ScanAccumulator {
             detail,
             matches,
             duration_ms: elapsed_ms,
-        }
+            evidence,
+            ..Default::default()
+        };
+        crate::finding_evidence::ensure_finding_identity(&mut finding, &rule_id);
+        finding
     }
 }
 
@@ -824,24 +913,63 @@ impl HeuristicsScanner {
         duration_ms: u64,
     ) -> Result<LayerScanResult> {
         let mut result = scan_content_for_media(content, layer_digest, media_type, duration_ms)?;
+        let subject = crate::finding_evidence::EvidenceSubject::identity(layer_digest, media_type)
+            .with_sha256(Some(layer_digest.to_owned()));
         if let Some(found) = TEMPLATE_DANGEROUS.find(content) {
             result.status = ScanStatus::Fail;
             result.finding_class = FindingClass::ContentIndicator;
             result.confidence = Confidence::High;
+            let excerpt = redacted_context_window(content, found.start(), found.end());
             result.matches.push(format!(
-                "[LF-TEMPLATE-SSTI] dangerous Jinja/template object-graph traversal: '{}'",
-                redacted_context_window(content, found.start(), found.end())
+                "[LF-TEMPLATE-SSTI] dangerous Jinja/template object-graph traversal: '{excerpt}'"
             ));
             result.detail = Some("High-priority prompt/template metadata contains an SSTI-style Jinja object-graph traversal primitive. Layerfault does not render the template; this is static downstream-risk evidence.".to_owned());
+            result.evidence.push(
+                crate::finding_evidence::FindingEvidence::new(
+                    crate::finding_evidence::EvidenceKind::SourceExcerpt,
+                    subject.clone(),
+                    "Jinja object-graph traversal primitive matched in template content",
+                )
+                .at(crate::finding_evidence::EvidenceLocation::ByteRange {
+                    offset: found.start() as u64,
+                    length: (found.end() - found.start()) as u64,
+                })
+                .excerpt(&excerpt),
+            );
+            result.rule_id = Some("LF-TEMPLATE-SSTI".to_owned());
+            result.finding_id = None;
+            result.evidence_state = None;
+            result.evidence_reason = None;
+            crate::finding_evidence::ensure_finding_identity(&mut result, "LF-TEMPLATE-SSTI");
         } else if let Some(found) = TEMPLATE_IMPORT.find(content) {
             if result.status == ScanStatus::Pass {
                 result.status = ScanStatus::Warn;
             }
             result.finding_class = FindingClass::ContentIndicator;
+            let excerpt = redacted_context_window(content, found.start(), found.end());
             result.matches.push(format!(
-                "[LF-TEMPLATE-DYNAMIC-INCLUDE] Jinja import/include directive requires review: '{}'",
-                redacted_context_window(content, found.start(), found.end())
+                "[LF-TEMPLATE-DYNAMIC-INCLUDE] Jinja import/include directive requires review: '{excerpt}'"
             ));
+            result.evidence.push(
+                crate::finding_evidence::FindingEvidence::new(
+                    crate::finding_evidence::EvidenceKind::SourceExcerpt,
+                    subject.clone(),
+                    "Jinja import/include directive matched in template content",
+                )
+                .at(crate::finding_evidence::EvidenceLocation::ByteRange {
+                    offset: found.start() as u64,
+                    length: (found.end() - found.start()) as u64,
+                })
+                .excerpt(&excerpt),
+            );
+            result.rule_id = Some("LF-TEMPLATE-DYNAMIC-INCLUDE".to_owned());
+            result.finding_id = None;
+            result.evidence_state = None;
+            result.evidence_reason = None;
+            crate::finding_evidence::ensure_finding_identity(
+                &mut result,
+                "LF-TEMPLATE-DYNAMIC-INCLUDE",
+            );
             if result.detail.is_none() {
                 result.detail = Some("High-priority prompt/template metadata contains a Jinja import/include directive; review the downstream renderer and loader policy.".to_owned());
             }

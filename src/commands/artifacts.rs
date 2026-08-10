@@ -149,8 +149,26 @@ pub(crate) fn run_verify_package(args: VerifyPackageArgs) -> Result<()> {
         &format!("{:?}", decision.action).to_ascii_uppercase(),
         output.clone(),
     )?;
+    maybe_write_evidence_bundle(
+        args.evidence_bundle.evidence_bundle.as_deref(),
+        "directory",
+        &report.fingerprint,
+        None,
+        Some(&report.fingerprint),
+        &format!("{:?}", decision.action).to_ascii_uppercase(),
+        &report.findings,
+        &report.correlations,
+        Some(&report.coverage),
+    )?;
     if args.json {
         println!("{}", serde_json::to_string_pretty(&output)?);
+    } else if args.evidence_report {
+        report::emit_evidence_report(
+            &report.fingerprint,
+            &report.findings,
+            &report.correlations,
+            Some(&report.coverage),
+        );
     } else {
         print_package_report(&report);
         println!("Policy: {:?}", decision.action);
@@ -196,6 +214,17 @@ pub(crate) fn run_pipeline(args: PipelineArgs) -> Result<()> {
             None,
             &pipeline_decision(exit),
             output.clone(),
+        )?;
+        maybe_write_evidence_bundle(
+            args.evidence_bundle.evidence_bundle.as_deref(),
+            "directory",
+            &report.fingerprint,
+            None,
+            Some(&report.fingerprint),
+            &pipeline_decision(exit),
+            &report.findings,
+            &report.correlations,
+            Some(&report.coverage),
         )?;
         emit_pipeline(
             &args,
@@ -252,6 +281,17 @@ pub(crate) fn run_pipeline(args: PipelineArgs) -> Result<()> {
         &pipeline_decision(exit),
         output.clone(),
     )?;
+    maybe_write_evidence_bundle(
+        args.evidence_bundle.evidence_bundle.as_deref(),
+        source.as_str(),
+        &identity,
+        None,
+        report.sha256.as_deref(),
+        &pipeline_decision(exit),
+        &report.results,
+        &layerfault::correlate::correlate(&report.results),
+        None,
+    )?;
     emit_pipeline(
         &args,
         &report.path,
@@ -262,6 +302,41 @@ pub(crate) fn run_pipeline(args: PipelineArgs) -> Result<()> {
         output,
     )?;
     std::process::exit(exit);
+}
+
+/// Write a self-contained evidence bundle if `--evidence-bundle <DIR>` was
+/// supplied. Distinct from `maybe_write_evidence`'s signed admission
+/// envelope: this documents the assessment for independent review.
+#[allow(clippy::too_many_arguments)]
+fn maybe_write_evidence_bundle(
+    dir: Option<&std::path::Path>,
+    source: &str,
+    identity: &str,
+    revision: Option<&str>,
+    fingerprint: Option<&str>,
+    decision: &str,
+    findings: &[layerfault::scanner::LayerScanResult],
+    correlations: &[layerfault::finding_evidence::FindingCorrelation],
+    coverage: Option<&layerfault::coverage::Coverage>,
+) -> Result<()> {
+    let Some(dir) = dir else {
+        return Ok(());
+    };
+    let input = layerfault::evidence_bundle::BundleInput {
+        subject: layerfault::evidence_bundle::BundleSubject {
+            source: source.to_owned(),
+            identity: identity.to_owned(),
+            revision: revision.map(str::to_owned),
+            fingerprint: fingerprint.map(str::to_owned),
+        },
+        decision,
+        findings,
+        correlations,
+        coverage,
+    };
+    let manifest_path = layerfault::evidence_bundle::write(dir, &input)?;
+    println!("Evidence bundle written: {}", manifest_path.display());
+    Ok(())
 }
 
 fn pipeline_json(
@@ -323,6 +398,9 @@ fn emit_pipeline(
 ) -> Result<()> {
     if args.json {
         println!("{}", serde_json::to_string_pretty(&output)?);
+    } else if args.evidence_report {
+        let correlations = layerfault::correlate::correlate(findings);
+        report::emit_evidence_report(identity, findings, &correlations, None);
     } else if args.sarif {
         report::emit_sarif(&[report::ModelReport {
             model_name: target.to_owned(),

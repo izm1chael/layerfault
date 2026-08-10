@@ -1,3 +1,7 @@
+use crate::finding_evidence::{
+    config_value, file_member, hash_mismatch, source_excerpt, symlink_target, EvidenceSubject,
+    FindingBuilder, MAX_EVIDENCE_PER_FINDING,
+};
 use crate::formats::{artifact, ArtifactFormat};
 use crate::safeio::open_readonly_nofollow;
 use crate::scanner::{CheckType, Confidence, FindingClass, LayerScanResult, ScanStatus};
@@ -12,6 +16,11 @@ use walkdir::WalkDir;
 
 const TEXT_STREAM_CHUNK_BYTES: usize = 256 * 1024;
 const TEXT_STREAM_OVERLAP_BYTES: usize = 8 * 1024;
+const PACKAGE_MEDIA_TYPE: &str = "application/vnd.layerfault.package";
+/// Lines of context captured around a matched primitive.
+const EXCERPT_CONTEXT_LINES: u64 = 3;
+/// Upper bound on bytes re-read from a member to build one excerpt.
+const EXCERPT_READ_BYTES: usize = 8 * 1024;
 const MAX_PACKAGE_ENTRIES: usize = 100_000;
 const MAX_PACKAGE_DEPTH: usize = 64;
 const MAX_PACKAGE_PATH_BYTES: usize = 4096;
@@ -34,6 +43,12 @@ pub struct PackageReport {
     pub files: Vec<PackageEntry>,
     pub total_bytes: u64,
     pub findings: Vec<LayerScanResult>,
+    /// Structural relationships between findings, such as a configuration
+    /// reference resolving to a module that carries a code-execution primitive.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub correlations: Vec<crate::finding_evidence::FindingCorrelation>,
+    /// What the scan actually examined.
+    pub coverage: crate::coverage::Coverage,
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
@@ -44,6 +59,11 @@ pub struct PackageFingerprintReport {
     pub total_bytes: u64,
 }
 
+/// Maximum `auto_map` entries retained as evidence from one configuration.
+const MAX_AUTO_MAP_ENTRIES: usize = 32;
+/// Maximum characters retained for a captured JSON key path or value.
+const MAX_JSON_EVIDENCE_CHARS: usize = 512;
+
 #[derive(Default)]
 struct PackageMemberEvidence {
     relative_path: String,
@@ -52,6 +72,12 @@ struct PackageMemberEvidence {
     modules: BTreeSet<String>,
     module_scope_operation: Option<&'static str>,
     json_parse_error: Option<String>,
+    /// Exact `auto_map` key paths and the symbols they reference, so a finding
+    /// can show `auto_map.AutoModel = "modeling_custom.CustomModel"` rather
+    /// than merely asserting that custom code mapping exists.
+    auto_map_entries: std::collections::BTreeMap<String, String>,
+    /// The exact key that enabled remote code.
+    remote_trust_key: Option<String>,
 }
 
 struct PackageDiscovery {
@@ -83,15 +109,27 @@ pub fn inspect(root: &Path) -> Result<PackageReport> {
     let mut findings = Vec::new();
     let mut discovery = discover_package(&root)?;
     for (rel, target) in discovery.symlinks {
-        findings.push(finding(
+        let rendered = target
+            .as_ref()
+            .map(|path| path.display().to_string())
+            .unwrap_or_else(|| "<unreadable>".to_owned());
+        let subject = EvidenceSubject::member(&rel).with_media_type(PACKAGE_MEDIA_TYPE);
+        findings.push(
+            finding(
                 &format!("package:{rel}"),
                 CheckType::PackageSecurity,
                 ScanStatus::Fail,
                 FindingClass::Structural,
                 Confidence::High,
                 "LF-PACKAGE-SYMLINK",
-                format!("Package contains symlink '{}' -> '{}'; model packages are fingerprinted and scanned without following links", rel, target.as_ref().map(|p| p.display().to_string()).unwrap_or_else(|| "<unreadable>".to_owned())),
-            ));
+                format!("Package contains symlink '{rel}' -> '{rendered}'; model packages are fingerprinted and scanned without following links"),
+            )
+            .subject(subject.clone())
+            // The declared target is recorded as read; Layerfault deliberately
+            // does not resolve it further to enrich this evidence.
+            .evidence(symlink_target(subject, &rel, target.as_ref().map(|_| rendered.as_str())))
+            .finish(),
+        );
     }
     discovery
         .paths
@@ -153,15 +191,24 @@ pub fn inspect(root: &Path) -> Result<PackageReport> {
             crate::hashcache::sha256_uncached_prefixed(&file)? != digest
         };
         if changed {
-            findings.push(finding(
-                &digest,
-                CheckType::PackageSecurity,
-                ScanStatus::Fail,
-                FindingClass::Integrity,
-                Confidence::High,
-                "LF-PACKAGE-RACE",
-                format!("Package file '{}' changed while it was being scanned", rel),
-            ));
+            let observed = crate::hashcache::sha256_uncached_prefixed(&file)
+                .unwrap_or_else(|_| "<unreadable after change>".to_owned());
+            let subject = member_subject(&rel, &digest, Some(size));
+            findings.push(
+                finding(
+                    &digest,
+                    CheckType::PackageSecurity,
+                    ScanStatus::Fail,
+                    FindingClass::Integrity,
+                    Confidence::High,
+                    "LF-PACKAGE-RACE",
+                    format!("Package file '{rel}' changed while it was being scanned"),
+                )
+                .subject(subject.clone())
+                // Only the two identities Layerfault actually measured.
+                .evidence(hash_mismatch(subject, &digest, &observed))
+                .finish(),
+            );
         }
     }
 
@@ -174,12 +221,27 @@ pub fn inspect(root: &Path) -> Result<PackageReport> {
             .then_with(|| a.layer_digest.cmp(&b.layer_digest))
     });
 
+    // Correlate only after findings are complete and ordered, so the derived
+    // relationships are deterministic for a given package.
+    let correlations = crate::correlate::correlate(&findings);
+    let mut coverage = crate::coverage::Coverage::complete(files.len() as u64, total_bytes);
+    if findings
+        .iter()
+        .any(|item| item.evidence_state == Some(crate::finding_evidence::EvidenceState::Partial))
+    {
+        coverage.evidence_limited(
+            "evidence collection for at least one member reached its bounded limit",
+        );
+    }
+
     Ok(PackageReport {
         root: root.display().to_string(),
         fingerprint,
         files,
         total_bytes,
         findings,
+        correlations,
+        coverage,
     })
 }
 
@@ -337,18 +399,23 @@ pub fn inspect_member(display_path: &Path, content_path: &Path) -> Result<Vec<La
         crate::hashcache::sha256_uncached_prefixed(&file)? != digest
     };
     if changed {
-        findings.push(finding(
-            &digest,
-            CheckType::PackageSecurity,
-            ScanStatus::Fail,
-            FindingClass::Integrity,
-            Confidence::High,
-            "LF-PACKAGE-RACE",
-            format!(
-                "Package member '{}' changed while it was being scanned",
-                rel
-            ),
-        ));
+        let observed = crate::hashcache::sha256_uncached_prefixed(&file)
+            .unwrap_or_else(|_| "<unreadable after change>".to_owned());
+        let subject = member_subject(&rel, &digest, Some(size));
+        findings.push(
+            finding(
+                &digest,
+                CheckType::PackageSecurity,
+                ScanStatus::Fail,
+                FindingClass::Integrity,
+                Confidence::High,
+                "LF-PACKAGE-RACE",
+                format!("Package member '{rel}' changed while it was being scanned"),
+            )
+            .subject(subject.clone())
+            .evidence(hash_mismatch(subject, &digest, &observed))
+            .finish(),
+        );
     }
     Ok(findings)
 }
@@ -379,6 +446,7 @@ fn scan_package_file(
     auto_map_modules: &BTreeSet<String>,
 ) -> Result<Vec<LayerScanResult>> {
     let mut out = Vec::new();
+    let subject = member_subject(rel, digest, Some(size));
     let file_prefix = prefix(file, 512)?;
     let archive_detection = crate::archive::detect_archive_format(path, &file_prefix);
     if archive_detection.format != crate::archive::ArchiveFormat::Unknown {
@@ -389,18 +457,25 @@ fn scan_package_file(
                 return Ok(out);
             }
             Err(error) => {
-                out.push(finding(
-                    digest,
-                    CheckType::PackageSecurity,
-                    ScanStatus::Fail,
-                    FindingClass::Structural,
-                    Confidence::High,
-                    "LF-ARCHIVE-MALFORMED",
-                    format!(
-                        "Archive container '{}' failed inspection safely: {error}",
-                        rel
-                    ),
-                ));
+                out.push(
+                    finding(
+                        digest,
+                        CheckType::PackageSecurity,
+                        ScanStatus::Fail,
+                        FindingClass::Structural,
+                        Confidence::High,
+                        "LF-ARCHIVE-MALFORMED",
+                        format!(
+                            "Archive container '{}' failed inspection safely: {error}",
+                            rel
+                        ),
+                    )
+                    .subject(subject.clone())
+                    .evidence_unavailable(
+                        "archive parser failed before member evidence could be captured",
+                    )
+                    .finish(),
+                );
                 return Ok(out);
             }
         }
@@ -416,18 +491,24 @@ fn scan_package_file(
             digest,
         ) {
             Ok(report) => out.extend(report.results),
-            Err(error) => out.push(finding(
-                digest,
-                CheckType::PackageSecurity,
-                ScanStatus::Fail,
-                FindingClass::Structural,
-                Confidence::High,
-                "LF-PACKAGE-ARTIFACT",
-                format!(
-                    "Artifact '{}' failed package validation safely: {error}",
-                    rel
-                ),
-            )),
+            Err(error) => out.push(
+                finding(
+                    digest,
+                    CheckType::PackageSecurity,
+                    ScanStatus::Fail,
+                    FindingClass::Structural,
+                    Confidence::High,
+                    "LF-PACKAGE-ARTIFACT",
+                    format!("Artifact '{rel}' failed package validation safely: {error}"),
+                )
+                .subject(subject.clone())
+                .evidence(crate::finding_evidence::structural_invariant(
+                    subject.clone(),
+                    "artifact parser rejected the member",
+                    serde_json::json!({ "format": format!("{format:?}"), "parser_error": error.to_string() }),
+                ))
+                .finish(),
+            ),
         }
         return Ok(out);
     }
@@ -444,25 +525,49 @@ fn scan_package_file(
         // Reaching here therefore means a compressed/opaque serialization name
         // whose payload is not transparently decompressed in this pass. Keep it
         // review-required instead of inventing a blanket unsafe-format BLOCK.
-        out.push(finding(
-            digest,
-            CheckType::PackageSecurity,
-            ScanStatus::Warn,
-            FindingClass::Compatibility,
-            Confidence::High,
-            "LF-PICKLE-OPAQUE-COMPRESSED",
-            format!("Package file '{}' has a pickle/PyTorch serialization name behind unsupported compression; opcode analysis could not verify the payload", rel),
-        ));
+        out.push(
+            finding(
+                digest,
+                CheckType::PackageSecurity,
+                ScanStatus::Warn,
+                FindingClass::Compatibility,
+                Confidence::High,
+                "LF-PICKLE-OPAQUE-COMPRESSED",
+                format!("Package file '{rel}' has a pickle/PyTorch serialization name behind unsupported compression; opcode analysis could not verify the payload"),
+            )
+            .subject(subject.clone())
+            .evidence(file_member(
+                subject.clone(),
+                serde_json::json!({
+                    "package_relative_path": rel,
+                    "size": size,
+                    "condition": "serialization name behind compression Layerfault does not decode in this pass",
+                }),
+            ))
+            .finish(),
+        );
     } else if ext == "bin" {
-        out.push(finding(
-            digest,
-            CheckType::PackageSecurity,
-            ScanStatus::Warn,
-            FindingClass::Compatibility,
-            Confidence::Medium,
-            "LF-SERIALIZATION-BIN",
-            format!("Legacy .bin artifact '{}' is opaque to Layerfault; verify the producer and loading path before use", rel),
-        ));
+        out.push(
+            finding(
+                digest,
+                CheckType::PackageSecurity,
+                ScanStatus::Warn,
+                FindingClass::Compatibility,
+                Confidence::Medium,
+                "LF-SERIALIZATION-BIN",
+                format!("Legacy .bin artifact '{rel}' is opaque to Layerfault; verify the producer and loading path before use"),
+            )
+            .subject(subject.clone())
+            .evidence(file_member(
+                subject.clone(),
+                serde_json::json!({
+                    "package_relative_path": rel,
+                    "size": size,
+                    "condition": "no structural parser for the '.bin' member",
+                }),
+            ))
+            .finish(),
+        );
     }
 
     let executable_prefix = prefix(file, 8)?;
@@ -479,15 +584,29 @@ fn scan_package_file(
     }
 
     if is_native_or_script(&ext, &lower) {
-        out.push(finding(
-            digest,
-            CheckType::PackageSecurity,
-            ScanStatus::Warn,
-            FindingClass::ContentIndicator,
-            Confidence::High,
-            "LF-PACKAGE-CODE",
-            format!("Package contains executable/custom-code artifact '{}'; weight-only packages normally do not require executable content", rel),
-        ));
+        out.push(
+            finding(
+                digest,
+                CheckType::PackageSecurity,
+                ScanStatus::Warn,
+                FindingClass::ContentIndicator,
+                Confidence::High,
+                "LF-PACKAGE-CODE",
+                format!("Package contains executable/custom-code artifact '{rel}'; weight-only packages normally do not require executable content"),
+            )
+            .subject(subject.clone())
+            .evidence(file_member(
+                subject.clone(),
+                serde_json::json!({
+                    "package_relative_path": rel,
+                    "extension": ext,
+                    "size": size,
+                    "sha256": digest,
+                    "condition": "executable or custom-code member in a model package",
+                }),
+            ))
+            .finish(),
+        );
     }
 
     if ext == "py" && !is_documentation_path(rel) && !is_tokenizer_vocabulary_path(rel) {
@@ -531,18 +650,22 @@ fn scan_package_file(
     }
 
     if out.is_empty() {
-        out.push(finding(
-            digest,
-            CheckType::PackageSecurity,
-            ScanStatus::Pass,
-            FindingClass::Informational,
-            Confidence::High,
-            "LF-PACKAGE-FILE",
-            format!(
-                "Package file '{}' hashed; no high-confidence package-security indicator matched",
-                rel
-            ),
-        ));
+        out.push(
+            finding(
+                digest,
+                CheckType::PackageSecurity,
+                ScanStatus::Pass,
+                FindingClass::Informational,
+                Confidence::High,
+                "LF-PACKAGE-FILE",
+                format!("Package file '{rel}' hashed; no high-confidence package-security indicator matched"),
+            )
+            .subject(subject)
+            // A PASS records what was examined; there is no triggering evidence
+            // to attach because nothing fired.
+            .evidence_not_applicable()
+            .finish(),
+        );
     }
     Ok(out)
 }
@@ -553,25 +676,88 @@ fn scan_json_evidence(
     evidence: &PackageMemberEvidence,
     out: &mut Vec<LayerScanResult>,
 ) {
+    let subject = member_subject(rel, digest, None);
     if evidence.auto_map {
-        out.push(finding(digest, CheckType::PackageSecurity, ScanStatus::Warn, FindingClass::ContentIndicator, Confidence::High, "LF-CODE-AUTO-MAP", format!("'{}' contains Hugging Face auto_map metadata that can route loading through custom model code", rel)));
-    }
-    if evidence.remote_trust {
-        out.push(finding(digest, CheckType::PackageSecurity, ScanStatus::Warn, FindingClass::ContentIndicator, Confidence::High, "LF-CODE-REMOTE-TRUST", format!("'{}' explicitly enables trust_remote_code; custom code should be reviewed before loading", rel)));
-    }
-    if let Some(error) = evidence.json_parse_error.as_deref() {
-        out.push(finding(
+        let referenced = evidence
+            .auto_map_entries
+            .values()
+            .cloned()
+            .collect::<Vec<_>>()
+            .join(", ");
+        let detail = if referenced.is_empty() {
+            format!("'{rel}' contains Hugging Face auto_map metadata that can route loading through custom model code")
+        } else {
+            format!("'{rel}' maps model loading to custom code via auto_map: {referenced}")
+        };
+        let mut builder = finding(
             digest,
             CheckType::PackageSecurity,
             ScanStatus::Warn,
-            FindingClass::Structural,
+            FindingClass::ContentIndicator,
             Confidence::High,
-            "LF-PACKAGE-JSON-INVALID",
-            format!(
-                "JSON/config '{}' could not be parsed completely: {}",
-                rel, error
-            ),
-        ));
+            "LF-CODE-AUTO-MAP",
+            detail,
+        )
+        .subject(subject.clone());
+        for (key, value) in &evidence.auto_map_entries {
+            builder = builder.evidence(config_value(
+                subject.clone(),
+                key,
+                serde_json::Value::String(value.clone()),
+                "Configuration maps a model loading entry point to publisher-supplied code",
+            ));
+        }
+        if evidence.auto_map_entries.is_empty() {
+            builder = builder.evidence_unavailable(
+                "auto_map was present but no string symbol reference was resolved from it",
+            );
+        }
+        out.push(builder.finish());
+    }
+    if evidence.remote_trust {
+        let key = evidence
+            .remote_trust_key
+            .clone()
+            .unwrap_or_else(|| "trust_remote_code".to_owned());
+        out.push(
+            finding(
+                digest,
+                CheckType::PackageSecurity,
+                ScanStatus::Warn,
+                FindingClass::ContentIndicator,
+                Confidence::High,
+                "LF-CODE-REMOTE-TRUST",
+                format!("'{rel}' sets {key} = true; custom code should be reviewed before loading"),
+            )
+            .subject(subject.clone())
+            .evidence(config_value(
+                subject.clone(),
+                &key,
+                serde_json::Value::Bool(true),
+                "Configuration explicitly permits execution of publisher-supplied code",
+            ))
+            .finish(),
+        );
+    }
+    if let Some(error) = evidence.json_parse_error.as_deref() {
+        out.push(
+            finding(
+                digest,
+                CheckType::PackageSecurity,
+                ScanStatus::Warn,
+                FindingClass::Structural,
+                Confidence::High,
+                "LF-PACKAGE-JSON-INVALID",
+                format!("JSON/config '{rel}' could not be parsed completely: {error}"),
+            )
+            .subject(subject.clone())
+            .evidence(crate::finding_evidence::structural_invariant(
+                subject,
+                "configuration could not be fully parsed",
+                serde_json::json!({ "parser_error": error }),
+            ))
+            .finish(),
+        );
     }
 }
 
@@ -608,13 +794,18 @@ fn scan_text_streaming(
         "cycler.__init__",
         "namespace.__init__",
     ];
-    let mut found_rules = BTreeSet::<&'static str>::new();
+    let mut hits = MatchCollector::default();
     let mut jinja_seen = false;
     let mut template_marker_seen = rel.to_ascii_lowercase().contains("template");
     let mut reader = file.try_clone()?;
     reader.seek(SeekFrom::Start(0))?;
     let mut chunk = vec![0_u8; TEXT_STREAM_CHUNK_BYTES];
     let mut carry = Vec::<u8>::new();
+    // Absolute file offset of `window[0]`, and the 1-based line number at that
+    // offset. Both advance by the freshly consumed bytes only, so the replayed
+    // overlap region is never counted twice.
+    let mut window_start = 0_u64;
+    let mut window_start_line = 1_u64;
     loop {
         let count = reader.read(&mut chunk)?;
         if count == 0 {
@@ -626,20 +817,45 @@ fn scan_text_streaming(
         let lower = String::from_utf8_lossy(&window).to_ascii_lowercase();
         if !documentation && !vocabulary_data {
             for (needle, rule) in dangerous {
-                if lower.contains(needle) {
-                    found_rules.insert(rule);
+                for (offset, _) in lower.match_indices(needle) {
+                    // `lower` is a lossy decode, so its byte offsets can differ
+                    // from the raw window's on invalid UTF-8. Clamp instead of
+                    // trusting the index.
+                    let local = offset.min(window.len());
+                    let absolute = window_start.saturating_add(local as u64);
+                    let line =
+                        window_start_line.saturating_add(count_newlines(&window[..local]) as u64);
+                    hits.record(rule, needle, absolute, line);
                 }
             }
         }
         if !vocabulary_data {
             jinja_seen |= jinja.iter().any(|needle| lower.contains(needle));
             template_marker_seen |= lower.contains("{{");
+            for needle in jinja {
+                for (offset, _) in lower.match_indices(needle) {
+                    let local = offset.min(window.len());
+                    let absolute = window_start.saturating_add(local as u64);
+                    let line =
+                        window_start_line.saturating_add(count_newlines(&window[..local]) as u64);
+                    hits.record("LF-TEMPLATE-INTROSPECTION", needle, absolute, line);
+                }
+            }
         }
         let keep = window.len().min(TEXT_STREAM_OVERLAP_BYTES);
+        let consumed = window.len() - keep;
+        window_start_line =
+            window_start_line.saturating_add(count_newlines(&window[..consumed]) as u64);
+        window_start = window_start.saturating_add(consumed as u64);
         carry.clear();
         carry.extend_from_slice(&window[window.len() - keep..]);
     }
-    for rule in found_rules {
+
+    let subject = member_subject(rel, digest, file.metadata().ok().map(|meta| meta.len()));
+    for rule in hits.rules() {
+        if rule == "LF-TEMPLATE-INTROSPECTION" {
+            continue;
+        }
         let primitive = match rule {
             "LF-CODE-OS-SYSTEM" => "os.system",
             "LF-CODE-SUBPROCESS" => "subprocess",
@@ -649,12 +865,205 @@ fn scan_text_streaming(
             "LF-CODE-NETWORK" => "network access",
             _ => "security-sensitive primitive",
         };
-        out.push(finding(digest, CheckType::PackageSecurity, ScanStatus::Warn, FindingClass::ContentIndicator, Confidence::High, rule, format!("Custom code/config '{}' contains security-relevant primitive '{}'; the entire file was streamed and review is required before enabling custom code", rel, primitive)));
+        let matches = hits.take(rule);
+        let detail = format!(
+            "Custom code/config '{}' contains security-relevant primitive '{}' at {}; the entire file was streamed and review is required before enabling custom code",
+            rel,
+            primitive,
+            describe_lines(&matches)
+        );
+        out.push(
+            finding(
+                digest,
+                CheckType::PackageSecurity,
+                ScanStatus::Warn,
+                FindingClass::ContentIndicator,
+                Confidence::High,
+                rule,
+                detail,
+            )
+            .subject(subject.clone())
+            .evidence_all(excerpt_evidence(&subject, file, &matches))
+            .truncated(hits.truncated(rule))
+            .finish(),
+        );
     }
     if jinja_seen && template_marker_seen {
-        out.push(finding(digest, CheckType::PackageSecurity, ScanStatus::Warn, FindingClass::ContentIndicator, Confidence::High, "LF-TEMPLATE-INTROSPECTION", format!("Template/config '{}' contains Python/Jinja introspection primitives; review template execution context before use", rel)));
+        let matches = hits.take("LF-TEMPLATE-INTROSPECTION");
+        let detail = format!(
+            "Template/config '{}' contains Python/Jinja introspection primitives at {}; review template execution context before use",
+            rel,
+            describe_lines(&matches)
+        );
+        out.push(
+            finding(
+                digest,
+                CheckType::PackageSecurity,
+                ScanStatus::Warn,
+                FindingClass::ContentIndicator,
+                Confidence::High,
+                "LF-TEMPLATE-INTROSPECTION",
+                detail,
+            )
+            .subject(subject.clone())
+            .evidence_all(excerpt_evidence(&subject, file, &matches))
+            .finish(),
+        );
     }
     Ok(())
+}
+
+/// One accepted primitive match inside a package member.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct TextMatch {
+    needle: &'static str,
+    offset: u64,
+    line: u64,
+}
+
+/// Bounded, deduplicated, deterministic collection of primitive matches.
+///
+/// Chunks are replayed with an 8 KiB overlap so a primitive straddling a chunk
+/// boundary is still found. That means the same match can be seen twice, so
+/// acceptance is keyed on the absolute file offset rather than the position
+/// inside the current window.
+#[derive(Default)]
+struct MatchCollector {
+    matches: std::collections::BTreeMap<&'static str, Vec<TextMatch>>,
+    suppressed: std::collections::BTreeMap<&'static str, usize>,
+}
+
+impl MatchCollector {
+    fn record(&mut self, rule: &'static str, needle: &'static str, offset: u64, line: u64) {
+        let entries = self.matches.entry(rule).or_default();
+        if entries.iter().any(|entry| entry.offset == offset) {
+            return;
+        }
+        if entries.len() >= MAX_EVIDENCE_PER_FINDING {
+            *self.suppressed.entry(rule).or_default() += 1;
+            return;
+        }
+        entries.push(TextMatch {
+            needle,
+            offset,
+            line,
+        });
+    }
+
+    fn rules(&self) -> Vec<&'static str> {
+        self.matches.keys().copied().collect()
+    }
+
+    fn take(&self, rule: &str) -> Vec<TextMatch> {
+        let mut out = self.matches.get(rule).cloned().unwrap_or_default();
+        out.sort_by_key(|entry| entry.offset);
+        out
+    }
+
+    fn truncated(&self, rule: &str) -> bool {
+        self.suppressed.get(rule).copied().unwrap_or(0) > 0
+    }
+}
+
+fn count_newlines(bytes: &[u8]) -> usize {
+    bytes.iter().filter(|byte| **byte == b'\n').count()
+}
+
+fn describe_lines(matches: &[TextMatch]) -> String {
+    if matches.is_empty() {
+        return "an undetermined position".to_owned();
+    }
+    let rendered = matches
+        .iter()
+        .take(4)
+        .map(|entry| format!("line {}", entry.line))
+        .collect::<Vec<_>>()
+        .join(", ");
+    if matches.len() > 4 {
+        format!("{rendered} and {} more", matches.len() - 4)
+    } else {
+        rendered
+    }
+}
+
+/// Build bounded source excerpts for accepted matches.
+///
+/// Each excerpt is a small positional re-read of the member, never a full load:
+/// a hostile multi-gigabyte file yields at most `EXCERPT_READ_BYTES` per match.
+fn excerpt_evidence(
+    subject: &EvidenceSubject,
+    file: &std::fs::File,
+    matches: &[TextMatch],
+) -> Vec<crate::finding_evidence::FindingEvidence> {
+    matches
+        .iter()
+        .filter_map(|entry| {
+            let (text, _) = read_excerpt_window(file, entry.offset, entry.line).ok()?;
+            // The location names the line the primitive is actually on. The
+            // excerpt carries surrounding context, but pointing a reviewer at
+            // the first context line would misreport where the match is.
+            Some(source_excerpt(
+                subject.clone(),
+                entry.line,
+                entry.line,
+                entry.needle,
+                &text,
+            ))
+        })
+        .collect()
+}
+
+fn read_excerpt_window(file: &std::fs::File, offset: u64, line: u64) -> Result<(String, u64)> {
+    let half = (EXCERPT_READ_BYTES / 2) as u64;
+    let start = offset.saturating_sub(half);
+    let mut reader = file.try_clone()?;
+    reader.seek(SeekFrom::Start(start))?;
+    let mut buffer = vec![0_u8; EXCERPT_READ_BYTES];
+    let read = reader.read(&mut buffer)?;
+    buffer.truncate(read);
+    let decoded = String::from_utf8_lossy(&buffer).into_owned();
+
+    // Locate the match inside the window, then keep a few lines either side.
+    let local = usize::try_from(offset.saturating_sub(start)).unwrap_or(0);
+    let local = local.min(decoded.len());
+    let before = &decoded[..floor_boundary(&decoded, local)];
+    let leading_newlines = count_newlines(before.as_bytes()) as u64;
+
+    let mut prefix_lines: Vec<&str> = before.split('\n').collect();
+    // A window that does not start at the file start may begin mid-line; drop
+    // that partial line rather than presenting it as a complete one.
+    if start > 0 && !prefix_lines.is_empty() {
+        prefix_lines.remove(0);
+    }
+    let context = EXCERPT_CONTEXT_LINES as usize;
+    let kept_before = prefix_lines.len().min(context);
+    let prefix = prefix_lines[prefix_lines.len() - kept_before..].join("\n");
+
+    let after = &decoded[floor_boundary(&decoded, local)..];
+    let suffix_lines: Vec<&str> = after.split('\n').take(context + 1).collect();
+    let suffix = suffix_lines.join("\n");
+
+    let mut text = String::new();
+    if !prefix.is_empty() {
+        text.push_str(&prefix);
+        text.push('\n');
+    }
+    text.push_str(&suffix);
+
+    // The reported first line is the match line minus the context actually kept.
+    let _ = leading_newlines;
+    let first_line = line.saturating_sub(kept_before as u64).max(1);
+    Ok((text, first_line))
+}
+
+fn floor_boundary(value: &str, mut index: usize) -> usize {
+    if index >= value.len() {
+        return value.len();
+    }
+    while index > 0 && !value.is_char_boundary(index) {
+        index -= 1;
+    }
+    index
 }
 
 fn is_tokenizer_vocabulary_path(rel: &str) -> bool {
@@ -702,6 +1111,9 @@ enum JsonMetadataContext {
 struct JsonMetadataSeed<'a> {
     evidence: &'a mut PackageMemberEvidence,
     context: JsonMetadataContext,
+    /// Dotted JSON key path to the value currently being visited, so evidence
+    /// can name the exact location (`auto_map.AutoModel`) rather than the file.
+    key_path: String,
 }
 
 impl<'de> DeserializeSeed<'de> for JsonMetadataSeed<'_> {
@@ -714,6 +1126,7 @@ impl<'de> DeserializeSeed<'de> for JsonMetadataSeed<'_> {
         deserializer.deserialize_any(JsonMetadataVisitor {
             evidence: self.evidence,
             context: self.context,
+            key_path: self.key_path,
         })
     }
 }
@@ -721,6 +1134,7 @@ impl<'de> DeserializeSeed<'de> for JsonMetadataSeed<'_> {
 struct JsonMetadataVisitor<'a> {
     evidence: &'a mut PackageMemberEvidence,
     context: JsonMetadataContext,
+    key_path: String,
 }
 
 impl<'de> Visitor<'de> for JsonMetadataVisitor<'_> {
@@ -733,6 +1147,9 @@ impl<'de> Visitor<'de> for JsonMetadataVisitor<'_> {
     fn visit_bool<E>(self, value: bool) -> std::result::Result<Self::Value, E> {
         if matches!(self.context, JsonMetadataContext::RemoteTrust) && value {
             self.evidence.remote_trust = true;
+            if self.evidence.remote_trust_key.is_none() {
+                self.evidence.remote_trust_key = Some(bounded_json_text(&self.key_path));
+            }
         }
         Ok(())
     }
@@ -740,6 +1157,11 @@ impl<'de> Visitor<'de> for JsonMetadataVisitor<'_> {
     fn visit_str<E>(self, value: &str) -> std::result::Result<Self::Value, E> {
         if matches!(self.context, JsonMetadataContext::AutoMap) {
             collect_module_reference(value, &mut self.evidence.modules);
+            if self.evidence.auto_map_entries.len() < MAX_AUTO_MAP_ENTRIES {
+                self.evidence
+                    .auto_map_entries
+                    .insert(bounded_json_text(&self.key_path), bounded_json_text(value));
+            }
         }
         Ok(())
     }
@@ -771,13 +1193,17 @@ impl<'de> Visitor<'de> for JsonMetadataVisitor<'_> {
     where
         A: SeqAccess<'de>,
     {
+        let mut index = 0_usize;
         while seq
             .next_element_seed(JsonMetadataSeed {
                 evidence: &mut *self.evidence,
                 context: self.context,
+                key_path: format!("{}[{index}]", self.key_path),
             })?
             .is_some()
-        {}
+        {
+            index = index.saturating_add(1);
+        }
         Ok(())
     }
 
@@ -794,9 +1220,15 @@ impl<'de> Visitor<'de> for JsonMetadataVisitor<'_> {
             } else {
                 self.context
             };
+            let key_path = if self.key_path.is_empty() {
+                key.clone()
+            } else {
+                format!("{}.{key}", self.key_path)
+            };
             map.next_value_seed(JsonMetadataSeed {
                 evidence: &mut *self.evidence,
                 context,
+                key_path,
             })?;
         }
         Ok(())
@@ -813,11 +1245,20 @@ fn stream_custom_loader_metadata(
     JsonMetadataSeed {
         evidence,
         context: JsonMetadataContext::Normal,
+        key_path: String::new(),
     }
     .deserialize(&mut de)
     .map_err(|error| anyhow!(error))?;
     de.end().map_err(|error| anyhow!(error))?;
     Ok(())
+}
+
+/// Bound a captured JSON key or value before it becomes evidence.
+fn bounded_json_text(value: &str) -> String {
+    if value.chars().count() <= MAX_JSON_EVIDENCE_CHARS {
+        return value.to_owned();
+    }
+    value.chars().take(MAX_JSON_EVIDENCE_CHARS).collect()
 }
 
 fn collect_module_reference(value: &str, modules: &mut BTreeSet<String>) {
@@ -973,18 +1414,36 @@ fn correlate_custom_code(
         } else {
             "; this code becomes importable when the caller enables trust_remote_code at runtime"
         };
-        findings.push(finding(
-            entry.sha256.as_deref().unwrap_or("module"),
-            CheckType::PackageSecurity,
-            ScanStatus::Fail,
-            FindingClass::ContentIndicator,
-            Confidence::High,
-            "LF-CODE-IMPORT-SIDE-EFFECT",
-            format!(
-                "Hugging Face auto_map routes loading through '{}', which performs '{}' at module scope{}",
-                entry.relative_path, operation, trust_context
-            ),
-        ));
+        let digest = entry.sha256.as_deref().unwrap_or("module");
+        let subject = member_subject(&entry.relative_path, digest, Some(entry.size));
+        findings.push(
+            finding(
+                digest,
+                CheckType::PackageSecurity,
+                ScanStatus::Fail,
+                FindingClass::ContentIndicator,
+                Confidence::High,
+                "LF-CODE-IMPORT-SIDE-EFFECT",
+                format!(
+                    "Hugging Face auto_map routes loading through '{}', which performs '{}' at module scope{}",
+                    entry.relative_path, operation, trust_context
+                ),
+            )
+            .subject(subject.clone())
+            // The relationship itself is the evidence: a configuration
+            // reference resolving to a module that acts at import time.
+            .evidence(crate::finding_evidence::path_relationship(
+                subject,
+                "auto_map reference resolves to a module with import-time behaviour",
+                serde_json::json!({
+                    "referenced_module": module,
+                    "resolved_module_path": entry.relative_path,
+                    "module_scope_operation": operation,
+                    "package_trust_remote_code": package_remote_trust,
+                }),
+            ))
+            .finish(),
+        );
     }
 }
 
@@ -1107,6 +1566,12 @@ fn prefix(file: &std::fs::File, limit: usize) -> Result<Vec<u8>> {
     Ok(bytes)
 }
 
+/// Start a package finding.
+///
+/// Returns a builder so the caller can attach the exact member subject and the
+/// evidence that caused the detector to fire. Callers that genuinely have no
+/// evidence must say why via `evidence_unavailable`; the builder records
+/// `UNAVAILABLE` rather than leaving absence ambiguous.
 fn finding(
     digest: &str,
     check_type: CheckType,
@@ -1115,24 +1580,273 @@ fn finding(
     confidence: Confidence,
     rule: &str,
     detail: String,
-) -> LayerScanResult {
-    LayerScanResult {
-        layer_digest: digest.to_owned(),
-        media_type: "application/vnd.layerfault.package".to_owned(),
-        check_type,
-        status,
-        finding_class: class,
-        confidence,
-        detail: Some(detail),
-        matches: vec![format!("[{rule}] package finding")],
-        duration_ms: 0,
-    }
+) -> FindingBuilder {
+    FindingBuilder::new(rule, check_type, status)
+        .class(class)
+        .confidence(confidence)
+        .digest(digest)
+        .media_type(PACKAGE_MEDIA_TYPE)
+        .match_note("package finding")
+        .detail(detail)
+}
+
+/// The canonical subject for a package member.
+///
+/// Always identified by its package-relative path, never by the absolute or
+/// staging path it happens to occupy during this scan: hub review and the
+/// hosted worker both stage downloads into temporary directories, and those
+/// paths must never become a finding's identity.
+fn member_subject(rel: &str, digest: &str, size: Option<u64>) -> EvidenceSubject {
+    EvidenceSubject::member(rel)
+        .with_sha256(Some(digest.to_owned()))
+        .with_size(size)
+        .with_media_type(PACKAGE_MEDIA_TYPE)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::fs;
+
+    use crate::finding_evidence::{EvidenceKind, EvidenceLocation, EvidenceState};
+
+    fn finding_for<'a>(findings: &'a [LayerScanResult], rule: &str) -> Option<&'a LayerScanResult> {
+        findings
+            .iter()
+            .find(|finding| crate::policy::rule_id(finding) == rule)
+    }
+
+    fn text_lines(finding: &LayerScanResult) -> Vec<u64> {
+        finding
+            .evidence
+            .iter()
+            .filter_map(|record| match record.location {
+                Some(EvidenceLocation::Text { line_start, .. }) => Some(line_start),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn custom_code_evidence_records_exact_line_and_excerpt() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let root = dir.path();
+        let source = "import os\n\n\ndef load(path):\n    # helper\n    subprocess.run([\"/bin/sh\"])\n    return path\n";
+        fs::write(root.join("modeling_custom.py"), source).expect("write");
+        let report = inspect(root).expect("inspect");
+
+        let finding =
+            finding_for(&report.findings, "LF-CODE-SUBPROCESS").expect("subprocess finding");
+        assert_eq!(finding.evidence_state, Some(EvidenceState::Available));
+        assert_eq!(
+            finding
+                .subject
+                .as_ref()
+                .and_then(|s| s.package_relative_path.as_deref()),
+            Some("modeling_custom.py")
+        );
+        assert!(finding
+            .subject
+            .as_ref()
+            .and_then(|s| s.sha256.as_deref())
+            .is_some_and(|digest| digest.starts_with("sha256:")));
+
+        assert_eq!(text_lines(finding), vec![6], "match is on line 6");
+        let record = &finding.evidence[0];
+        assert_eq!(record.kind, EvidenceKind::SourceExcerpt);
+        assert_eq!(record.match_value.as_deref(), Some("subprocess.run"));
+        assert!(record
+            .excerpt
+            .as_deref()
+            .expect("excerpt")
+            .contains("subprocess.run"));
+        assert!(finding
+            .finding_id
+            .as_deref()
+            .is_some_and(|id| id.starts_with("lffinding:sha256:")));
+    }
+
+    #[test]
+    fn primitive_spanning_a_chunk_boundary_reports_one_correct_line() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let root = dir.path();
+        // Pad with whole lines so the primitive straddles the 256 KiB chunk
+        // boundary and lands inside the replayed overlap window.
+        let line = "x = 1\n"; // 6 bytes
+        let pad_lines = (TEXT_STREAM_CHUNK_BYTES / line.len()) + 1;
+        let mut source = line.repeat(pad_lines);
+        // Trim back so the needle starts a few bytes before the boundary.
+        source.truncate(TEXT_STREAM_CHUNK_BYTES - 4);
+        let lines_before = source.matches('\n').count() as u64;
+        source.push_str("subprocess.run([\"/bin/sh\"])\ntrailer = 2\n");
+        fs::write(root.join("boundary.py"), &source).expect("write");
+
+        let report = inspect(root).expect("inspect");
+        let finding =
+            finding_for(&report.findings, "LF-CODE-SUBPROCESS").expect("subprocess finding");
+        let lines = text_lines(finding);
+        assert_eq!(lines.len(), 1, "overlap must not double-report the match");
+        assert_eq!(lines[0], lines_before + 1);
+    }
+
+    #[test]
+    fn repeated_primitives_are_bounded_and_deterministic() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let root = dir.path();
+        let source = "subprocess.run(1)\n".repeat(MAX_EVIDENCE_PER_FINDING * 4);
+        fs::write(root.join("flood.py"), &source).expect("write");
+
+        let first = inspect(root).expect("inspect");
+        let second = inspect(root).expect("inspect");
+        // The semantic Python analyzer also flags LF-CODE-SUBPROCESS (one
+        // finding per call site); pick the aggregated streaming-scanner
+        // finding specifically, which is the one whose bounding this test
+        // covers.
+        let most_evidence = |findings: &[LayerScanResult]| {
+            findings
+                .iter()
+                .filter(|finding| crate::policy::rule_id(finding) == "LF-CODE-SUBPROCESS")
+                .max_by_key(|finding| finding.evidence.len())
+                .expect("finding")
+                .clone()
+        };
+        let a = most_evidence(&first.findings);
+        let b = most_evidence(&second.findings);
+        let a = &a;
+        let b = &b;
+        assert!(a.evidence.len() <= MAX_EVIDENCE_PER_FINDING);
+        assert_eq!(
+            text_lines(a),
+            text_lines(b),
+            "evidence must be deterministic"
+        );
+        assert_eq!(a.finding_id, b.finding_id);
+        assert_eq!(a.evidence_state, Some(EvidenceState::Partial));
+    }
+
+    #[test]
+    fn credentials_in_custom_code_are_redacted_in_evidence() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let root = dir.path();
+        let source = "import requests\nTOKEN = \"hf_abcdefghijklmnopqrstuvwxyz0123456789\"\nrequests.post(url, headers={\"Authorization\": \"Bearer abcdefghijklmnopqrstuvwxyz\"})\n";
+        fs::write(root.join("net.py"), source).expect("write");
+        let report = inspect(root).expect("inspect");
+        // Both the streaming text scanner and the semantic Python analyzer can
+        // independently flag LF-CODE-NETWORK for this file; check across all
+        // of them rather than assuming a specific one is first.
+        let network_findings: Vec<&LayerScanResult> = report
+            .findings
+            .iter()
+            .filter(|finding| crate::policy::rule_id(finding) == "LF-CODE-NETWORK")
+            .collect();
+        assert!(!network_findings.is_empty(), "expected a network finding");
+        let excerpts = network_findings
+            .iter()
+            .flat_map(|finding| finding.evidence.iter())
+            .filter_map(|record| record.excerpt.as_deref())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            !excerpts.contains("hf_abcdefghijklmnopqrstuvwxyz0123456789"),
+            "token must not be reproduced in evidence"
+        );
+        assert!(excerpts.contains("<redacted sha256:"));
+        assert!(network_findings
+            .iter()
+            .flat_map(|finding| finding.evidence.iter())
+            .any(|record| record.redactions > 0));
+    }
+
+    #[test]
+    fn terminal_escapes_in_custom_code_are_neutralised() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let root = dir.path();
+        let source = "banner = \"\u{1b}[2J\u{1b}[31mPWNED\"\nsubprocess.run(x)\n";
+        fs::write(root.join("ansi.py"), source).expect("write");
+        let report = inspect(root).expect("inspect");
+        let finding =
+            finding_for(&report.findings, "LF-CODE-SUBPROCESS").expect("subprocess finding");
+        let rendered = serde_json::to_string(&finding.evidence).expect("serialize");
+        assert!(!rendered.contains('\u{1b}'));
+    }
+
+    #[test]
+    fn auto_map_evidence_names_the_key_and_referenced_symbol() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let root = dir.path();
+        fs::write(
+            root.join("config.json"),
+            br#"{"auto_map": {"AutoModel": "modeling_custom.CustomModel"}, "trust_remote_code": true}"#,
+        )
+        .expect("write");
+        let report = inspect(root).expect("inspect");
+
+        let auto_map = finding_for(&report.findings, "LF-CODE-AUTO-MAP").expect("auto_map finding");
+        let record = auto_map.evidence.first().expect("config evidence");
+        assert_eq!(record.kind, EvidenceKind::ConfigValue);
+        assert_eq!(
+            record.location,
+            Some(EvidenceLocation::Metadata {
+                key: "auto_map.AutoModel".to_owned()
+            })
+        );
+        assert_eq!(
+            record.structured.as_ref().and_then(|v| v["value"].as_str()),
+            Some("modeling_custom.CustomModel")
+        );
+
+        let trust =
+            finding_for(&report.findings, "LF-CODE-REMOTE-TRUST").expect("trust_remote_code");
+        let record = trust.evidence.first().expect("config evidence");
+        assert_eq!(
+            record.structured.as_ref().map(|v| v["value"].clone()),
+            Some(serde_json::Value::Bool(true))
+        );
+    }
+
+    #[test]
+    fn symlink_evidence_records_path_and_declared_target() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let root = dir.path();
+        fs::write(root.join("real.txt"), b"data").expect("write");
+        #[cfg(unix)]
+        std::os::unix::fs::symlink("../outside", root.join("link")).expect("symlink");
+        #[cfg(not(unix))]
+        return;
+        let report = inspect(root).expect("inspect");
+        let finding = finding_for(&report.findings, "LF-PACKAGE-SYMLINK").expect("symlink finding");
+        let record = finding.evidence.first().expect("symlink evidence");
+        assert_eq!(record.kind, EvidenceKind::SymlinkTarget);
+        let structured = record.structured.as_ref().expect("structured");
+        assert_eq!(structured["package_relative_path"], "link");
+        assert_eq!(structured["target"], "../outside");
+    }
+
+    #[test]
+    fn auto_map_and_capability_correlate_end_to_end() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let root = dir.path();
+        fs::write(
+            root.join("config.json"),
+            br#"{"auto_map": {"AutoModel": "modeling_custom.CustomModel"}}"#,
+        )
+        .expect("write");
+        fs::write(
+            root.join("modeling_custom.py"),
+            b"class CustomModel:\n    def __init__(self):\n        subprocess.run([\"id\"])\n",
+        )
+        .expect("write");
+
+        let report = inspect(root).expect("inspect");
+        let correlations = crate::correlate::correlate(&report.findings);
+        let chain = correlations
+            .iter()
+            .find(|c| c.id == "LF-CORR-CUSTOM-LOADER-PROCESS")
+            .expect("custom loader correlation");
+        assert_eq!(chain.confidence, Confidence::High);
+        assert_eq!(chain.finding_ids.len(), 2);
+        assert!(chain.summary.contains("modeling_custom.py:3"));
+    }
 
     #[test]
     fn package_resource_limits_fail_closed() {

@@ -4,6 +4,9 @@
 //! disassembles the documented protocol 0-5 opcode stream far enough to resolve
 //! GLOBAL/STACK_GLOBAL references and dangerous construction primitives.
 
+use crate::finding_evidence::{
+    byte_range_evidence, serialization_opcode, EvidenceSubject, FindingBuilder,
+};
 use crate::scanner::{CheckType, Confidence, FindingClass, LayerScanResult, ScanStatus};
 use anyhow::{anyhow, bail, Context, Result};
 use std::collections::{BTreeMap, BTreeSet};
@@ -77,12 +80,40 @@ const DANGEROUS_EXACT: &[&str] = &[
     "pty.spawn",
 ];
 
+/// Maximum opcode sites retained as evidence from one stream.
+const MAX_OPCODE_SITES: usize = 64;
+
+/// Where in the opcode stream a security-relevant reference was resolved.
+///
+/// This comes solely from the bounded static disassembler. Layerfault never
+/// deserializes the stream to obtain it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OpcodeSite {
+    /// The recorded entry, matching the corresponding `dangerous`/`globals` set item.
+    pub entry: String,
+    /// Mnemonic of the opcode that produced the entry.
+    pub opcode: &'static str,
+    /// 1-based index of that opcode within the stream.
+    pub opcode_index: u64,
+    /// Byte offset of that opcode within the stream.
+    pub byte_offset: u64,
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct PickleAnalysis {
     pub globals: BTreeSet<String>,
     pub unknown_globals: BTreeSet<String>,
     pub dangerous: BTreeSet<String>,
     pub opcode_count: usize,
+    /// Bounded, ordered positions for the entries above.
+    pub sites: Vec<OpcodeSite>,
+}
+
+impl PickleAnalysis {
+    /// The first recorded position for a set entry, if one was captured.
+    pub fn site_for(&self, entry: &str) -> Option<&OpcodeSite> {
+        self.sites.iter().find(|site| site.entry == entry)
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -108,17 +139,22 @@ pub fn scan(
     if count >= 4 && magic == *b"PK\x03\x04" {
         return Ok(match scan_zip(path, file, identity, media) {
             Ok(results) => results,
-            Err(error) => vec![LayerScanResult {
-                layer_digest: identity.to_owned(),
-                media_type: media.to_owned(),
-                check_type: CheckType::PickleStructure,
-                status: ScanStatus::Fail,
-                finding_class: FindingClass::Structural,
-                confidence: Confidence::High,
-                detail: Some(format!("Malformed or unsafe pickle ZIP container: {error}")),
-                matches: vec![format!("[LF-PICKLE-MALFORMED] {error}")],
-                duration_ms: 0,
-            }],
+            Err(error) => vec![FindingBuilder::new(
+                "LF-PICKLE-MALFORMED",
+                CheckType::PickleStructure,
+                ScanStatus::Fail,
+            )
+            .class(FindingClass::Structural)
+            .confidence(Confidence::High)
+            .digest(identity)
+            .media_type(media)
+            .subject(EvidenceSubject::identity(identity, media).with_sha256(Some(identity.to_owned())))
+            .detail(format!("Malformed or unsafe pickle ZIP container: {error}"))
+            .match_note(error.to_string())
+            .evidence_unavailable(
+                "the ZIP container could not be opened, so no member or byte offset could be attributed",
+            )
+            .finish()],
         });
     }
     Ok(vec![scan_stream(
@@ -146,22 +182,61 @@ fn scan_stream<R: Read + Seek>(
     let label = member
         .map(|name| format!("pickle member '{name}'"))
         .unwrap_or_else(|| "pickle stream".to_owned());
+    let subject = pickle_subject(identity, media, member);
     match analyze_reader(reader, len) {
-        Ok(analysis) => finding_from_analysis(analysis, identity, media, &label, started),
-        Err(error) => LayerScanResult {
-            layer_digest: identity.to_owned(),
-            media_type: media.to_owned(),
-            check_type: CheckType::PickleStructure,
-            status: ScanStatus::Fail,
-            finding_class: FindingClass::Structural,
-            confidence: Confidence::High,
-            detail: Some(format!("Malformed or unsafe {label}: {error}")),
-            matches: vec![format!(
-                "[LF-PICKLE-MALFORMED] bounded pickle opcode parsing failed for {label}"
-            )],
-            duration_ms: elapsed(started),
-        },
+        Ok(analysis) => finding_from_analysis(analysis, identity, media, &label, subject, started),
+        Err(error) => {
+            let offset = pickle_error_offset(&error);
+            let mut builder = FindingBuilder::new(
+                "LF-PICKLE-MALFORMED",
+                CheckType::PickleStructure,
+                ScanStatus::Fail,
+            )
+            .class(FindingClass::Structural)
+            .confidence(Confidence::High)
+            .digest(identity)
+            .media_type(media)
+            .subject(subject.clone())
+            .detail(format!("Malformed or unsafe {label}: {error}"))
+            .match_note(format!("bounded pickle opcode parsing failed for {label}"))
+            .started(started);
+            builder = match offset {
+                Some(offset) => builder.evidence(byte_range_evidence(
+                    subject,
+                    offset,
+                    1,
+                    "Parsing failed at this byte offset in the opcode stream",
+                )),
+                None => builder.evidence_unavailable(
+                    "the parser rejected the stream before a specific byte offset could be attributed",
+                ),
+            };
+            builder.finish()
+        }
     }
+}
+
+/// Best-effort extraction of the byte offset embedded in a parser error
+/// message, so `LF-PICKLE-MALFORMED` can report where parsing stopped without
+/// plumbing a typed offset through every one of the disassembler's `bail!`s.
+fn pickle_error_offset(error: &anyhow::Error) -> Option<u64> {
+    let text = error.to_string();
+    let marker = "at offset ";
+    let start = text.find(marker)? + marker.len();
+    let digits: String = text[start..]
+        .chars()
+        .take_while(|c| c.is_ascii_digit())
+        .collect();
+    digits.parse().ok()
+}
+
+fn pickle_subject(identity: &str, media: &str, member: Option<&str>) -> EvidenceSubject {
+    let mut subject =
+        EvidenceSubject::identity(identity, media).with_sha256(Some(identity.to_owned()));
+    if let Some(name) = member {
+        subject.package_relative_path = Some(name.to_owned());
+    }
+    subject
 }
 
 fn finding_from_analysis(
@@ -169,74 +244,111 @@ fn finding_from_analysis(
     identity: &str,
     media: &str,
     label: &str,
+    subject: EvidenceSubject,
     started: Instant,
 ) -> LayerScanResult {
     let globals = analysis.globals.iter().cloned().collect::<Vec<_>>();
     let dangerous = analysis.dangerous.iter().cloned().collect::<Vec<_>>();
     let unknown = analysis.unknown_globals.iter().cloned().collect::<Vec<_>>();
     if !dangerous.is_empty() {
-        return LayerScanResult {
-            layer_digest: identity.to_owned(),
-            media_type: media.to_owned(),
-            check_type: CheckType::PickleStructure,
-            status: ScanStatus::Fail,
-            finding_class: FindingClass::ContentIndicator,
-            confidence: Confidence::High,
-            detail: Some(format!(
-                "{label} references dangerous or non-allowlisted callable(s): {}",
-                dangerous.join(", ")
-            )),
-            matches: dangerous
-                .iter()
-                .map(|value| format!("[LF-PICKLE-DANGEROUS-GLOBAL] {value}"))
-                .collect(),
-            duration_ms: elapsed(started),
-        };
+        let mut builder = FindingBuilder::new(
+            "LF-PICKLE-DANGEROUS-GLOBAL",
+            CheckType::PickleStructure,
+            ScanStatus::Fail,
+        )
+        .class(FindingClass::ContentIndicator)
+        .confidence(Confidence::High)
+        .digest(identity)
+        .media_type(media)
+        .subject(subject.clone())
+        .detail(format!(
+            "{label} references dangerous or non-allowlisted callable(s): {}",
+            dangerous.join(", ")
+        ))
+        .match_note(dangerous.first().cloned().unwrap_or_default())
+        .started(started);
+        for value in &dangerous {
+            builder = builder.evidence(opcode_evidence(&subject, &analysis, value));
+        }
+        return builder.finish();
     }
     if !unknown.is_empty() {
-        return LayerScanResult {
-            layer_digest: identity.to_owned(),
-            media_type: media.to_owned(),
-            check_type: CheckType::PickleStructure,
-            status: ScanStatus::Warn,
-            finding_class: FindingClass::ContentIndicator,
-            confidence: Confidence::High,
-            detail: Some(format!(
-                "{label} contains unrecognized pickle global(s); review before trusting: {}",
-                unknown.join(", ")
-            )),
-            matches: unknown
-                .iter()
-                .map(|value| format!("[LF-PICKLE-UNKNOWN-GLOBAL] {value}"))
-                .collect(),
-            duration_ms: elapsed(started),
-        };
+        let mut builder = FindingBuilder::new(
+            "LF-PICKLE-UNKNOWN-GLOBAL",
+            CheckType::PickleStructure,
+            ScanStatus::Warn,
+        )
+        .class(FindingClass::ContentIndicator)
+        .confidence(Confidence::High)
+        .digest(identity)
+        .media_type(media)
+        .subject(subject.clone())
+        .detail(format!(
+            "{label} contains unrecognized pickle global(s); review before trusting: {}",
+            unknown.join(", ")
+        ))
+        .match_note(unknown.first().cloned().unwrap_or_default())
+        .started(started);
+        for value in &unknown {
+            builder = builder.evidence(opcode_evidence(&subject, &analysis, value));
+        }
+        return builder.finish();
     }
-    LayerScanResult {
-        layer_digest: identity.to_owned(),
-        media_type: media.to_owned(),
-        check_type: CheckType::PickleStructure,
-        status: ScanStatus::Pass,
-        finding_class: FindingClass::Structural,
-        confidence: Confidence::High,
-        detail: Some(format!(
-            "{label} opcode stream validated; {} opcode(s), allowlisted globals: {}",
-            analysis.opcode_count,
-            if globals.is_empty() {
-                "none".to_owned()
-            } else {
-                globals.join(", ")
-            }
-        )),
-        matches: vec![format!(
-            "[LF-PICKLE-SAFE-GLOBALS] {}",
-            if globals.is_empty() {
-                "no GLOBAL/STACK_GLOBAL references".to_owned()
-            } else {
-                globals.join(", ")
-            }
-        )],
-        duration_ms: elapsed(started),
+    FindingBuilder::new(
+        "LF-PICKLE-SAFE-GLOBALS",
+        CheckType::PickleStructure,
+        ScanStatus::Pass,
+    )
+    .class(FindingClass::Structural)
+    .confidence(Confidence::High)
+    .digest(identity)
+    .media_type(media)
+    .subject(subject)
+    .detail(format!(
+        "{label} opcode stream validated; {} opcode(s), allowlisted globals: {}",
+        analysis.opcode_count,
+        if globals.is_empty() {
+            "none".to_owned()
+        } else {
+            globals.join(", ")
+        }
+    ))
+    .match_note(if globals.is_empty() {
+        "no GLOBAL/STACK_GLOBAL references".to_owned()
+    } else {
+        globals.join(", ")
+    })
+    .evidence_not_applicable()
+    .started(started)
+    .finish()
+}
+
+/// Build the static-opcode evidence record for one resolved global/callable.
+///
+/// Falls back to an explicit unavailable reason if a position was not
+/// captured for the entry (e.g. the bounded site table was already full for
+/// this stream) rather than fabricating one.
+fn opcode_evidence(
+    subject: &EvidenceSubject,
+    analysis: &PickleAnalysis,
+    entry: &str,
+) -> crate::finding_evidence::FindingEvidence {
+    match analysis.site_for(entry) {
+        Some(site) => serialization_opcode(
+            subject.clone(),
+            site.opcode_index,
+            site.byte_offset,
+            serde_json::json!({
+                "global": entry,
+                "opcode": site.opcode,
+            }),
+        ),
+        None => crate::finding_evidence::FindingEvidence::new(
+            crate::finding_evidence::EvidenceKind::SerializationOpcode,
+            subject.clone(),
+            "Static opcode analysis resolved this reference, but its exact position was not retained",
+        )
+        .structured(serde_json::json!({ "global": entry })),
     }
 }
 
@@ -295,23 +407,32 @@ fn scan_zip(path: &Path, file: &File, identity: &str, media: &str) -> Result<Vec
         ));
     }
     if results.is_empty() {
-        results.push(LayerScanResult {
-            layer_digest: identity.to_owned(),
-            media_type: media.to_owned(),
-            check_type: CheckType::PickleStructure,
-            status: ScanStatus::Warn,
-            finding_class: FindingClass::Compatibility,
-            confidence: Confidence::High,
-            detail: Some(format!(
+        results.push(
+            FindingBuilder::new(
+                "LF-PICKLE-OPAQUE-CONTAINER",
+                CheckType::PickleStructure,
+                ScanStatus::Warn,
+            )
+            .class(FindingClass::Compatibility)
+            .confidence(Confidence::High)
+            .digest(identity)
+            .media_type(media)
+            .subject(
+                EvidenceSubject::identity(identity, media).with_sha256(Some(identity.to_owned())),
+            )
+            .detail(format!(
                 "PyTorch-style ZIP '{}' contains no .pkl member that Layerfault can opcode-analyze",
                 path.display()
-            )),
-            matches: vec![
-                "[LF-PICKLE-OPAQUE-CONTAINER] ZIP serialization container contains no analyzable pickle member"
-                    .to_owned(),
-            ],
-            duration_ms: elapsed(started),
-        });
+            ))
+            .match_note(
+                "ZIP serialization container contains no analyzable pickle member".to_owned(),
+            )
+            .evidence_unavailable(
+                "opacity is the finding: no .pkl member exists to attribute evidence to",
+            )
+            .started(started)
+            .finish(),
+        );
     }
     Ok(results)
 }
@@ -332,6 +453,23 @@ fn validate_zip_member_name(name: &str) -> Result<()> {
     Ok(())
 }
 
+/// Human-readable mnemonic for an opcode byte, used only as evidence labelling.
+fn opcode_mnemonic(opcode: u8) -> &'static str {
+    match opcode {
+        b'c' => "GLOBAL",
+        b'i' => "INST",
+        0x93 => "STACK_GLOBAL",
+        b'R' => "REDUCE",
+        b'b' => "BUILD",
+        b'o' => "OBJ",
+        0x81 => "NEWOBJ",
+        0x92 => "NEWOBJ_EX",
+        0x80 => "PROTO",
+        0x95 => "FRAME",
+        _ => "OPCODE",
+    }
+}
+
 fn analyze_reader<R: Read + Seek>(mut reader: R, len: u64) -> Result<PickleAnalysis> {
     if len == 0 {
         bail!("empty pickle stream");
@@ -345,7 +483,12 @@ fn analyze_reader<R: Read + Seek>(mut reader: R, len: u64) -> Result<PickleAnaly
         if state.analysis.opcode_count > MAX_OPCODES {
             bail!("pickle opcode count exceeds safety cap");
         }
+        // Record where this opcode starts before consuming its byte, so any
+        // dangerous/unknown entry it produces can be attributed to this exact
+        // position rather than wherever the cursor ends up after its operands.
+        state.current_offset = pos;
         let opcode = read_u8(&mut reader, &mut pos, len)?;
+        state.current_opcode = opcode_mnemonic(opcode);
         match opcode {
             b'I' | b'L' | b'F' => {
                 skip_line(&mut reader, &mut pos, len, MAX_TRACKED_STRING_BYTES)?;
@@ -490,10 +633,7 @@ fn analyze_reader<R: Read + Seek>(mut reader: R, len: u64) -> Result<PickleAnaly
                 let global = format!("{}.{}", module.trim(), name.trim());
                 state.record_global(&global);
                 if opcode == b'i' {
-                    state
-                        .analysis
-                        .dangerous
-                        .insert(format!("{global} via legacy INST opcode"));
+                    state.mark_dangerous(format!("{global} via legacy INST opcode"));
                     state.pop_to_mark(None)?;
                 }
                 state.push(StackValue::Global(global))?;
@@ -515,17 +655,11 @@ fn analyze_reader<R: Read + Seek>(mut reader: R, len: u64) -> Result<PickleAnaly
                 let name = callable_name(&callable);
                 if let Some(name) = name.as_deref() {
                     if !is_allowlisted(name) {
-                        state
-                            .analysis
-                            .dangerous
-                            .insert(format!("{name} used by REDUCE"));
+                        state.mark_dangerous(format!("{name} used by REDUCE"));
                     }
                     state.push(StackValue::Constructed(name.to_owned()))?;
                 } else {
-                    state
-                        .analysis
-                        .dangerous
-                        .insert("unresolved callable used by REDUCE".to_owned());
+                    state.mark_dangerous("unresolved callable used by REDUCE".to_owned());
                     state.push(StackValue::Other)?;
                 }
             }
@@ -534,10 +668,7 @@ fn analyze_reader<R: Read + Seek>(mut reader: R, len: u64) -> Result<PickleAnaly
                 let instance = state.pop();
                 if let Some(name) = callable_name(&instance) {
                     if !is_allowlisted(&name) {
-                        state
-                            .analysis
-                            .dangerous
-                            .insert(format!("{name} used with BUILD"));
+                        state.mark_dangerous(format!("{name} used with BUILD"));
                     }
                     state.push(StackValue::Constructed(name.to_owned()))?;
                 } else {
@@ -549,7 +680,7 @@ fn analyze_reader<R: Read + Seek>(mut reader: R, len: u64) -> Result<PickleAnaly
                 // not expected in a plain tensor checkpoint and is an execution primitive.
                 let values = state.take_since_mark()?;
                 let class = values.first().and_then(callable_name);
-                state.analysis.dangerous.insert(match class {
+                state.mark_dangerous(match class {
                     Some(name) => format!("{name} via legacy OBJ opcode"),
                     None => "legacy OBJ class-instantiation opcode".to_owned(),
                 });
@@ -618,6 +749,10 @@ struct ParserState {
     memo: BTreeMap<usize, StackValue>,
     next_memo: usize,
     analysis: PickleAnalysis,
+    /// Byte offset of the opcode currently being interpreted, so any entry it
+    /// produces can be attributed to an exact position.
+    current_offset: u64,
+    current_opcode: &'static str,
 }
 
 impl ParserState {
@@ -673,16 +808,42 @@ impl ParserState {
         let value = self.memo.get(&index).cloned().unwrap_or(StackValue::Other);
         self.push(value)
     }
+    /// Record where the current opcode produced `entry`.
+    ///
+    /// Bounded and first-write-wins so a hostile stream repeating one construct
+    /// millions of times cannot grow the evidence set.
+    fn note_site(&mut self, entry: &str) {
+        if self.analysis.sites.len() >= MAX_OPCODE_SITES {
+            return;
+        }
+        if self.analysis.sites.iter().any(|site| site.entry == entry) {
+            return;
+        }
+        self.analysis.sites.push(OpcodeSite {
+            entry: entry.to_owned(),
+            opcode: self.current_opcode,
+            opcode_index: self.analysis.opcode_count as u64,
+            byte_offset: self.current_offset,
+        });
+    }
+
+    /// Insert a dangerous entry and record where it was resolved.
+    fn mark_dangerous(&mut self, entry: String) {
+        self.note_site(&entry);
+        self.analysis.dangerous.insert(entry);
+    }
+
     fn record_global(&mut self, value: &str) {
         self.analysis.globals.insert(value.to_owned());
         if is_explicit_danger(value) {
-            self.analysis.dangerous.insert(value.to_owned());
+            self.mark_dangerous(value.to_owned());
         } else if !is_allowlisted(value) {
+            self.note_site(value);
             self.analysis.unknown_globals.insert(value.to_owned());
         }
     }
     fn record_extension(&mut self, code: u32) {
-        self.analysis.dangerous.insert(format!(
+        self.mark_dangerous(format!(
             "unresolved pickle extension code {code}; EXT registry resolution is environment-dependent"
         ));
     }
@@ -690,14 +851,12 @@ impl ParserState {
         match name {
             Some(name) if is_allowlisted(name) => {}
             Some(name) => {
-                self.analysis.dangerous.insert(format!(
+                self.mark_dangerous(format!(
                     "non-allowlisted constructor {name} used by {opcode}"
                 ));
             }
             None => {
-                self.analysis
-                    .dangerous
-                    .insert(format!("unresolved callable used by {opcode}"));
+                self.mark_dangerous(format!("unresolved callable used by {opcode}"));
             }
         }
     }
@@ -849,9 +1008,6 @@ fn unquote_protocol0(mut value: String) -> String {
     }
     value
 }
-fn elapsed(started: Instant) -> u64 {
-    u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX)
-}
 
 #[cfg(test)]
 mod tests {
@@ -879,6 +1035,80 @@ mod tests {
             .iter()
             .any(|value| value.contains("os.system")));
         Ok(())
+    }
+
+    #[test]
+    fn dangerous_global_records_opcode_and_offset() -> Result<()> {
+        // GLOBAL at offset 0, REDUCE consuming it a few bytes later.
+        let bytes = b"cos\nsystem\n)R.";
+        let analysis = analyze_bytes(bytes)?;
+        let entry = analysis
+            .dangerous
+            .iter()
+            .find(|value| value.contains("os.system"))
+            .expect("dangerous entry");
+        let site = analysis.site_for(entry).expect("recorded site");
+        assert_eq!(site.byte_offset, 0, "GLOBAL opcode starts at offset 0");
+        assert_eq!(site.opcode_index, 1);
+        assert_eq!(site.opcode, "GLOBAL");
+        Ok(())
+    }
+
+    #[test]
+    fn finding_from_analysis_attaches_serialization_opcode_evidence() {
+        let bytes = b"cos\nsystem\n)R.";
+        let subject = EvidenceSubject::identity("sha256:abcd", "application/octet-stream")
+            .with_sha256(Some("sha256:abcd".to_owned()));
+        let analysis = analyze_bytes(bytes).expect("analysis");
+        let finding = finding_from_analysis(
+            analysis,
+            "sha256:abcd",
+            "application/octet-stream",
+            "pickle stream",
+            subject,
+            Instant::now(),
+        );
+        assert_eq!(
+            crate::policy::rule_id(&finding),
+            "LF-PICKLE-DANGEROUS-GLOBAL"
+        );
+        let record = finding.evidence.first().expect("evidence record");
+        assert_eq!(
+            record.kind,
+            crate::finding_evidence::EvidenceKind::SerializationOpcode
+        );
+        match &record.location {
+            Some(crate::finding_evidence::EvidenceLocation::Serialization {
+                opcode_index,
+                byte_offset,
+            }) => {
+                assert_eq!(*opcode_index, 1);
+                assert_eq!(*byte_offset, 0);
+            }
+            other => panic!("expected serialization location, got {other:?}"),
+        }
+        assert_eq!(
+            finding.evidence_state,
+            Some(crate::finding_evidence::EvidenceState::Available)
+        );
+    }
+
+    #[test]
+    fn malformed_stream_reports_available_byte_offset() {
+        let bytes = b"\x80\x04cfoo\nbar";
+        let finding = scan_stream(
+            std::io::Cursor::new(bytes.to_vec()),
+            bytes.len() as u64,
+            "sha256:abcd",
+            "application/octet-stream",
+            None,
+        );
+        assert_eq!(crate::policy::rule_id(&finding), "LF-PICKLE-MALFORMED");
+        assert!(matches!(
+            finding.evidence_state,
+            Some(crate::finding_evidence::EvidenceState::Available)
+                | Some(crate::finding_evidence::EvidenceState::Unavailable)
+        ));
     }
 
     #[test]

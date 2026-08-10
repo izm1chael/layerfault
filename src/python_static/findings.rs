@@ -1,9 +1,11 @@
 use super::calls::{CallSite, ExecutionContext, PythonCapabilityCategory};
 use super::parser::PythonSyntaxState;
 use super::reachability::ReachabilityState;
+use crate::finding_evidence::{source_excerpt, EvidenceSubject, FindingBuilder};
 use crate::scanner::{CheckType, Confidence, FindingClass, LayerScanResult, ScanStatus};
 use std::time::Instant;
 
+#[allow(clippy::too_many_arguments)]
 fn finding(
     layer_digest: &str,
     check_type: CheckType,
@@ -12,18 +14,23 @@ fn finding(
     confidence: Confidence,
     rule_id: &str,
     detail: String,
+    subject: EvidenceSubject,
+    evidence: Option<crate::finding_evidence::FindingEvidence>,
 ) -> LayerScanResult {
-    LayerScanResult {
-        layer_digest: layer_digest.to_owned(),
-        media_type: "application/vnd.layerfault.package-member".to_owned(),
-        check_type,
-        status,
-        finding_class,
-        confidence,
-        detail: Some(detail),
-        matches: vec![rule_id.to_owned()],
-        duration_ms: 0,
-    }
+    let mut builder = FindingBuilder::new(rule_id, check_type, status)
+        .class(finding_class)
+        .confidence(confidence)
+        .digest(layer_digest)
+        .media_type("application/vnd.layerfault.package-member")
+        .subject(subject)
+        .detail(detail);
+    builder = match evidence {
+        Some(record) => builder.evidence(record),
+        None => builder.evidence_unavailable(
+            "structural/parser-limit findings describe coverage rather than a specific call site",
+        ),
+    };
+    builder.finish()
 }
 
 pub fn convert_analysis_to_findings(
@@ -36,6 +43,7 @@ pub fn convert_analysis_to_findings(
     started: Instant,
 ) -> Vec<LayerScanResult> {
     let mut out = Vec::new();
+    let subject = EvidenceSubject::member(relative_path).with_sha256(Some(digest.to_owned()));
 
     if let PythonSyntaxState::Invalid {
         error,
@@ -58,6 +66,8 @@ pub fn convert_analysis_to_findings(
                 "Python static analysis could not parse AST for '{}'{loc}: {error}. Streaming textual scanner was performed as fallback.",
                 relative_path
             ),
+            subject.clone(),
+            None,
         ));
     } else if let PythonSyntaxState::ExceededLimits { reason } = syntax_state {
         out.push(finding(
@@ -71,6 +81,8 @@ pub fn convert_analysis_to_findings(
                 "Python static analysis bounds exceeded for '{}': {reason}. Streaming textual scanner was performed as fallback.",
                 relative_path
             ),
+            subject.clone(),
+            None,
         ));
     }
 
@@ -173,6 +185,30 @@ pub fn convert_analysis_to_findings(
             evidence_str.push_str(&format!(" Command evidence: {}.", lit));
         }
 
+        let line = call.line.unwrap_or(0) as u64;
+        let call_evidence = if call.line.is_some() {
+            let mut structured = serde_json::json!({
+                "call_target": target_display,
+                "execution_context": ctx_desc,
+                "reachability": reachability.to_string(),
+            });
+            if let Some(exe) = call.executable_name.as_deref() {
+                structured["executable"] = serde_json::Value::String(exe.to_owned());
+            }
+            if call.shell_mode {
+                structured["shell_mode"] = serde_json::Value::Bool(true);
+            }
+            if let Some(lit) = call.literal_arg_evidence.as_deref() {
+                structured["command_evidence"] = serde_json::Value::String(lit.to_owned());
+            }
+            Some(
+                source_excerpt(subject.clone(), line, line, target_display, target_display)
+                    .structured(structured),
+            )
+        } else {
+            None
+        };
+
         // Emit legacy rule for backward compatibility
         let mut f_legacy = finding(
             digest,
@@ -182,6 +218,8 @@ pub fn convert_analysis_to_findings(
             confidence,
             legacy_rule,
             evidence_str.clone(),
+            subject.clone(),
+            call_evidence.clone(),
         );
         f_legacy.duration_ms = crate::scanner::duration_ms(started);
         out.push(f_legacy);
@@ -196,6 +234,8 @@ pub fn convert_analysis_to_findings(
                 confidence,
                 semantic_rule,
                 evidence_str.clone(),
+                subject.clone(),
+                call_evidence.clone(),
             );
             f_semantic.duration_ms = crate::scanner::duration_ms(started);
             out.push(f_semantic);
@@ -217,6 +257,8 @@ pub fn convert_analysis_to_findings(
                     "Hugging Face auto_map configuration routes model loading through custom module '{}'{line_info} containing capability '{}'.",
                     relative_path, target_display
                 ),
+                subject.clone(),
+                call_evidence,
             );
             f_corr.duration_ms = crate::scanner::duration_ms(started);
             out.push(f_corr);

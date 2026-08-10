@@ -1,3 +1,6 @@
+use crate::finding_evidence::{
+    structural_invariant, tensor_metadata, EvidenceSubject, FindingBuilder,
+};
 use crate::scanner::{CheckType, Confidence, FindingClass, LayerScanResult, ScanStatus};
 use anyhow::{anyhow, bail, Context, Result};
 use serde::de::{MapAccess, Visitor};
@@ -22,6 +25,10 @@ pub struct SafetensorsSummary {
     pub header_bytes: u64,
     pub metadata_entries: usize,
     pub unknown_dtypes: Vec<String>,
+    /// `(tensor_name, dtype)` for every tensor with an unvalidated dtype, so
+    /// findings can name the exact tensor rather than only the dtype.
+    #[serde(default)]
+    pub unknown_dtype_tensors: Vec<(String, String)>,
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
@@ -145,56 +152,105 @@ pub fn scan_file(
     media_type: &str,
 ) -> Result<LayerScanResult> {
     let started = Instant::now();
+    let subject =
+        EvidenceSubject::identity(digest, media_type).with_sha256(Some(digest.to_owned()));
     match validate_file(file, file_len) {
         Ok(summary) => {
-            let mut matches = Vec::new();
-            let (status, class, detail) = if summary.unknown_dtypes.is_empty() {
-                (
+            if summary.unknown_dtypes.is_empty() {
+                Ok(FindingBuilder::new(
+                    "LF-SAFE-STRUCT-VALID",
+                    CheckType::SafetensorsStructure,
                     ScanStatus::Pass,
-                    FindingClass::Structural,
-                    format!(
-                        "Safetensors structure validated: {} tensor(s), {} data bytes, {} header bytes",
-                        summary.tensor_count, summary.data_bytes, summary.header_bytes
-                    ),
                 )
+                .class(FindingClass::Structural)
+                .confidence(Confidence::High)
+                .digest(digest)
+                .media_type(media_type)
+                .subject(subject)
+                .detail(format!(
+                    "Safetensors structure validated: {} tensor(s), {} data bytes, {} header bytes",
+                    summary.tensor_count, summary.data_bytes, summary.header_bytes
+                ))
+                .evidence_not_applicable()
+                .duration_ms(elapsed(started))
+                .finish())
             } else {
-                matches.push(format!(
-                    "[LF-SAFE-DTYPE] Exact tensor-byte validation skipped for unknown dtype(s): {}",
-                    summary.unknown_dtypes.join(", ")
-                ));
-                (
+                let mut builder = FindingBuilder::new(
+                    "LF-SAFE-DTYPE",
+                    CheckType::SafetensorsStructure,
                     ScanStatus::Warn,
-                    FindingClass::Compatibility,
-                    format!(
-                        "Safetensors structure validated with {} unknown dtype(s)",
-                        summary.unknown_dtypes.len()
-                    ),
                 )
-            };
-            Ok(LayerScanResult {
-                layer_digest: digest.to_owned(),
-                media_type: media_type.to_owned(),
-                check_type: CheckType::SafetensorsStructure,
-                status,
-                finding_class: class,
-                confidence: Confidence::High,
-                detail: Some(detail),
-                matches,
-                duration_ms: elapsed(started),
-            })
+                .class(FindingClass::Compatibility)
+                .confidence(Confidence::High)
+                .digest(digest)
+                .media_type(media_type)
+                .subject(subject.clone())
+                .detail(format!(
+                    "Safetensors structure validated with {} unknown dtype(s): {}",
+                    summary.unknown_dtypes.len(),
+                    summary.unknown_dtypes.join(", ")
+                ))
+                .duration_ms(elapsed(started));
+                for (tensor, dtype) in &summary.unknown_dtype_tensors {
+                    builder = builder.evidence(tensor_metadata(
+                        subject.clone(),
+                        tensor,
+                        serde_json::json!({
+                            "dtype": dtype,
+                            "condition": "dtype has no exact byte-size validation in this build",
+                        }),
+                    ));
+                }
+                Ok(builder.finish())
+            }
         }
-        Err(error) => Ok(LayerScanResult {
-            layer_digest: digest.to_owned(),
-            media_type: media_type.to_owned(),
-            check_type: CheckType::SafetensorsStructure,
-            status: ScanStatus::Fail,
-            finding_class: FindingClass::Structural,
-            confidence: Confidence::High,
-            detail: Some(format!("Invalid or unsafe Safetensors structure: {error}")),
-            matches: vec!["[LF-SAFE-STRUCT] Safetensors structural validation failed".to_owned()],
-            duration_ms: elapsed(started),
-        }),
+        Err(error) => {
+            let mut builder = FindingBuilder::new(
+                "LF-SAFE-STRUCT",
+                CheckType::SafetensorsStructure,
+                ScanStatus::Fail,
+            )
+            .class(FindingClass::Structural)
+            .confidence(Confidence::High)
+            .digest(digest)
+            .media_type(media_type)
+            .subject(subject.clone())
+            .detail(format!("Invalid or unsafe Safetensors structure: {error}"))
+            .match_note("Safetensors structural validation failed".to_owned())
+            .duration_ms(elapsed(started));
+            builder = match safetensors_structural_evidence(&subject, &error.to_string()) {
+                Some(evidence) => builder.evidence(evidence),
+                None => builder.evidence_unavailable(
+                    "the parser identified a structural failure but this build could not \
+                     extract a precise tensor/offset attribution from it",
+                ),
+            };
+            Ok(builder.finish())
+        }
     }
+}
+
+/// Extract structural evidence from `inventory_file`'s own tensor-range error
+/// text. As with the GGUF equivalent, these shapes are self-authored by this
+/// parser, not attacker content, so recovering the tensor/offset facts already
+/// computed (but only placed in a `bail!` message) is safe.
+fn safetensors_structural_evidence(
+    subject: &EvidenceSubject,
+    error_text: &str,
+) -> Option<crate::finding_evidence::FindingEvidence> {
+    let tensor = error_text
+        .split_once("tensor '")
+        .and_then(|(_, rest)| rest.split_once('\''))
+        .map(|(name, _)| name.to_owned())?;
+    let condition = error_text
+        .split_once(&format!("tensor '{tensor}' "))
+        .map(|(_, rest)| rest.to_owned())
+        .unwrap_or_else(|| error_text.to_owned());
+    Some(structural_invariant(
+        subject.clone(),
+        &condition,
+        serde_json::json!({ "tensor": tensor, "condition": condition }),
+    ))
 }
 
 pub fn scan_index(
@@ -205,29 +261,46 @@ pub fn scan_index(
     media_type: &str,
 ) -> Result<LayerScanResult> {
     let started = Instant::now();
+    let subject = EvidenceSubject::member(&path.display().to_string())
+        .with_sha256(Some(digest.to_owned()))
+        .with_media_type(media_type);
     match validate_index(path, file, file_len) {
-        Ok((tensors, shards)) => Ok(LayerScanResult {
-            layer_digest: digest.to_owned(),
-            media_type: media_type.to_owned(),
-            check_type: CheckType::SafetensorsStructure,
-            status: ScanStatus::Pass,
-            finding_class: FindingClass::Structural,
-            confidence: Confidence::High,
-            detail: Some(format!("Safetensors sharded index validated: {tensors} tensor mapping(s), {shards} shard(s)")),
-            matches: vec!["[LF-SAFE-INDEX] sharded Safetensors index validated".to_owned()],
-            duration_ms: elapsed(started),
-        }),
-        Err(error) => Ok(LayerScanResult {
-            layer_digest: digest.to_owned(),
-            media_type: media_type.to_owned(),
-            check_type: CheckType::SafetensorsStructure,
-            status: ScanStatus::Fail,
-            finding_class: FindingClass::Structural,
-            confidence: Confidence::High,
-            detail: Some(format!("Invalid or unsafe Safetensors sharded index: {error}")),
-            matches: vec!["[LF-SAFE-INDEX-INVALID] Safetensors index validation failed".to_owned()],
-            duration_ms: elapsed(started),
-        }),
+        Ok((tensors, shards)) => Ok(FindingBuilder::new(
+            "LF-SAFE-INDEX",
+            CheckType::SafetensorsStructure,
+            ScanStatus::Pass,
+        )
+        .class(FindingClass::Structural)
+        .confidence(Confidence::High)
+        .digest(digest)
+        .media_type(media_type)
+        .subject(subject)
+        .detail(format!(
+            "Safetensors sharded index validated: {tensors} tensor mapping(s), {shards} shard(s)"
+        ))
+        .evidence_not_applicable()
+        .duration_ms(elapsed(started))
+        .finish()),
+        Err(error) => Ok(FindingBuilder::new(
+            "LF-SAFE-INDEX-INVALID",
+            CheckType::SafetensorsStructure,
+            ScanStatus::Fail,
+        )
+        .class(FindingClass::Structural)
+        .confidence(Confidence::High)
+        .digest(digest)
+        .media_type(media_type)
+        .subject(subject.clone())
+        .detail(format!("Invalid or unsafe Safetensors sharded index: {error}"))
+        .match_note("Safetensors index validation failed".to_owned())
+        .evidence(structural_invariant(
+            subject,
+            "sharded index reference is malformed, unsafe, or points to a shard that \
+             failed structural validation",
+            serde_json::json!({ "index_path": path.display().to_string(), "error": error.to_string() }),
+        ))
+        .duration_ms(elapsed(started))
+        .finish()),
     }
 }
 
@@ -348,6 +421,7 @@ pub fn inventory_file(file: &File, file_len: u64) -> Result<SafetensorsInventory
     let mut tensors = Vec::<SafetensorsTensor>::new();
     let mut metadata = BTreeMap::<String, String>::new();
     let mut unknown_dtypes = BTreeSet::new();
+    let mut unknown_dtype_tensors = Vec::new();
     for (name, value) in entries {
         if name == "__metadata__" {
             let object = value
@@ -383,6 +457,7 @@ pub fn inventory_file(file: &File, file_len: u64) -> Result<SafetensorsInventory
             }
         } else {
             unknown_dtypes.insert(spec.dtype.clone());
+            unknown_dtype_tensors.push((name.clone(), spec.dtype.clone()));
         }
         tensors.push(SafetensorsTensor {
             name,
@@ -426,6 +501,7 @@ pub fn inventory_file(file: &File, file_len: u64) -> Result<SafetensorsInventory
         header_bytes: header_len,
         metadata_entries: metadata.len(),
         unknown_dtypes: unknown_dtypes.into_iter().collect(),
+        unknown_dtype_tensors,
     };
     Ok(SafetensorsInventory {
         summary,

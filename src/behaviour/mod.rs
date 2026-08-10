@@ -1009,6 +1009,7 @@ mod tests {
                 risk: Risk::None,
                 rule_ids: Vec::new(),
                 indicators: Vec::new(),
+                evidence: Vec::new(),
             },
         }
     }

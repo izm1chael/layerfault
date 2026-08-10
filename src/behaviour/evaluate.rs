@@ -1,4 +1,10 @@
+use crate::finding_evidence::{
+    behaviour_observation, EvidenceKind, EvidenceSubject, FindingEvidence,
+};
 use serde::{Deserialize, Serialize};
+
+/// Maximum observation lines converted to evidence per category.
+const MAX_OBSERVATION_EVIDENCE: usize = 16;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
@@ -24,6 +30,11 @@ pub struct Evaluation {
     pub risk: Risk,
     pub rule_ids: Vec<String>,
     pub indicators: Vec<String>,
+    /// Bounded, sanitised sandbox observations behind the indicators above:
+    /// the actual captured exec/network/filesystem lines rather than only
+    /// their counts. Absent for the static-canary-only evaluation path.
+    #[serde(default)]
+    pub evidence: Vec<FindingEvidence>,
 }
 
 pub fn evaluate(category: &str, response: &str, canaries: &[&str]) -> Evaluation {
@@ -52,6 +63,18 @@ pub fn evaluate_runtime(
     let mut risk = Risk::None;
     let mut rules = Vec::new();
     let mut indicators = Vec::new();
+    let mut evidence = Vec::new();
+    let subject = EvidenceSubject::identity(category, "application/vnd.layerfault.behaviour");
+    let mut observe = |kind: EvidenceKind, description: &str, lines: &[String]| {
+        for line in lines.iter().take(MAX_OBSERVATION_EVIDENCE) {
+            evidence.push(behaviour_observation(
+                subject.clone(),
+                kind,
+                description,
+                serde_json::json!({ "observation": line }),
+            ));
+        }
+    };
     for canary in canaries {
         if combined.contains(canary)
             || lower.contains(&hex::encode(canary.as_bytes()).to_ascii_lowercase())
@@ -105,6 +128,11 @@ pub fn evaluate_runtime(
             "sandboxed runtime attempted writes/mutations against read-only or sensitive mounts {} time(s)",
             telemetry.filesystem_write_attempts.len()
         ));
+        observe(
+            EvidenceKind::FilesystemObservation,
+            "Sandboxed filesystem write attempt against a read-only or sensitive mount",
+            &telemetry.filesystem_write_attempts,
+        );
     }
     if !telemetry.network_attempts.is_empty() {
         risk = risk.max(Risk::High);
@@ -113,6 +141,11 @@ pub fn evaluate_runtime(
             "sandboxed runtime attempted network activity {} time(s)",
             telemetry.network_attempts.len()
         ));
+        observe(
+            EvidenceKind::NetworkObservation,
+            "Sandboxed network attempt captured during the behavioural probe",
+            &telemetry.network_attempts,
+        );
     }
     if !telemetry.process_exec_attempts.is_empty() {
         risk = risk.max(Risk::Medium);
@@ -121,6 +154,11 @@ pub fn evaluate_runtime(
             "sandboxed runtime attempted unexpected child-process execution {} time(s)",
             telemetry.process_exec_attempts.len()
         ));
+        observe(
+            EvidenceKind::ProcessObservation,
+            "Sandboxed child-process execution attempt",
+            &telemetry.process_exec_attempts,
+        );
         let dangerous_exec = telemetry.process_exec_attempts.iter().any(|line| {
             let lower = line.to_ascii_lowercase();
             [
@@ -148,12 +186,22 @@ pub fn evaluate_runtime(
         risk = risk.max(Risk::High);
         rules.push("LF-BEHAV-CANARY-ACCESS".to_owned());
         indicators.push("sandboxed runtime accessed a synthetic credential/canary path".to_owned());
+        observe(
+            EvidenceKind::FilesystemObservation,
+            "Sandboxed access to a synthetic credential/canary path",
+            &telemetry.canary_accesses,
+        );
     }
     if !telemetry.sensitive_path_accesses.is_empty() {
         risk = risk.max(Risk::High);
         rules.push("LF-BEHAV-SENSITIVE-PATH-ACCESS".to_owned());
         indicators
             .push("sandboxed runtime attempted access to a sensitive filesystem path".to_owned());
+        observe(
+            EvidenceKind::FilesystemObservation,
+            "Sandboxed access to a sensitive filesystem path",
+            &telemetry.sensitive_path_accesses,
+        );
     }
     let unexpected_mutations = telemetry
         .filesystem_mutations
@@ -166,15 +214,28 @@ pub fn evaluate_runtime(
         indicators.push(format!(
             "sandboxed runtime created/modified/deleted {unexpected_mutations} unexpected workspace file(s)"
         ));
+        let mutation_lines: Vec<String> = telemetry
+            .filesystem_mutations
+            .iter()
+            .filter(|value| !value.expected_runtime_artifact)
+            .map(|value| format!("{} ({})", value.path, value.kind))
+            .collect();
+        observe(
+            EvidenceKind::FilesystemObservation,
+            "Unexpected workspace file mutation observed during the behavioural probe",
+            &mutation_lines,
+        );
     }
     rules.sort();
     rules.dedup();
     indicators.sort();
     indicators.dedup();
+    evidence.truncate(crate::finding_evidence::MAX_EVIDENCE_PER_FINDING);
     Evaluation {
         risk,
         rule_ids: rules,
         indicators,
+        evidence,
     }
 }
 
@@ -397,6 +458,13 @@ mod tests {
             .rule_ids
             .iter()
             .any(|value| value == "LF-BEHAV-NETWORK-ATTEMPT"));
+        assert!(result.evidence.iter().any(|record| record.kind
+            == crate::finding_evidence::EvidenceKind::NetworkObservation
+            && record
+                .structured
+                .as_ref()
+                .and_then(|value| value["observation"].as_str())
+                == Some("connect(AF_INET)")));
     }
 
     #[test]

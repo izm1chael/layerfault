@@ -1,5 +1,6 @@
 //! Bounded non-executing ONNX ModelProto structural scanner.
 
+use crate::finding_evidence::{EvidenceSubject, FindingBuilder};
 use anyhow::{anyhow, bail, Context, Result};
 use serde::Serialize;
 use sha2::{Digest, Sha256};
@@ -58,23 +59,38 @@ pub fn scan(
             let mut matches = Vec::new();
             let mut status = crate::scanner::ScanStatus::Pass;
             let mut class = crate::scanner::FindingClass::Structural;
+            let mut rule_id = "LF-ONNX-STRUCT-VALID".to_owned();
+            let mut evidence = Vec::new();
             if !summary.custom_domains.is_empty() {
                 status = crate::scanner::ScanStatus::Warn;
                 class = crate::scanner::FindingClass::ContentIndicator;
+                rule_id = "LF-ONNX-CUSTOM-OP".to_owned();
                 matches.push(format!(
                     "[LF-ONNX-CUSTOM-OP] custom operator domain(s): {}",
                     summary.custom_domains.join(", ")
                 ));
+                for domain in &summary.custom_domains {
+                    evidence.push(crate::finding_evidence::config_value(
+                        EvidenceSubject::identity(digest, media),
+                        "opset.domain",
+                        serde_json::Value::String(domain.clone()),
+                        "Graph references a non-standard operator domain",
+                    ));
+                }
             }
             let compound_identity = if summary.external_data.is_empty() {
                 None
             } else {
                 match bind_external_data(path, digest, &summary.external_data) {
-                    Ok((identity, bound, hardlinked)) => {
+                    Ok((identity, bound, hardlinked, bound_evidence)) => {
                         matches.extend(bound);
+                        evidence.extend(bound_evidence);
                         if hardlinked && status == crate::scanner::ScanStatus::Pass {
                             status = crate::scanner::ScanStatus::Warn;
                             class = crate::scanner::FindingClass::Integrity;
+                            rule_id = "LF-ONNX-EXTERNAL-HARDLINK".to_owned();
+                        } else if status == crate::scanner::ScanStatus::Pass {
+                            rule_id = "LF-ONNX-EXTERNAL-DATA".to_owned();
                         }
                         Some(identity)
                     }
@@ -87,8 +103,14 @@ pub fn scan(
                         } else {
                             "LF-ONNX-EXTERNAL-INTEGRITY"
                         };
+                        rule_id = rule.to_owned();
                         matches.push(format!(
                             "[{rule}] external tensor data could not be integrity-bound: {error_text}"
+                        ));
+                        evidence.push(crate::finding_evidence::structural_invariant(
+                            EvidenceSubject::identity(digest, media),
+                            "external tensor data could not be integrity-bound",
+                            serde_json::json!({ "error": error_text }),
                         ));
                         None
                     }
@@ -110,7 +132,9 @@ pub fn scan(
                 )
             };
             Ok((
-                result(digest, media, status, class, detail, matches, start),
+                result(
+                    digest, media, status, class, detail, matches, start, &rule_id, evidence,
+                ),
                 compound_identity,
             ))
         }
@@ -123,6 +147,8 @@ pub fn scan(
                 format!("Invalid or unsafe ONNX structure: {error}"),
                 vec!["[LF-ONNX-STRUCT] ONNX structural validation failed".to_owned()],
                 start,
+                "LF-ONNX-STRUCT",
+                Vec::new(),
             ),
             None,
         )),
@@ -147,7 +173,12 @@ fn bind_external_data(
     model_path: &Path,
     model_digest: &str,
     external: &[OnnxExternalData],
-) -> Result<(String, Vec<String>, bool)> {
+) -> Result<(
+    String,
+    Vec<String>,
+    bool,
+    Vec<crate::finding_evidence::FindingEvidence>,
+)> {
     // `Path::parent()` returns `Some("")` for a bare relative filename like
     // "model.onnx" (not `None`), so the empty-parent case must be folded into
     // "." explicitly or canonicalization fails on the empty path and masks
@@ -166,6 +197,7 @@ fn bind_external_data(
     let mut matches = Vec::new();
     let mut sidecars = BTreeMap::<String, BoundSidecar>::new();
     let mut hardlinked = false;
+    let mut evidence = Vec::new();
 
     for item in external {
         let candidate =
@@ -200,6 +232,14 @@ fn bind_external_data(
                 matches.push(format!(
                     "[LF-ONNX-EXTERNAL-HARDLINK] '{}' has link_count={}; an alias outside the admitted model directory may mutate the same inode",
                     item.relative_path, link_count
+                ));
+                evidence.push(crate::finding_evidence::file_member(
+                    EvidenceSubject::member(&item.relative_path),
+                    serde_json::json!({
+                        "package_relative_path": item.relative_path,
+                        "link_count": link_count,
+                        "condition": "external tensor sidecar has more than one hard link",
+                    }),
                 ));
             }
             let outcome = crate::hashcache::sha256_prefixed(&canonical, &sidecar)?;
@@ -268,6 +308,17 @@ fn bind_external_data(
                 .map(|value| value.to_string())
                 .unwrap_or_else(|| "to-eof".to_owned())
         ));
+        evidence.push(
+            crate::finding_evidence::byte_range_evidence(
+                EvidenceSubject::member(&item.relative_path)
+                    .with_sha256(Some(sidecar_digest.clone()))
+                    .with_size(Some(sidecar_len)),
+                offset,
+                item.length.unwrap_or(sidecar_len.saturating_sub(offset)),
+                "External tensor data bound to this sidecar file and byte range",
+            )
+            .sha256(Some(sidecar_digest)),
+        );
     }
     for bound in sidecars.values() {
         if !crate::hashcache::identity_unchanged(&bound.path, &bound.file, &bound.identity)? {
@@ -282,6 +333,7 @@ fn bind_external_data(
         format!("lfonnx:sha256:{}", hex::encode(hasher.finalize())),
         matches,
         hardlinked,
+        evidence,
     ))
 }
 
@@ -779,6 +831,7 @@ impl Proto {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn result(
     digest: &str,
     media: &str,
@@ -787,18 +840,39 @@ fn result(
     detail: String,
     matches: Vec<String>,
     started: std::time::Instant,
+    rule_id: &str,
+    evidence: Vec<crate::finding_evidence::FindingEvidence>,
 ) -> crate::scanner::LayerScanResult {
-    crate::scanner::LayerScanResult {
-        layer_digest: digest.to_owned(),
-        media_type: media.to_owned(),
-        check_type: crate::scanner::CheckType::OnnxStructure,
-        status,
-        finding_class: class,
-        confidence: crate::scanner::Confidence::High,
-        detail: Some(detail),
-        matches,
-        duration_ms: u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX),
+    let subject = EvidenceSubject::identity(digest, media).with_sha256(Some(digest.to_owned()));
+    let mut builder =
+        FindingBuilder::new(rule_id, crate::scanner::CheckType::OnnxStructure, status)
+            .class(class)
+            .confidence(crate::scanner::Confidence::High)
+            .digest(digest)
+            .media_type(media)
+            .subject(subject)
+            .detail(detail)
+            .duration_ms(u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX));
+    for note in matches.iter().skip(1) {
+        builder = builder.match_note(note.clone());
     }
+    if evidence.is_empty() {
+        builder = if status == crate::scanner::ScanStatus::Pass {
+            builder.evidence_not_applicable()
+        } else {
+            builder.evidence_unavailable(
+                "this condition is a structural/coverage fact without a single attributable location",
+            )
+        };
+    } else {
+        builder = builder.evidence_all(evidence);
+    }
+    let mut finding = builder.finish();
+    // Preserve the exact original bracket-tagged text for every note (custom
+    // domains, external-data bindings, hardlink warnings can each carry a
+    // different rule tag within one finding).
+    finding.matches = matches;
+    finding
 }
 
 #[cfg(test)]

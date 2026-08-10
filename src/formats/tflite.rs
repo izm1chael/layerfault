@@ -1,4 +1,5 @@
 //! Minimal bounded TensorFlow Lite FlatBuffer structural validation.
+use crate::finding_evidence::{file_member, EvidenceSubject, FindingBuilder};
 use anyhow::{bail, Result};
 use serde::Serialize;
 use std::fs::File;
@@ -62,24 +63,26 @@ pub fn scan(
         Ok(s) => {
             let associated = !s.associated_files.is_empty();
             Ok(mk(
-            digest,
-            media,
-            if associated {
-                crate::scanner::ScanStatus::Warn
-            } else {
-                crate::scanner::ScanStatus::Pass
-            },
-            format!(
-                "TFLite FlatBuffer validated: schema {}, {:?} subgraph(s), {:?} operator code(s), associated files {:?}",
-                s.schema_version, s.subgraph_count, s.operator_code_count, s.associated_files
-            ),
-            if associated {
-                vec!["[LF-TFLITE-ASSOCIATED-FILE] TFLite carries ZIP-appended authority metadata that must be integrity-bound with the model".to_owned()]
-            } else {
-                vec![]
-            },
-            st,
-        ))
+                digest,
+                media,
+                if associated {
+                    crate::scanner::ScanStatus::Warn
+                } else {
+                    crate::scanner::ScanStatus::Pass
+                },
+                format!(
+                    "TFLite FlatBuffer validated: schema {}, {:?} subgraph(s), {:?} operator code(s), associated files {:?}",
+                    s.schema_version, s.subgraph_count, s.operator_code_count, s.associated_files
+                ),
+                if associated {
+                    vec!["[LF-TFLITE-ASSOCIATED-FILE] TFLite carries ZIP-appended authority metadata that must be integrity-bound with the model".to_owned()]
+                } else {
+                    vec![]
+                },
+                st,
+                if associated { "LF-TFLITE-ASSOCIATED-FILE" } else { "LF-TFLITE-STRUCT-VALID" },
+                &s.associated_files,
+            ))
         }
         Err(e) => Ok(mk(
             digest,
@@ -88,6 +91,8 @@ pub fn scan(
             format!("Invalid or unsafe TFLite structure: {e}"),
             vec!["[LF-TFLITE-STRUCT] TFLite structural validation failed".to_owned()],
             st,
+            "LF-TFLITE-STRUCT",
+            &[],
         )),
     }
 }
@@ -175,6 +180,7 @@ fn table_vector_len(buf: &[u8], table: usize, index: usize) -> Result<Option<u32
         buf[vector..vector + 4].try_into().unwrap_or([0; 4]),
     )))
 }
+#[allow(clippy::too_many_arguments)]
 fn mk(
     d: &str,
     m: &str,
@@ -182,18 +188,40 @@ fn mk(
     detail: String,
     matches: Vec<String>,
     st: std::time::Instant,
+    rule_id: &str,
+    associated_files: &[String],
 ) -> crate::scanner::LayerScanResult {
-    crate::scanner::LayerScanResult {
-        layer_digest: d.into(),
-        media_type: m.into(),
-        check_type: crate::scanner::CheckType::TfliteStructure,
-        status: s,
-        finding_class: crate::scanner::FindingClass::Structural,
-        confidence: crate::scanner::Confidence::High,
-        detail: Some(detail),
-        matches,
-        duration_ms: u64::try_from(st.elapsed().as_millis()).unwrap_or(u64::MAX),
+    let subject = EvidenceSubject::identity(d, m).with_sha256(Some(d.to_owned()));
+    let mut builder = FindingBuilder::new(rule_id, crate::scanner::CheckType::TfliteStructure, s)
+        .class(crate::scanner::FindingClass::Structural)
+        .confidence(crate::scanner::Confidence::High)
+        .digest(d)
+        .media_type(m)
+        .subject(subject.clone())
+        .detail(detail)
+        .duration_ms(u64::try_from(st.elapsed().as_millis()).unwrap_or(u64::MAX));
+    for note in matches.iter().skip(1) {
+        builder = builder.match_note(note.clone());
     }
+    if associated_files.is_empty() {
+        builder = if s == crate::scanner::ScanStatus::Pass {
+            builder.evidence_not_applicable()
+        } else {
+            builder.evidence_unavailable(
+                "the FlatBuffer parser rejected the structure before a specific field could be attributed",
+            )
+        };
+    } else {
+        for name in associated_files {
+            builder = builder.evidence(file_member(
+                subject.clone(),
+                serde_json::json!({ "associated_file": name }),
+            ));
+        }
+    }
+    let mut finding = builder.finish();
+    finding.matches = matches;
+    finding
 }
 
 #[cfg(test)]

@@ -153,6 +153,12 @@ pub struct PolicyDecision {
     pub action: PolicyAction,
     pub reasons: Vec<String>,
     pub suppressed_rule_ids: Vec<String>,
+    /// Evidence that references the underlying scanner findings behind
+    /// finding-derived reasons above, so policy never appears to have
+    /// discovered the technical condition itself. Reasons with no associated
+    /// scanner finding (allowlist/size/signer-count checks) have none here.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub evidence: Vec<crate::finding_evidence::FindingEvidence>,
 }
 
 impl PolicyDocument {
@@ -282,6 +288,7 @@ impl EffectivePolicy {
         let mut block_reasons = Vec::new();
         let mut warn_reasons = Vec::new();
         let mut suppressed = Vec::new();
+        let mut policy_evidence = Vec::new();
         if !self.allowed_model_patterns.is_empty()
             && !self
                 .allowed_model_patterns
@@ -349,21 +356,39 @@ impl EffectivePolicy {
 
         for result in results {
             let rule = rule_id(result);
+            let finding_ids: Vec<String> = result.finding_id.iter().cloned().collect();
+            let mut note_policy_evidence = |reason: &str| {
+                policy_evidence.push(crate::finding_evidence::policy_reason(
+                    result.subject.clone().unwrap_or_else(|| {
+                        crate::finding_evidence::EvidenceSubject::identity(
+                            &result.layer_digest,
+                            &result.media_type,
+                        )
+                    }),
+                    reason,
+                    &finding_ids,
+                    std::slice::from_ref(&rule),
+                ));
+            };
             if self
                 .denied_rule_ids
                 .iter()
                 .any(|denied| denied.eq_ignore_ascii_case(&rule))
             {
-                block_reasons.push(format!("Denied rule {rule} matched"));
+                let reason = format!("Denied rule {rule} matched");
+                note_policy_evidence(&reason);
+                block_reasons.push(reason);
                 continue;
             }
             if self.block_finding_classes.contains(&result.finding_class)
                 && result.status != ScanStatus::Pass
             {
-                block_reasons.push(format!(
+                let reason = format!(
                     "Finding class {:?} is blocking by policy ({rule})",
                     result.finding_class
-                ));
+                );
+                note_policy_evidence(&reason);
+                block_reasons.push(reason);
                 continue;
             }
             if result.status == ScanStatus::Pass {
@@ -391,28 +416,38 @@ impl EffectivePolicy {
             if self.block_confidence_at_or_above.is_some_and(|threshold| {
                 confidence_rank(result.confidence) >= confidence_rank(threshold)
             }) {
-                block_reasons.push(format!(
-                    "{rule} meets configured blocking confidence threshold"
-                ));
+                let reason = format!("{rule} meets configured blocking confidence threshold");
+                note_policy_evidence(&reason);
+                block_reasons.push(reason);
                 continue;
             }
             match result.status {
-                ScanStatus::Fail => block_reasons.push(format!(
-                    "{}: {}",
-                    rule,
-                    result
-                        .detail
-                        .as_deref()
-                        .unwrap_or("blocking scanner finding")
-                )),
-                ScanStatus::Warn if self.block_on_warnings => {
-                    block_reasons.push(format!("{} warning is blocking under this profile", rule))
+                ScanStatus::Fail => {
+                    let reason = format!(
+                        "{}: {}",
+                        rule,
+                        result
+                            .detail
+                            .as_deref()
+                            .unwrap_or("blocking scanner finding")
+                    );
+                    note_policy_evidence(&reason);
+                    block_reasons.push(reason);
                 }
-                ScanStatus::Warn => warn_reasons.push(format!(
-                    "{}: {}",
-                    rule,
-                    result.detail.as_deref().unwrap_or("scanner warning")
-                )),
+                ScanStatus::Warn if self.block_on_warnings => {
+                    let reason = format!("{} warning is blocking under this profile", rule);
+                    note_policy_evidence(&reason);
+                    block_reasons.push(reason);
+                }
+                ScanStatus::Warn => {
+                    let reason = format!(
+                        "{}: {}",
+                        rule,
+                        result.detail.as_deref().unwrap_or("scanner warning")
+                    );
+                    note_policy_evidence(&reason);
+                    warn_reasons.push(reason);
+                }
                 ScanStatus::Pass => {}
             }
         }
@@ -429,11 +464,18 @@ impl EffectivePolicy {
         } else {
             (PolicyAction::Allow, Vec::new())
         };
+        policy_evidence.sort_by(|a, b| a.description.cmp(&b.description));
+        policy_evidence.dedup_by(|a, b| a.description == b.description);
         PolicyDecision {
             profile: self.profile,
             action,
             reasons,
             suppressed_rule_ids: suppressed,
+            evidence: if action == PolicyAction::Allow {
+                Vec::new()
+            } else {
+                policy_evidence
+            },
         }
     }
 }
@@ -478,7 +520,21 @@ fn confidence_rank(value: Confidence) -> u8 {
     }
 }
 
+/// Resolve a finding's stable rule identity.
+///
+/// The explicit `rule_id` field is authoritative. The legacy path — parsing a
+/// `[RULE-ID]` prefix out of `matches`, then falling back to the check type —
+/// remains for findings built as plain struct literals, so migrated and
+/// unmigrated detectors resolve identically.
 pub fn rule_id(result: &LayerScanResult) -> String {
+    if let Some(id) = result
+        .rule_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        return id.to_owned();
+    }
     for matched in &result.matches {
         if let Some(rest) = matched.strip_prefix('[') {
             if let Some((candidate, _)) = rest.split_once(']') {
@@ -592,6 +648,7 @@ mod tests {
             detail: Some("test finding".to_owned()),
             matches: vec![format!("[{id}] match")],
             duration_ms: 0,
+            ..Default::default()
         }
     }
     #[test]

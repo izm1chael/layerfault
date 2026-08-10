@@ -1,6 +1,5 @@
-use crate::scanner::{
-    duration_ms, CheckType, Confidence, FindingClass, LayerScanResult, ScanStatus,
-};
+use crate::finding_evidence::{binary_object, EvidenceSubject, FindingBuilder};
+use crate::scanner::{CheckType, Confidence, FindingClass, LayerScanResult, ScanStatus};
 use anyhow::Result;
 use std::collections::BTreeSet;
 use std::fs::File;
@@ -21,6 +20,8 @@ pub(crate) struct BinaryStreamScanner {
     carry: Vec<u8>,
     absolute_read: u64,
     findings: Vec<String>,
+    /// (rule_id, byte_offset, format) for each accepted object, parallel to `findings`.
+    pending_evidence: Vec<(String, u64, String)>,
     seen: BTreeSet<(u8, u64)>,
     started: Instant,
 }
@@ -31,6 +32,7 @@ impl BinaryStreamScanner {
             carry: Vec::new(),
             absolute_read: 0,
             findings: Vec::new(),
+            pending_evidence: Vec::new(),
             seen: BTreeSet::new(),
             started: Instant::now(),
         }
@@ -64,6 +66,8 @@ impl BinaryStreamScanner {
                     self.push(
                         1,
                         absolute,
+                        "T12-001",
+                        "ELF",
                         format!(
                             "[T12-001] Structurally valid embedded ELF object at file offset 0x{absolute:x}"
                         ),
@@ -76,6 +80,8 @@ impl BinaryStreamScanner {
                     self.push(
                         4,
                         absolute,
+                        "T12-004",
+                        "WASM",
                         format!(
                             "[T12-004] Structurally valid WebAssembly module header at file offset 0x{absolute:x}"
                         ),
@@ -89,6 +95,8 @@ impl BinaryStreamScanner {
                 self.push(
                     3,
                     absolute,
+                    "T12-003",
+                    "Mach-O",
                     format!(
                         "[T12-003] Structurally valid embedded Mach-O object at file offset 0x{absolute:x}"
                     ),
@@ -109,6 +117,8 @@ impl BinaryStreamScanner {
                     self.push(
                         2,
                         absolute,
+                        "T12-002",
+                        "PE",
                         format!(
                             "[T12-002] Structurally valid embedded PE object at file offset 0x{absolute:x}"
                         ),
@@ -123,35 +133,69 @@ impl BinaryStreamScanner {
         Ok(())
     }
 
-    fn push(&mut self, kind: u8, offset: u64, finding: String) {
+    fn push(&mut self, kind: u8, offset: u64, rule_id: &str, format_name: &str, finding: String) {
         if self.seen.insert((kind, offset)) && self.findings.len() < MAX_FINDINGS {
             self.findings.push(finding);
+            self.pending_evidence
+                .push((rule_id.to_owned(), offset, format_name.to_owned()));
         }
     }
 
+    /// Emit the finding, attaching structural binary evidence for each object
+    /// found. Only headers were parsed; no disassembly or emulation occurred.
     pub(crate) fn finish(self, layer_digest: &str, media_type: &str) -> LayerScanResult {
-        let (status, detail) = if self.findings.is_empty() {
-            (ScanStatus::Pass, None)
-        } else {
-            (
-                ScanStatus::Fail,
-                Some(format!(
+        let subject = EvidenceSubject::identity(layer_digest, media_type)
+            .with_sha256(Some(layer_digest.to_owned()));
+        if self.findings.is_empty() {
+            return FindingBuilder::new(
+                "T12-CLEAR",
+                CheckType::BinarySteganography,
+                ScanStatus::Pass,
+            )
+            .class(FindingClass::ContentIndicator)
+            .confidence(Confidence::High)
+            .digest(layer_digest)
+            .media_type(media_type)
+            .subject(subject)
+            .evidence_not_applicable()
+            .duration_ms(crate::scanner::duration_ms(self.started))
+            .finish();
+        }
+        // One rule id can appear multiple times (e.g. two embedded ELF
+        // objects); report under the first-detected rule and attach every
+        // object as its own evidence record.
+        let rule_id = self
+            .pending_evidence
+            .first()
+            .map(|(rule, ..)| rule.clone())
+            .unwrap_or_else(|| "T12-001".to_owned());
+        let mut builder =
+            FindingBuilder::new(&rule_id, CheckType::BinarySteganography, ScanStatus::Fail)
+                .class(FindingClass::ContentIndicator)
+                .confidence(Confidence::High)
+                .digest(layer_digest)
+                .media_type(media_type)
+                .subject(subject.clone())
+                .detail(format!(
                     "{} structurally plausible embedded executable/module object(s) detected",
                     self.findings.len()
-                )),
-            )
-        };
-        LayerScanResult {
-            layer_digest: layer_digest.to_owned(),
-            media_type: media_type.to_owned(),
-            check_type: CheckType::BinarySteganography,
-            status,
-            finding_class: FindingClass::ContentIndicator,
-            confidence: Confidence::High,
-            detail,
-            matches: self.findings,
-            duration_ms: duration_ms(self.started),
+                ))
+                .duration_ms(crate::scanner::duration_ms(self.started));
+        for (rule, offset, format_name) in &self.pending_evidence {
+            builder = builder.evidence(binary_object(
+                subject.clone(),
+                *offset,
+                4,
+                serde_json::json!({ "format": format_name, "rule_id": rule }),
+            ));
         }
+        let mut result = builder.finish();
+        // Preserve the exact original per-object bracketed text (each object
+        // keeps its own `[T12-00N]` tag) rather than the single-rule summary
+        // line the builder produces; `rule_id`/evidence/finding_id above
+        // already carry the structured identity, so this is cosmetic only.
+        result.matches = self.findings;
+        result
     }
 }
 
@@ -663,6 +707,27 @@ mod tests {
         let result = scan_fixture("elf", &minimal_elf64())?;
         assert_eq!(result.status, ScanStatus::Fail);
         assert!(result.matches.iter().any(|m| m.contains("T12-001")));
+        assert_eq!(crate::policy::rule_id(&result), "T12-001");
+        let record = result.evidence.first().expect("binary evidence");
+        assert_eq!(
+            record.kind,
+            crate::finding_evidence::EvidenceKind::BinaryObject
+        );
+        assert!(matches!(
+            record.location,
+            Some(crate::finding_evidence::EvidenceLocation::ByteRange { offset: 0, .. })
+        ));
+        assert_eq!(
+            record
+                .structured
+                .as_ref()
+                .and_then(|v| v["format"].as_str()),
+            Some("ELF")
+        );
+        assert_eq!(
+            result.evidence_state,
+            Some(crate::finding_evidence::EvidenceState::Available)
+        );
         Ok(())
     }
 

@@ -154,6 +154,7 @@ mod tests {
             detail: None,
             matches: Vec::new(),
             duration_ms: 0,
+            ..Default::default()
         }
     }
 

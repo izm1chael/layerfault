@@ -261,6 +261,8 @@ layerfault pipeline ./downloaded-model --policy strict --json
 
 The pipeline performs bounded package discovery, canonical identity, artifact structure checks, package-code and serialization checks, local policy evaluation, and a final `PASS`, `WARN`, or `BLOCK` decision. It never invokes an inference runtime or deserializes model content. Use `--sarif` for CI annotations and `--evidence-out ... --evidence-key ...` to reuse the existing signed evidence infrastructure.
 
+Every WARN/FAIL finding carries structured evidence: the exact file/tensor/opcode/byte position that triggered it, a bounded and redacted excerpt, why it matters, and its limitations. Use `--evidence` for the evidence-first human report, or `--evidence-bundle <DIR>` to write a self-contained, hash-verifiable review bundle (manifest, findings, sanitised excerpts). `--json` includes the same evidence in machine-readable form under each finding's `evidence`/`evidence_state`/`explanation` keys.
+
 Pipeline exit codes preserve the admission contract: `0` means PASS, `1` means WARN, `2` means integrity failure, `3` means scanner/structural/content blocking failure, and `4` means policy-only block.
 
 Layerfault can assess artifact structure, package contents, integrity, provenance, trust, policy, and runtime compatibility/advisories. A PASS does not prove that learned weights are behaviorally benign, free from semantic backdoors, or trained on unpoisoned data.

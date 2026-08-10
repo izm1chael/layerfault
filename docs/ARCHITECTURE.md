@@ -25,6 +25,11 @@ local policy -------------------------------------+
 - `formats/`: artifact identification and hostile-input parsers. No runtime execution.
 - `sources/`: discovery and narrowly-scoped runtime process adapters. Discovery never means trust.
 - `scanner/`: evidence collection and stable finding classifications.
+- `finding_evidence`: the structured evidence model attached to findings (see below).
+- `rules`: the canonical registry of detector rule IDs and their declared evidence strategy.
+- `correlate`: derives structural relationships between findings (e.g. `auto_map` resolving to a module that also fired a process-execution finding).
+- `coverage`: what a scan actually examined, so incomplete scanning is never presented as a clean PASS.
+- `evidence_bundle`: writes a self-contained, reviewable evidence bundle (manifest, findings, excerpts) to a directory.
 - `trust` / `provenance` / `sigstore`: signer identity and attestation verification.
 - `policy`: admission decision over scanner evidence plus context.
 - `admission`: standalone-artifact composition of scan + provenance + policy.
@@ -66,3 +71,11 @@ When the configured Python executable belongs to a virtualenv, only the virtuale
 Behaviour evidence combines model responses with attempted network operations, child-process execution, sensitive/canary file access, protected filesystem write attempts and unexpected writable-workspace mutations. Runtime crashes do not discard telemetry: loader-time side effects are retained as security evidence. Differential analysis compares actual bounded responses as well as rule/risk labels so localized trigger behaviour cannot disappear merely because both responses individually score `NONE`.
 
 Bubblewrap is a shared-kernel isolation boundary, not a virtual machine. Active execution of intentionally hostile model code should therefore be performed on a disposable/dedicated lab host; Layerfault never exposes real credentials to the sandbox.
+
+## Evidence model
+
+Every `LayerScanResult` carries the nine original stable fields (`layer_digest`, `media_type`, `check_type`, `status`, `finding_class`, `confidence`, `detail`, `matches`, `duration_ms`) plus additive evidence-attribution fields: `rule_id`, `subject`, `evidence`, `evidence_state`, `evidence_reason`, `finding_id`. A finding is not just a conclusion — it identifies the exact subject (package-relative path, sha256, tensor/opcode/byte position where known), the exact bounded and redacted evidence that caused the detector to fire, and an explicit completeness state (`Available` / `Partial` / `Unavailable` / `NotApplicable`) so absence of evidence is never ambiguous.
+
+Detectors build findings through `finding_evidence::FindingBuilder`, which enforces bounds (`MAX_EVIDENCE_PER_FINDING`, per-finding and per-report byte budgets), deterministic evidence ordering, secret redaction (`redact_secrets`), and terminal-escape-safe sanitisation (`sanitize_excerpt`) before a finding can be emitted. `src/rules.rs` declares every rule's evidence requirement (`Required` / `StructuredOnly` / `NotApplicable`); `tests/evidence_gate.rs` fails the build if a detector emits a rule ID that isn't registered there, or if a registered rule has no `explain::lookup` entry (title, meaning, `why_it_matters`, and `limitations` — the last of which exists specifically so a detected capability is never overstated into proven malicious behaviour).
+
+`--evidence` renders the evidence-first human report (`report::emit_evidence_report`) instead of the summary table. `--evidence-bundle <DIR>` writes a self-contained, hash-verifiable directory (manifest, enriched findings, sanitised excerpts, `SHA256SUMS`) for independent review; it is distinct from `--evidence-out`, which writes a signed Ed25519 admission envelope via `evidence.rs`. SARIF output emits a real `physicalLocation` only for evidence with a genuine source file and line (custom Python, config, templates); other evidence kinds (byte ranges, tensor names, opcode positions) stay in SARIF `properties` rather than a fabricated location.

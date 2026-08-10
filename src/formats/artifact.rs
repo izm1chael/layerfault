@@ -228,6 +228,7 @@ fn inspect_opened(
             status: ScanStatus::Warn, finding_class: FindingClass::Compatibility, confidence: Confidence::High,
             detail: Some("Keras/TensorFlow HDF5 container recognized. This build hashes and package-scans the file but does not execute or fully decode arbitrary HDF5 object graphs.".to_owned()),
             matches: vec!["[LF-KERAS-HDF5-LIMIT] HDF5 model recognized with explicit bounded capability limit".to_owned()], duration_ms: 0,
+            ..Default::default()
         }),
         ArtifactFormat::Unknown => {
             let mut prefix_buf = [0_u8; 512];
@@ -259,6 +260,7 @@ fn inspect_opened(
                             "[LF-ARCHIVE-MALFORMED] archive inspection failed".to_owned(),
                         ],
                         duration_ms: 0,
+                        ..Default::default()
                     }),
                 }
             } else {
@@ -272,8 +274,19 @@ fn inspect_opened(
                     detail: Some("Unknown artifact format: integrity can be hashed but no structural parser is available".to_owned()),
                     matches: vec!["[LF-FORMAT-UNKNOWN] unknown artifact format".to_owned()],
                     duration_ms: 0,
+                    ..Default::default()
                 });
             }
+        }
+    }
+    // Every branch above tags `matches[0]` with a `[RULE-ID]` prefix already;
+    // backfill the structured identity fields for any finding still built as
+    // a plain struct literal so evidence attribution stays consistent
+    // regardless of construction style.
+    for result in &mut results {
+        if result.rule_id.is_none() {
+            let rule = crate::policy::rule_id(result);
+            crate::finding_evidence::ensure_finding_identity(result, &rule);
         }
     }
     let report = ArtifactReport {

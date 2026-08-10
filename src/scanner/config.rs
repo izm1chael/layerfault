@@ -1,3 +1,4 @@
+use crate::finding_evidence::{config_value, EvidenceSubject};
 use crate::safeio::read_all_from_file;
 use crate::scanner::{
     duration_ms, CheckType, Confidence, FindingClass, LayerScanResult, ScanStatus,
@@ -40,34 +41,72 @@ fn scan_params(
     elapsed: u64,
     thresholds: &ThresholdConfig,
 ) -> Result<LayerScanResult> {
+    let subject = EvidenceSubject::identity(layer_digest, media_type)
+        .with_sha256(Some(layer_digest.to_owned()));
     let mut findings = Vec::new();
+    let mut evidence = Vec::new();
+    let mut rule_id: Option<&'static str> = None;
 
     if let Some(value) = params
         .get("temperature")
         .and_then(serde_json::Value::as_f64)
     {
         if value > thresholds.max_temperature {
-            findings.push(format!(
-                "temperature {value} exceeds operator policy maximum {}",
-                thresholds.max_temperature
-            ));
+            note(
+                &mut findings,
+                &mut evidence,
+                &mut rule_id,
+                &subject,
+                "LF-PARAM-TEMPERATURE",
+                "temperature",
+                value.into(),
+                format!(
+                    "temperature {value} exceeds operator policy maximum {}",
+                    thresholds.max_temperature
+                ),
+            );
         } else if value > TEMPERATURE_WARN {
-            findings.push(format!(
-                "temperature {value} is unusually high (review threshold {TEMPERATURE_WARN})"
-            ));
+            note(
+                &mut findings,
+                &mut evidence,
+                &mut rule_id,
+                &subject,
+                "LF-PARAM-TEMPERATURE",
+                "temperature",
+                value.into(),
+                format!(
+                    "temperature {value} is unusually high (review threshold {TEMPERATURE_WARN})"
+                ),
+            );
         }
     }
 
     if let Some(value) = params.get("num_ctx").and_then(serde_json::Value::as_u64) {
         if value > thresholds.max_ctx {
-            findings.push(format!(
-                "num_ctx {value} exceeds operator policy maximum {}",
-                thresholds.max_ctx
-            ));
+            note(
+                &mut findings,
+                &mut evidence,
+                &mut rule_id,
+                &subject,
+                "LF-PARAM-NUM-CTX",
+                "num_ctx",
+                value.into(),
+                format!(
+                    "num_ctx {value} exceeds operator policy maximum {}",
+                    thresholds.max_ctx
+                ),
+            );
         } else if thresholds.max_ctx >= 8 && value > thresholds.max_ctx / 8 {
-            findings.push(format!(
-                "num_ctx {value} is large enough to merit resource-capacity review"
-            ));
+            note(
+                &mut findings,
+                &mut evidence,
+                &mut rule_id,
+                &subject,
+                "LF-PARAM-NUM-CTX",
+                "num_ctx",
+                value.into(),
+                format!("num_ctx {value} is large enough to merit resource-capacity review"),
+            );
         }
     }
 
@@ -76,22 +115,47 @@ fn scan_params(
         .and_then(serde_json::Value::as_i64)
     {
         if value >= 0 && value > thresholds.max_predict {
-            findings.push(format!(
-                "num_predict {value} exceeds operator policy maximum {}",
-                thresholds.max_predict
-            ));
+            note(
+                &mut findings,
+                &mut evidence,
+                &mut rule_id,
+                &subject,
+                "LF-PARAM-NUM-PREDICT",
+                "num_predict",
+                value.into(),
+                format!(
+                    "num_predict {value} exceeds operator policy maximum {}",
+                    thresholds.max_predict
+                ),
+            );
         }
     }
 
     if params.get("top_k").and_then(serde_json::Value::as_u64) == Some(0) {
-        findings.push("top_k 0 disables top-k sampling".to_owned());
+        note(
+            &mut findings,
+            &mut evidence,
+            &mut rule_id,
+            &subject,
+            "LF-PARAM-TOP-K",
+            "top_k",
+            0.into(),
+            "top_k 0 disables top-k sampling".to_owned(),
+        );
     }
 
     if let Some(value) = params.get("top_p").and_then(serde_json::Value::as_f64) {
         if value > 0.99 {
-            findings.push(format!(
-                "top_p {value} makes nucleus filtering minimally restrictive"
-            ));
+            note(
+                &mut findings,
+                &mut evidence,
+                &mut rule_id,
+                &subject,
+                "LF-PARAM-TOP-P",
+                "top_p",
+                value.into(),
+                format!("top_p {value} makes nucleus filtering minimally restrictive"),
+            );
         }
     }
 
@@ -100,21 +164,35 @@ fn scan_params(
         .and_then(serde_json::Value::as_f64)
     {
         if value < 0.5 {
-            findings.push(format!(
-                "repeat_penalty {value} may increase repetition-loop risk"
-            ));
+            note(
+                &mut findings,
+                &mut evidence,
+                &mut rule_id,
+                &subject,
+                "LF-PARAM-REPEAT-PENALTY",
+                "repeat_penalty",
+                value.into(),
+                format!("repeat_penalty {value} may increase repetition-loop risk"),
+            );
         }
     }
 
     // A fixed seed is a reproducibility setting, not evidence of poisoning.
     // Record it only when another policy anomaly is already present.
-    if params
-        .get("seed")
-        .and_then(serde_json::Value::as_i64)
-        .is_some()
-        && !findings.is_empty()
-    {
-        findings.push("fixed seed present (reproducibility setting; informational)".to_owned());
+    let had_prior_findings = !findings.is_empty();
+    if let Some(seed) = params.get("seed").and_then(serde_json::Value::as_i64) {
+        if had_prior_findings {
+            note(
+                &mut findings,
+                &mut evidence,
+                &mut rule_id,
+                &subject,
+                "LF-PARAM-SEED",
+                "seed",
+                seed.into(),
+                "fixed seed present (reproducibility setting; informational)".to_owned(),
+            );
+        }
     }
 
     if let Some(stops) = params.get("stop").and_then(serde_json::Value::as_array) {
@@ -123,15 +201,24 @@ fn scan_params(
         )?;
         for stop in stops.iter().filter_map(serde_json::Value::as_str) {
             if stop_pattern.is_match(stop) {
-                findings.push(format!(
-                    "stop sequence {} resembles a prompt-role delimiter",
-                    safe_preview(stop)
-                ));
+                note(
+                    &mut findings,
+                    &mut evidence,
+                    &mut rule_id,
+                    &subject,
+                    "LF-PARAM-STOP-DELIMITER",
+                    "stop",
+                    serde_json::Value::String(stop.to_owned()),
+                    format!(
+                        "stop sequence {} resembles a prompt-role delimiter",
+                        safe_preview(stop)
+                    ),
+                );
             }
         }
     }
 
-    Ok(LayerScanResult {
+    let mut finding = LayerScanResult {
         layer_digest: layer_digest.to_owned(),
         media_type: media_type.to_owned(),
         check_type: CheckType::ParameterThreshold,
@@ -150,7 +237,30 @@ fn scan_params(
         }),
         matches: findings,
         duration_ms: elapsed,
-    })
+        evidence,
+        ..Default::default()
+    };
+    crate::finding_evidence::ensure_finding_identity(
+        &mut finding,
+        rule_id.unwrap_or("LF-PARAM-CLEAR"),
+    );
+    Ok(finding)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn note(
+    findings: &mut Vec<String>,
+    evidence: &mut Vec<crate::finding_evidence::FindingEvidence>,
+    rule_id: &mut Option<&'static str>,
+    subject: &EvidenceSubject,
+    rule: &'static str,
+    key: &str,
+    value: serde_json::Value,
+    text: String,
+) {
+    findings.push(format!("[{rule}] {text}"));
+    evidence.push(config_value(subject.clone(), key, value, &text));
+    rule_id.get_or_insert(rule);
 }
 
 fn safe_preview(value: &str) -> String {

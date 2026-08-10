@@ -1,5 +1,6 @@
 //! Bounded TensorFlow SavedModel/checkpoint inspection without graph execution.
 
+use crate::finding_evidence::{byte_range_evidence, EvidenceSubject, FindingBuilder};
 use anyhow::{bail, Context, Result};
 use serde::Serialize;
 use std::fs::File;
@@ -15,6 +16,12 @@ pub struct TensorFlowSummary {
     pub suspicious_markers: Vec<String>,
     pub blocking_markers: Vec<String>,
     pub capability: String,
+    /// `(marker, first_byte_offset)` for every accepted marker above, so
+    /// findings can point at where the substring match was found. This is a
+    /// byte-substring position, not a parsed graph node: the protobuf is
+    /// never actually decoded, so no node/op attribution is possible.
+    #[serde(default)]
+    pub marker_offsets: Vec<(String, u64)>,
 }
 
 pub fn inspect_saved_model(file: &File, len: u64) -> Result<TensorFlowSummary> {
@@ -29,6 +36,7 @@ pub fn inspect_saved_model(file: &File, len: u64) -> Result<TensorFlowSummary> {
     cloned.read_exact(&mut bytes)?;
 
     let mut suspicious = Vec::new();
+    let mut marker_offsets = Vec::new();
     for needle in [
         b"PyFunc".as_slice(),
         b"EagerPyFunc".as_slice(),
@@ -42,8 +50,10 @@ pub fn inspect_saved_model(file: &File, len: u64) -> Result<TensorFlowSummary> {
         b"TextLineReader".as_slice(),
         b"FixedLengthRecordReader".as_slice(),
     ] {
-        if find_bytes(&bytes, needle) {
-            suspicious.push(String::from_utf8_lossy(needle).into_owned());
+        if let Some(offset) = find_bytes(&bytes, needle) {
+            let name = String::from_utf8_lossy(needle).into_owned();
+            marker_offsets.push((name.clone(), offset as u64));
+            suspicious.push(name);
         }
     }
 
@@ -51,8 +61,12 @@ pub fn inspect_saved_model(file: &File, len: u64) -> Result<TensorFlowSummary> {
     // PrintV2 becomes an arbitrary file-write primitive when output_stream is a file URI.
     // Other filesystem-related op names remain review evidence until Layerfault can bind
     // them to a concrete destination/attribute rather than blocking on the op name alone.
-    if find_bytes(&bytes, b"PrintV2") && find_bytes(&bytes, b"file://") {
+    if let (Some(print_offset), Some(_)) = (
+        find_bytes(&bytes, b"PrintV2"),
+        find_bytes(&bytes, b"file://"),
+    ) {
         blocking.push("PrintV2:file://".to_owned());
+        marker_offsets.push(("PrintV2:file://".to_owned(), print_offset as u64));
     }
 
     suspicious.sort();
@@ -70,6 +84,7 @@ pub fn inspect_saved_model(file: &File, len: u64) -> Result<TensorFlowSummary> {
         } else {
             "bounded protobuf structural/marker scan".into()
         },
+        marker_offsets,
     })
 }
 
@@ -118,6 +133,7 @@ pub fn inspect_checkpoint(path: &Path, _file: &File, len: u64) -> Result<TensorF
         capability: format!(
             "checkpoint shard/package integrity validated; {shards} data shard(s); tensor value decoding is not required for static admission"
         ),
+        marker_offsets: Vec::new(),
     })
 }
 
@@ -129,18 +145,28 @@ pub fn scan_saved_model(
 ) -> Result<crate::scanner::LayerScanResult> {
     let started = std::time::Instant::now();
     match inspect_saved_model(file, len) {
-        Ok(summary) if !summary.blocking_markers.is_empty() => Ok(mk(
-            digest,
-            media,
-            crate::scanner::ScanStatus::Fail,
-            crate::scanner::FindingClass::ContentIndicator,
-            format!("TensorFlow SavedModel inspected: {}", summary.capability),
-            vec![format!(
-                "[LF-TF-FILESYSTEM-WRITE] graph contains file-write capability marker(s): {}",
-                summary.blocking_markers.join(", ")
-            )],
-            started,
-        )),
+        Ok(summary) if !summary.blocking_markers.is_empty() => {
+            let offsets: Vec<(String, u64)> = summary
+                .marker_offsets
+                .iter()
+                .filter(|(marker, _)| summary.blocking_markers.contains(marker))
+                .cloned()
+                .collect();
+            Ok(mk(
+                digest,
+                media,
+                crate::scanner::ScanStatus::Fail,
+                crate::scanner::FindingClass::ContentIndicator,
+                format!("TensorFlow SavedModel inspected: {}", summary.capability),
+                vec![format!(
+                    "[LF-TF-FILESYSTEM-WRITE] graph contains file-write capability marker(s): {}",
+                    summary.blocking_markers.join(", ")
+                )],
+                started,
+                "LF-TF-FILESYSTEM-WRITE",
+                &offsets,
+            ))
+        }
         Ok(summary) if !summary.suspicious_markers.is_empty() => Ok(mk(
             digest,
             media,
@@ -152,6 +178,8 @@ pub fn scan_saved_model(
                 summary.suspicious_markers.join(", ")
             )],
             started,
+            "LF-TF-EXECUTION-OP",
+            &summary.marker_offsets,
         )),
         Ok(summary) if len > MAX_PB_SCAN => Ok(mk(
             digest,
@@ -164,6 +192,8 @@ pub fn scan_saved_model(
                     .to_owned(),
             ],
             started,
+            "LF-TF-SCAN-LIMIT",
+            &[],
         )),
         Ok(summary) => Ok(mk(
             digest,
@@ -173,6 +203,8 @@ pub fn scan_saved_model(
             format!("TensorFlow SavedModel inspected: {}", summary.capability),
             Vec::new(),
             started,
+            "LF-TF-STRUCT-VALID",
+            &[],
         )),
         Err(error) => Ok(mk(
             digest,
@@ -182,6 +214,8 @@ pub fn scan_saved_model(
             format!("Invalid TensorFlow SavedModel: {error}"),
             vec!["[LF-TF-STRUCT] SavedModel structural validation failed".into()],
             started,
+            "LF-TF-STRUCT",
+            &[],
         )),
     }
 }
@@ -206,6 +240,8 @@ pub fn scan_checkpoint(
                     .into(),
             ],
             started,
+            "LF-TF-CHECKPOINT-LIMIT",
+            &[],
         )),
         Err(error) => Ok(mk(
             digest,
@@ -215,19 +251,23 @@ pub fn scan_checkpoint(
             format!("Invalid TensorFlow checkpoint: {error}"),
             vec!["[LF-TF-CHECKPOINT-STRUCT] checkpoint validation failed".into()],
             started,
+            "LF-TF-CHECKPOINT-STRUCT",
+            &[],
         )),
     }
 }
 
-fn find_bytes(haystack: &[u8], needle: &[u8]) -> bool {
+/// Byte offset of the first occurrence of `needle`, or `None`.
+fn find_bytes(haystack: &[u8], needle: &[u8]) -> Option<usize> {
     if needle.is_empty() {
-        return true;
+        return Some(0);
     }
     haystack
         .windows(needle.len())
-        .any(|window| window == needle)
+        .position(|window| window == needle)
 }
 
+#[allow(clippy::too_many_arguments)]
 fn mk(
     digest: &str,
     media: &str,
@@ -236,18 +276,51 @@ fn mk(
     detail: String,
     matches: Vec<String>,
     started: std::time::Instant,
+    rule_id: &str,
+    marker_offsets: &[(String, u64)],
 ) -> crate::scanner::LayerScanResult {
-    crate::scanner::LayerScanResult {
-        layer_digest: digest.into(),
-        media_type: media.into(),
-        check_type: crate::scanner::CheckType::TensorFlowStructure,
+    let subject = EvidenceSubject::identity(digest, media).with_sha256(Some(digest.to_owned()));
+    let mut builder = FindingBuilder::new(
+        rule_id,
+        crate::scanner::CheckType::TensorFlowStructure,
         status,
-        finding_class: class,
-        confidence: crate::scanner::Confidence::High,
-        detail: Some(detail),
-        matches,
-        duration_ms: u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX),
+    )
+    .class(class)
+    .confidence(crate::scanner::Confidence::High)
+    .digest(digest)
+    .media_type(media)
+    .subject(subject.clone())
+    .detail(detail)
+    .duration_ms(u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX));
+    for note in matches.iter().skip(1) {
+        builder = builder.match_note(note.clone());
     }
+    if marker_offsets.is_empty() {
+        builder = if status == crate::scanner::ScanStatus::Pass {
+            builder.evidence_not_applicable()
+        } else {
+            builder.evidence_unavailable(
+                "this is a bounded byte-substring search over the serialized graph, not a \
+                 protobuf parse; no node or offset attribution is available for this condition",
+            )
+        };
+    } else {
+        for (marker, offset) in marker_offsets {
+            builder = builder.evidence(
+                byte_range_evidence(
+                    subject.clone(),
+                    *offset,
+                    marker.len() as u64,
+                    "Byte-substring match for a TensorFlow op-name marker in the serialized \
+                     graph; the protobuf was not parsed, so no node can be attributed",
+                )
+                .matched(marker),
+            );
+        }
+    }
+    let mut finding = builder.finish();
+    finding.matches = matches;
+    finding
 }
 
 #[cfg(test)]

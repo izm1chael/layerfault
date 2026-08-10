@@ -403,7 +403,7 @@ class CustomModel:
 
         assert!(findings
             .iter()
-            .any(|f| f.matches.contains(&"LF-CORR-HF-LOADER-PROCESS".to_owned())));
+            .any(|f| crate::policy::rule_id(f) == "LF-CORR-HF-LOADER-PROCESS"));
     }
 
     #[test]

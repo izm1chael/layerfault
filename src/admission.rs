@@ -68,7 +68,12 @@ pub fn inspect_and_evaluate(
                 )),
                 matches: vec!["[LF-PROV-SIGSTORE] verified Sigstore bundle".to_owned()],
                 duration_ms: 0,
+                ..Default::default()
             });
+            crate::finding_evidence::ensure_finding_identity(
+                report.results.last_mut().expect("just pushed"),
+                "LF-PROV-SIGSTORE",
+            );
         } else {
             trust_state = TrustState::Invalid;
             report.results.push(LayerScanResult {
@@ -87,7 +92,12 @@ pub fn inspect_and_evaluate(
                 )),
                 matches: vec!["[LF-PROV-SIGSTORE-INVALID] invalid Sigstore bundle".to_owned()],
                 duration_ms: 0,
+                ..Default::default()
             });
+            crate::finding_evidence::ensure_finding_identity(
+                report.results.last_mut().expect("just pushed"),
+                "LF-PROV-SIGSTORE-INVALID",
+            );
         }
     } else {
         report.results.push(LayerScanResult {
@@ -103,7 +113,12 @@ pub fn inspect_and_evaluate(
             detail: Some("No artifact provenance bundle was supplied".to_owned()),
             matches: vec!["[LF-PROV-UNSIGNED] artifact is unsigned/unattested".to_owned()],
             duration_ms: 0,
+            ..Default::default()
         });
+        crate::finding_evidence::ensure_finding_identity(
+            report.results.last_mut().expect("just pushed"),
+            "LF-PROV-UNSIGNED",
+        );
     }
 
     let context = PolicyContext {

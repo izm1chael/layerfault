@@ -258,7 +258,15 @@ fn aggregate(
         trusted_signatures: trusted,
         valid_signatures: valid,
         signer_fingerprints,
-        finding: finding(model, status, rule, detail, elapsed_ms(started)),
+        finding: finding_with(
+            model,
+            status,
+            rule,
+            detail,
+            elapsed_ms(started),
+            key.and_then(|value| value.key_fingerprint.as_deref()),
+            key.and_then(|value| value.key_name.as_deref()),
+        ),
     }
 }
 
@@ -443,15 +451,23 @@ fn single(
     ProvenanceEvaluation {
         state,
         key_fingerprint: fingerprint.clone(),
-        key_name: name,
+        key_name: name.clone(),
         trusted_signatures: trusted,
         valid_signatures: valid,
         signer_fingerprints: if state == TrustState::Trusted {
-            fingerprint.into_iter().collect()
+            fingerprint.clone().into_iter().collect()
         } else {
             Vec::new()
         },
-        finding: finding(model, status, rule, detail.to_owned(), elapsed_ms(started)),
+        finding: finding_with(
+            model,
+            status,
+            rule,
+            detail.to_owned(),
+            elapsed_ms(started),
+            fingerprint.as_deref(),
+            name.as_deref(),
+        ),
     }
 }
 
@@ -486,7 +502,15 @@ fn verify_legacy(
             trusted_signatures: 0,
             valid_signatures: 1,
             signer_fingerprints: Vec::new(),
-            finding: finding(model, ScanStatus::Pass, "[LF-PROV-LOCAL]", format!("Legacy detached signature verified by supplied key {fingerprint}; trust/identity binding is not established"), elapsed_ms(started)),
+            finding: finding_with(
+                model,
+                ScanStatus::Pass,
+                "[LF-PROV-LOCAL]",
+                format!("Legacy detached signature verified by supplied key {fingerprint}; trust/identity binding is not established"),
+                elapsed_ms(started),
+                Some(&fingerprint),
+                None,
+            ),
         })
     } else {
         Ok(single(
@@ -509,17 +533,50 @@ fn finding(
     detail: String,
     duration_ms: u64,
 ) -> LayerScanResult {
-    LayerScanResult {
-        layer_digest: model.digest.clone(),
-        media_type: "application/vnd.ollama.image.manifest".to_owned(),
-        check_type: CheckType::Provenance,
-        status,
-        finding_class: FindingClass::Attestation,
-        confidence: Confidence::High,
-        detail: Some(detail),
-        matches: vec![format!("{rule_id} provenance")],
-        duration_ms,
+    finding_with(model, status, rule_id, detail, duration_ms, None, None)
+}
+
+/// Build a provenance finding with the trust-state evidence that produced it.
+///
+/// Never includes private key material: only the fingerprint, name and the
+/// verification/trust-store state Layerfault actually observed.
+#[allow(clippy::too_many_arguments)]
+fn finding_with(
+    model: &ResolvedModel,
+    status: ScanStatus,
+    rule_id: &str,
+    detail: String,
+    duration_ms: u64,
+    fingerprint: Option<&str>,
+    key_name: Option<&str>,
+) -> LayerScanResult {
+    let bare_rule = rule_id.trim_start_matches('[').trim_end_matches(']');
+    let media_type = "application/vnd.ollama.image.manifest";
+    let subject = crate::finding_evidence::EvidenceSubject::identity(&model.digest, media_type)
+        .with_sha256(Some(model.digest.clone()))
+        .with_identity(&model.name);
+    let mut facts = serde_json::json!({
+        "subject_identity": model.name,
+        "manifest_digest": model.digest,
+        "status": format!("{status:?}"),
+    });
+    if let Some(fingerprint) = fingerprint {
+        facts["key_fingerprint"] = serde_json::Value::String(fingerprint.to_owned());
     }
+    if let Some(name) = key_name {
+        facts["key_name"] = serde_json::Value::String(name.to_owned());
+    }
+    crate::finding_evidence::FindingBuilder::new(bare_rule, CheckType::Provenance, status)
+        .class(FindingClass::Attestation)
+        .confidence(Confidence::High)
+        .digest(&model.digest)
+        .media_type(media_type)
+        .subject(subject.clone())
+        .detail(detail)
+        .match_note("provenance")
+        .evidence(crate::finding_evidence::provenance_evidence(subject, facts))
+        .duration_ms(duration_ms)
+        .finish()
 }
 
 fn elapsed_ms(started: Instant) -> u64 {

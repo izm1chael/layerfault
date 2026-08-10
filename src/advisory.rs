@@ -331,7 +331,7 @@ pub fn evaluate_info(
         match affected {
             Some(true) => {
                 let status = if advisory.severity >= Severity::High { ScanStatus::Fail } else { ScanStatus::Warn };
-                findings.push(finding(&runtime, status, advisory.severity, &advisory.id, format!("{} is affected by {} ({:?}): {}. Fixed boundary: {}. {}", runtime.runtime.as_str(), advisory.id, advisory.severity, advisory.title, advisory.matcher.fixed, advisory.reference)));
+                findings.push(finding_with(&runtime, status, advisory.severity, &advisory.id, format!("{} is affected by {} ({:?}): {}. Fixed boundary: {}. {}", runtime.runtime.as_str(), advisory.id, advisory.severity, advisory.title, advisory.matcher.fixed, advisory.reference), Some(advisory)));
             }
             Some(false) => {}
             None => findings.push(finding(&runtime, ScanStatus::Warn, Severity::Moderate, "LF-RUNTIME-VERSION-UNKNOWN", format!("Layerfault could not compare runtime version '{}' against advisory {} fixed boundary {}", parsed.as_deref().unwrap_or("unknown"), advisory.id, advisory.matcher.fixed))),
@@ -422,27 +422,57 @@ fn finding(
     rule: &str,
     detail: String,
 ) -> LayerScanResult {
-    LayerScanResult {
-        layer_digest: runtime
-            .parsed_version
-            .clone()
-            .unwrap_or_else(|| runtime.raw_version.clone()),
-        media_type: format!(
-            "application/vnd.layerfault.runtime+{}",
-            runtime.runtime.as_str()
-        ),
-        check_type: CheckType::RuntimeAdvisory,
-        status,
-        finding_class: if status == ScanStatus::Fail {
+    finding_with(runtime, status, severity, rule, detail, None)
+}
+
+/// Build a runtime-advisory finding, optionally with the matched advisory
+/// evidence: runtime, detected version, advisory ID, affected range and
+/// comparison result.
+fn finding_with(
+    runtime: &RuntimeInfo,
+    status: ScanStatus,
+    severity: Severity,
+    rule: &str,
+    detail: String,
+    advisory: Option<&RuntimeAdvisory>,
+) -> LayerScanResult {
+    let layer_digest = runtime
+        .parsed_version
+        .clone()
+        .unwrap_or_else(|| runtime.raw_version.clone());
+    let media_type = format!(
+        "application/vnd.layerfault.runtime+{}",
+        runtime.runtime.as_str()
+    );
+    let subject = crate::finding_evidence::EvidenceSubject::identity(&layer_digest, &media_type)
+        .with_sha256(Some(runtime.executable_sha256.clone()));
+    let mut facts = serde_json::json!({
+        "runtime": runtime.runtime.as_str(),
+        "executable": runtime.executable,
+        "raw_version": runtime.raw_version,
+        "parsed_version": runtime.parsed_version,
+        "severity": format!("{severity:?}"),
+    });
+    if let Some(advisory) = advisory {
+        facts["advisory_id"] = serde_json::Value::String(advisory.id.clone());
+        facts["fixed_boundary"] = serde_json::Value::String(advisory.matcher.fixed.clone());
+        facts["matcher_scheme"] = serde_json::Value::String(advisory.matcher.scheme.clone());
+        facts["reference"] = serde_json::Value::String(advisory.reference.clone());
+    }
+    crate::finding_evidence::FindingBuilder::new(rule, CheckType::RuntimeAdvisory, status)
+        .class(if status == ScanStatus::Fail {
             FindingClass::Operational
         } else {
             FindingClass::Policy
-        },
-        confidence: Confidence::High,
-        detail: Some(detail),
-        matches: vec![format!("[{rule}] runtime advisory {:?}", severity)],
-        duration_ms: 0,
-    }
+        })
+        .confidence(Confidence::High)
+        .digest(&layer_digest)
+        .media_type(&media_type)
+        .subject(subject.clone())
+        .detail(detail)
+        .match_note(format!("runtime advisory {severity:?}"))
+        .evidence(crate::finding_evidence::advisory_match(subject, facts))
+        .finish()
 }
 
 #[cfg(test)]

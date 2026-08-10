@@ -1,4 +1,5 @@
 //! Safe Keras archive inspection. Model code is never imported/executed.
+use crate::finding_evidence::{config_value, EvidenceSubject, FindingBuilder};
 use anyhow::{bail, Context, Result};
 use serde::Serialize;
 use std::fs::File;
@@ -129,6 +130,12 @@ pub fn scan(
                     vec![]
                 },
                 st,
+                if warn {
+                    "LF-KERAS-CUSTOM-OBJECT"
+                } else {
+                    "LF-KERAS-STRUCT-VALID"
+                },
+                &s.custom_objects,
             ))
         }
         Err(e) => Ok(mk(
@@ -139,6 +146,8 @@ pub fn scan(
             format!("Invalid or unsafe Keras archive: {e}"),
             vec!["[LF-KERAS-ARCHIVE] Keras archive validation failed".into()],
             st,
+            "LF-KERAS-ARCHIVE",
+            &[],
         )),
     }
 }
@@ -168,6 +177,7 @@ fn collect_custom(v: &serde_json::Value, out: &mut Vec<String>) {
         _ => {}
     }
 }
+#[allow(clippy::too_many_arguments)]
 fn mk(
     d: &str,
     m: &str,
@@ -176,18 +186,42 @@ fn mk(
     detail: String,
     matches: Vec<String>,
     st: std::time::Instant,
+    rule_id: &str,
+    custom_objects: &[String],
 ) -> crate::scanner::LayerScanResult {
-    crate::scanner::LayerScanResult {
-        layer_digest: d.into(),
-        media_type: m.into(),
-        check_type: crate::scanner::CheckType::KerasStructure,
-        status: s,
-        finding_class: c,
-        confidence: crate::scanner::Confidence::High,
-        detail: Some(detail),
-        matches,
-        duration_ms: u64::try_from(st.elapsed().as_millis()).unwrap_or(u64::MAX),
+    let subject = EvidenceSubject::identity(d, m).with_sha256(Some(d.to_owned()));
+    let mut builder = FindingBuilder::new(rule_id, crate::scanner::CheckType::KerasStructure, s)
+        .class(c)
+        .confidence(crate::scanner::Confidence::High)
+        .digest(d)
+        .media_type(m)
+        .subject(subject.clone())
+        .detail(detail)
+        .duration_ms(u64::try_from(st.elapsed().as_millis()).unwrap_or(u64::MAX));
+    for note in matches.iter().skip(1) {
+        builder = builder.match_note(note.clone());
     }
+    if custom_objects.is_empty() {
+        builder = if s == crate::scanner::ScanStatus::Pass {
+            builder.evidence_not_applicable()
+        } else {
+            builder.evidence_unavailable(
+                "the archive parser rejected the structure before a specific entry could be attributed",
+            )
+        };
+    } else {
+        for object in custom_objects {
+            builder = builder.evidence(config_value(
+                subject.clone(),
+                "config.json custom_objects",
+                serde_json::Value::String(object.clone()),
+                "Custom or Lambda-like Keras layer referenced from the model config",
+            ));
+        }
+    }
+    let mut finding = builder.finish();
+    finding.matches = matches;
+    finding
 }
 
 #[cfg(test)]

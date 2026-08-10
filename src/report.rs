@@ -1,3 +1,5 @@
+use crate::coverage::Coverage;
+use crate::finding_evidence::{EvidenceLocation, EvidenceState, FindingCorrelation};
 use crate::scanner::{CheckType, Confidence, FindingClass, LayerScanResult, ScanStatus};
 use anyhow::Result;
 use colored::Colorize;
@@ -57,9 +59,14 @@ pub fn emit_json(reports: &[ModelReport]) -> Result<()> {
     Ok(())
 }
 
-/// Emit SARIF 2.1.0 containing WARN/FAIL findings only. Layerfault scans
-/// artifacts rather than source locations, so model/layer identity is carried
-/// in result properties instead of synthetic filesystem locations.
+/// Emit SARIF 2.1.0 containing WARN/FAIL findings only.
+///
+/// Layerfault scans artifacts rather than source trees, so model/layer identity
+/// is carried in result properties instead of synthetic filesystem locations.
+/// A real `physicalLocation` is emitted only where a genuine source file and
+/// line are known — custom Python, configuration, templates and scripts. Binary,
+/// tensor, opcode and metadata evidence stays in properties: fabricating a line
+/// number to satisfy SARIF tooling would be dishonest about what was measured.
 pub fn emit_sarif(reports: &[ModelReport]) -> Result<()> {
     let mut results = Vec::new();
     for report in reports {
@@ -72,7 +79,7 @@ pub fn emit_sarif(reports: &[ModelReport]) -> Result<()> {
                 .detail
                 .clone()
                 .unwrap_or_else(|| format!("{} finding", check_type_label(&finding.check_type)));
-            results.push(serde_json::json!({
+            let mut entry = serde_json::json!({
                 "ruleId": rule_id,
                 "level": match finding.status {
                     ScanStatus::Fail => "error",
@@ -91,7 +98,30 @@ pub fn emit_sarif(reports: &[ModelReport]) -> Result<()> {
                     "durationMs": finding.duration_ms,
                     "risk": crate::explain::risk_lookup(&rule_id)
                 }
-            }));
+            });
+            let properties = entry["properties"]
+                .as_object_mut()
+                .expect("sarif properties object");
+            if let Some(id) = finding.finding_id.as_ref() {
+                properties.insert("findingId".to_owned(), serde_json::json!(id));
+            }
+            if let Some(state) = finding.evidence_state.as_ref() {
+                properties.insert("evidenceState".to_owned(), serde_json::json!(state));
+            }
+            if let Some(reason) = finding.evidence_reason.as_ref() {
+                properties.insert("evidenceReason".to_owned(), serde_json::json!(reason));
+            }
+            if !finding.evidence.is_empty() {
+                properties.insert("evidence".to_owned(), serde_json::json!(&finding.evidence));
+            }
+            if let Some(explanation) = crate::explain::lookup(&rule_id) {
+                properties.insert("explanation".to_owned(), serde_json::json!(explanation));
+            }
+            let locations = sarif_locations(finding);
+            if !locations.is_empty() {
+                entry["locations"] = serde_json::Value::Array(locations);
+            }
+            results.push(entry);
         }
     }
 
@@ -114,6 +144,52 @@ pub fn emit_sarif(reports: &[ModelReport]) -> Result<()> {
 
 fn sarif_rule_id(result: &LayerScanResult) -> String {
     crate::policy::rule_id(result)
+}
+
+/// Build SARIF `locations` for evidence that genuinely has source semantics.
+///
+/// Only text evidence anchored to a package-relative member qualifies. Byte
+/// offsets, tensor names, metadata keys and opcode indices are real locations
+/// but not *source* locations, and SARIF has no honest way to express them.
+fn sarif_locations(finding: &LayerScanResult) -> Vec<serde_json::Value> {
+    let mut locations = Vec::new();
+    for record in &finding.evidence {
+        let Some(EvidenceLocation::Text {
+            line_start,
+            line_end,
+            column_start,
+            column_end,
+        }) = record.location.as_ref()
+        else {
+            continue;
+        };
+        let Some(uri) = record.subject.package_relative_path.as_deref() else {
+            continue;
+        };
+        let mut region = serde_json::json!({
+            "startLine": line_start,
+            "endLine": line_end,
+        });
+        if let Some(column) = column_start {
+            region["startColumn"] = serde_json::json!(column);
+        }
+        if let Some(column) = column_end {
+            region["endColumn"] = serde_json::json!(column);
+        }
+        if let Some(snippet) = record.excerpt.as_deref() {
+            region["snippet"] = serde_json::json!({ "text": snippet });
+        }
+        locations.push(serde_json::json!({
+            "physicalLocation": {
+                "artifactLocation": { "uri": uri },
+                "region": region,
+            }
+        }));
+        if locations.len() >= crate::finding_evidence::MAX_EVIDENCE_PER_FINDING {
+            break;
+        }
+    }
+    locations
 }
 
 fn overall_status(results: &[LayerScanResult]) -> ScanStatus {
@@ -228,9 +304,14 @@ pub fn emit_evaluated_json(reports: &[crate::app::EvaluatedReport]) -> Result<()
     Ok(())
 }
 
+/// Project a finding into the enriched JSON contract.
+///
+/// Every key that existed before the evidence upgrade is still emitted with the
+/// same name and meaning. Attribution keys are added alongside them, and are
+/// omitted rather than emitted empty when a detector has nothing to say.
 pub fn enriched_finding(finding: &LayerScanResult) -> serde_json::Value {
     let rule_id = crate::policy::rule_id(finding);
-    serde_json::json!({
+    let mut value = serde_json::json!({
         "rule_id": rule_id,
         "layer_digest": &finding.layer_digest,
         "media_type": &finding.media_type,
@@ -242,11 +323,220 @@ pub fn enriched_finding(finding: &LayerScanResult) -> serde_json::Value {
         "matches": &finding.matches,
         "duration_ms": finding.duration_ms,
         "risk": crate::explain::risk_lookup(&rule_id)
-    })
+    });
+
+    let object = value
+        .as_object_mut()
+        .expect("enriched finding is an object");
+    if let Some(id) = finding.finding_id.as_ref() {
+        object.insert("finding_id".to_owned(), serde_json::json!(id));
+    }
+    if let Some(subject) = finding.subject.as_ref() {
+        object.insert("subject".to_owned(), serde_json::json!(subject));
+    }
+    if let Some(state) = finding.evidence_state.as_ref() {
+        object.insert("evidence_state".to_owned(), serde_json::json!(state));
+    }
+    if let Some(reason) = finding.evidence_reason.as_ref() {
+        object.insert("evidence_reason".to_owned(), serde_json::json!(reason));
+    }
+    if !finding.evidence.is_empty() {
+        object.insert("evidence".to_owned(), serde_json::json!(&finding.evidence));
+    }
+    if let Some(explanation) = crate::explain::lookup(&rule_id) {
+        object.insert("explanation".to_owned(), serde_json::json!(explanation));
+    }
+    value
 }
 
 pub fn enriched_findings(findings: &[LayerScanResult]) -> Vec<serde_json::Value> {
     findings.iter().map(enriched_finding).collect()
+}
+
+/// Render the evidence-first human report.
+///
+/// This is the `--evidence` view. The default table output is deliberately
+/// unchanged, because existing users and the corpus regression gate depend on
+/// it byte for byte.
+///
+/// Every value that originates in an artifact has already been sanitised and
+/// redacted by [`crate::finding_evidence`], so hostile content cannot inject
+/// terminal escape sequences here.
+pub fn render_evidence_report(
+    subject: &str,
+    findings: &[LayerScanResult],
+    correlations: &[FindingCorrelation],
+    coverage: Option<&Coverage>,
+    color: bool,
+) -> String {
+    let mut out = String::new();
+    out.push_str(&format!("━━━ {subject} ━━━\n\n"));
+
+    let overall = overall_status(findings);
+    let decision = match overall {
+        ScanStatus::Pass => "PASS",
+        ScanStatus::Warn => "WARN",
+        ScanStatus::Fail => "FAIL",
+    };
+    let reportable: Vec<&LayerScanResult> = findings
+        .iter()
+        .filter(|finding| finding.status != ScanStatus::Pass)
+        .collect();
+    out.push_str(&format!(
+        "FINAL: {}  —  {} security-relevant finding(s)\n\n",
+        if color {
+            match overall {
+                ScanStatus::Pass => decision.green().to_string(),
+                ScanStatus::Warn => decision.yellow().to_string(),
+                ScanStatus::Fail => decision.red().to_string(),
+            }
+        } else {
+            decision.to_owned()
+        },
+        reportable.len()
+    ));
+
+    for finding in &reportable {
+        let rule_id = crate::policy::rule_id(finding);
+        out.push_str(&format!(
+            "[{}] {}\n",
+            confidence_label(&finding.confidence).to_uppercase(),
+            rule_id
+        ));
+        let explanation = crate::explain::lookup(&rule_id);
+        if let Some(explanation) = explanation.as_ref() {
+            out.push_str(&format!("{}\n", explanation.title));
+        }
+        if let Some(subject) = finding.subject.as_ref() {
+            let name = subject.canonical_name();
+            if !name.is_empty() {
+                out.push_str(&format!("\n  Subject:\n    {name}\n"));
+            }
+            if let Some(digest) = subject.sha256.as_deref() {
+                out.push_str(&format!("    {digest}\n"));
+            }
+        }
+        if let Some(detail) = finding.detail.as_deref() {
+            out.push_str(&format!("\n  Detail:\n    {detail}\n"));
+        }
+
+        if finding.evidence.is_empty() {
+            let state = finding
+                .evidence_state
+                .map(|state| format!("{state:?}").to_uppercase())
+                .unwrap_or_else(|| "UNAVAILABLE".to_owned());
+            out.push_str(&format!("\n  Evidence: {state}\n"));
+            if let Some(reason) = finding.evidence_reason.as_deref() {
+                out.push_str(&format!("    {reason}\n"));
+            }
+        } else {
+            out.push_str("\n  Evidence:\n");
+            for record in &finding.evidence {
+                if let Some(location) = record.location.as_ref() {
+                    out.push_str(&format!(
+                        "    {}\n",
+                        crate::evidence_bundle::describe_location(location)
+                    ));
+                }
+                if let Some(matched) = record.match_value.as_deref() {
+                    out.push_str(&format!("    match: {matched}\n"));
+                }
+                if let Some(excerpt) = record.excerpt.as_deref() {
+                    out.push_str("    ------------------------------------------------\n");
+                    for line in excerpt.lines() {
+                        out.push_str(&format!("    {line}\n"));
+                    }
+                    out.push_str("    ------------------------------------------------\n");
+                }
+                if let Some(structured) = record.structured.as_ref() {
+                    out.push_str(&format!("    {structured}\n"));
+                }
+                if record.redactions > 0 {
+                    out.push_str(&format!(
+                        "    ({} value(s) redacted as credential-shaped)\n",
+                        record.redactions
+                    ));
+                }
+                if record.truncated {
+                    out.push_str("    (evidence bounded by collection limits)\n");
+                }
+            }
+            if finding.evidence_state == Some(EvidenceState::Partial) {
+                if let Some(reason) = finding.evidence_reason.as_deref() {
+                    out.push_str(&format!("    Partial: {reason}\n"));
+                }
+            }
+        }
+
+        if let Some(explanation) = explanation.as_ref() {
+            out.push_str(&format!(
+                "\n  Why this matters:\n    {}\n",
+                explanation.why_it_matters
+            ));
+            out.push_str(&format!(
+                "\n  Limitation:\n    {}\n",
+                explanation.limitations
+            ));
+        }
+        out.push('\n');
+    }
+
+    if !correlations.is_empty() {
+        out.push_str("CORRELATION\n\n");
+        for correlation in correlations {
+            out.push_str(&format!(
+                "  {} ({:?} confidence)\n",
+                correlation.id, correlation.confidence
+            ));
+            out.push_str(&format!("    {}\n", correlation.summary));
+            if let Some(limitations) = correlation.limitations.as_deref() {
+                out.push_str(&format!("    Limitation: {limitations}\n"));
+            }
+            if !correlation.finding_ids.is_empty() {
+                out.push_str(&format!(
+                    "    Findings: {}\n",
+                    correlation.finding_ids.join(", ")
+                ));
+            }
+            out.push('\n');
+        }
+    }
+
+    if let Some(coverage) = coverage {
+        out.push_str("COVERAGE\n\n");
+        out.push_str(&format!(
+            "  complete: {}  scanned: {}/{} file(s), {} byte(s)\n",
+            coverage.complete,
+            coverage.files_scanned,
+            coverage.files_discovered,
+            coverage.bytes_scanned
+        ));
+        for reason in &coverage.reasons {
+            out.push_str(&format!("  - {reason}\n"));
+        }
+        if !coverage.complete {
+            out.push_str(
+                "\n  Coverage is incomplete: content Layerfault did not examine is unreviewed,\n\
+                 \x20 not clean.\n",
+            );
+        }
+        out.push('\n');
+    }
+
+    out
+}
+
+/// Print the evidence-first human report.
+pub fn emit_evidence_report(
+    subject: &str,
+    findings: &[LayerScanResult],
+    correlations: &[FindingCorrelation],
+    coverage: Option<&Coverage>,
+) {
+    print!(
+        "{}",
+        render_evidence_report(subject, findings, correlations, coverage, true)
+    );
 }
 
 pub fn emit_evaluated_table(reports: &[crate::app::EvaluatedReport]) {
@@ -375,6 +665,7 @@ mod tests {
             detail: None,
             matches: Vec::new(),
             duration_ms: 0,
+            ..Default::default()
         }
     }
 

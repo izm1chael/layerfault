@@ -1,3 +1,4 @@
+use crate::finding_evidence::{hash_mismatch, signature_evidence, EvidenceSubject, FindingBuilder};
 use crate::manifest::{resolve_blob_path, Layer};
 use crate::safeio::{open_readonly_nofollow, read_all_from_file};
 use crate::scanner::{
@@ -75,7 +76,7 @@ impl IntegrityScanner {
         let actual_size = file.metadata()?.len();
         if actual_size != layer.size {
             return Ok((
-                result(
+                result_with(
                     layer,
                     ScanStatus::Fail,
                     Some(format!(
@@ -83,6 +84,12 @@ impl IntegrityScanner {
                         layer.size
                     )),
                     duration_ms(started),
+                    "LF-INTEGRITY-SIZE-MISMATCH",
+                    Some(hash_mismatch(
+                        EvidenceSubject::identity(&layer.digest, &layer.media_type),
+                        &layer.size.to_string(),
+                        &actual_size.to_string(),
+                    )),
                 ),
                 None,
             ));
@@ -111,13 +118,19 @@ impl IntegrityScanner {
 
         if !computed.eq_ignore_ascii_case(expected) {
             return Ok((
-                result(
+                result_with(
                     layer,
                     ScanStatus::Fail,
                     Some(format!(
                         "Digest mismatch: expected {expected}, got {computed}"
                     )),
                     duration_ms(started),
+                    "LF-INTEGRITY-DIGEST-MISMATCH",
+                    Some(hash_mismatch(
+                        EvidenceSubject::identity(&layer.digest, &layer.media_type),
+                        expected,
+                        &computed,
+                    )),
                 ),
                 None,
             ));
@@ -161,6 +174,8 @@ impl IntegrityScanner {
                     vec!["[T13-001] Missing local attestation signature".to_owned()],
                     duration_ms(started),
                     Confidence::High,
+                    "T13-001",
+                    None,
                 ));
             }
             Err(error) => {
@@ -173,6 +188,8 @@ impl IntegrityScanner {
                     vec!["[T13-002] Unsafe or unreadable signature path".to_owned()],
                     duration_ms(started),
                     Confidence::High,
+                    "T13-002",
+                    None,
                 ));
             }
             Ok(_) => {}
@@ -188,6 +205,8 @@ impl IntegrityScanner {
                     vec!["[T13-002] Unsafe or unreadable signature file".to_owned()],
                     duration_ms(started),
                     Confidence::High,
+                    "T13-002",
+                    None,
                 ));
             }
         };
@@ -206,6 +225,14 @@ impl IntegrityScanner {
                     vec!["[T13-002] Invalid Ed25519 signature encoding".to_owned()],
                     duration_ms(started),
                     Confidence::High,
+                    "T13-002",
+                    Some(signature_evidence(
+                        EvidenceSubject::identity(
+                            manifest_digest,
+                            "application/vnd.ollama.image.manifest",
+                        ),
+                        serde_json::json!({ "signature_bytes": sig_bytes.len(), "expected_bytes": 64 }),
+                    )),
                 ));
             }
         };
@@ -223,6 +250,8 @@ impl IntegrityScanner {
                     vec!["[T13-001] Unverified local attestation signature".to_owned()],
                     duration_ms(started),
                     Confidence::High,
+                    "T13-001",
+                    None,
                 ));
             }
         };
@@ -238,6 +267,11 @@ impl IntegrityScanner {
                 vec![format!("Verified local attestation key {fingerprint}")],
                 duration_ms(started),
                 Confidence::High,
+                "LF-PROV-LOCAL-VERIFIED",
+                Some(signature_evidence(
+                    EvidenceSubject::identity(manifest_digest, "application/vnd.ollama.image.manifest"),
+                    serde_json::json!({ "key_fingerprint": fingerprint, "verified": true }),
+                )),
             )),
             Err(_) => Ok(attestation_result(
                 manifest_digest,
@@ -246,6 +280,14 @@ impl IntegrityScanner {
                 vec!["[T13-002] Invalid local attestation signature".to_owned()],
                 duration_ms(started),
                 Confidence::High,
+                "T13-002",
+                Some(signature_evidence(
+                    EvidenceSubject::identity(
+                        manifest_digest,
+                        "application/vnd.ollama.image.manifest",
+                    ),
+                    serde_json::json!({ "key_fingerprint": fingerprint, "verified": false }),
+                )),
             )),
         }
     }
@@ -296,19 +338,52 @@ fn result(
     detail: Option<String>,
     elapsed: u64,
 ) -> LayerScanResult {
-    LayerScanResult {
-        layer_digest: layer.digest.clone(),
-        media_type: layer.media_type.clone(),
-        check_type: CheckType::IntegrityHash,
+    result_with(
+        layer,
         status,
-        finding_class: FindingClass::Integrity,
-        confidence: Confidence::High,
         detail,
-        matches: Vec::new(),
-        duration_ms: elapsed,
-    }
+        elapsed,
+        "LF-INTEGRITY-VERIFIED",
+        None,
+    )
 }
 
+/// Build an integrity finding, optionally with the digest/size evidence that
+/// caused it to fire. `PASS` and open-failure findings have nothing to attach:
+/// a verified digest match is not itself security-relevant evidence, and an
+/// I/O error has no digest to compare.
+fn result_with(
+    layer: &Layer,
+    status: ScanStatus,
+    detail: Option<String>,
+    elapsed: u64,
+    rule_id: &str,
+    evidence: Option<crate::finding_evidence::FindingEvidence>,
+) -> LayerScanResult {
+    let subject = EvidenceSubject::identity(&layer.digest, &layer.media_type)
+        .with_sha256(Some(layer.digest.clone()))
+        .with_size(Some(layer.size));
+    let mut builder = FindingBuilder::new(rule_id, CheckType::IntegrityHash, status)
+        .class(FindingClass::Integrity)
+        .confidence(Confidence::High)
+        .digest(&layer.digest)
+        .media_type(&layer.media_type)
+        .subject(subject)
+        .duration_ms(elapsed);
+    if let Some(detail) = detail {
+        builder = builder.detail(detail);
+    }
+    builder = match evidence {
+        Some(record) => builder.evidence(record),
+        None if status == ScanStatus::Pass => builder.evidence_not_applicable(),
+        None => builder.evidence_unavailable(
+            "the blob could not be opened or measured, so no digest comparison exists",
+        ),
+    };
+    builder.finish()
+}
+
+#[allow(clippy::too_many_arguments)]
 fn attestation_result(
     digest: &str,
     status: ScanStatus,
@@ -316,18 +391,41 @@ fn attestation_result(
     matches: Vec<String>,
     elapsed: u64,
     confidence: Confidence,
+    rule_id: &str,
+    evidence: Option<crate::finding_evidence::FindingEvidence>,
 ) -> LayerScanResult {
-    LayerScanResult {
-        layer_digest: digest.to_owned(),
-        media_type: "application/vnd.ollama.image.manifest".to_owned(),
-        check_type: CheckType::Provenance,
-        status,
-        finding_class: FindingClass::Attestation,
-        confidence,
-        detail,
-        matches,
-        duration_ms: elapsed,
+    let media_type = "application/vnd.ollama.image.manifest";
+    let subject =
+        EvidenceSubject::identity(digest, media_type).with_sha256(Some(digest.to_owned()));
+    let mut builder = FindingBuilder::new(rule_id, CheckType::Provenance, status)
+        .class(FindingClass::Attestation)
+        .confidence(confidence)
+        .digest(digest)
+        .media_type(media_type)
+        .subject(subject)
+        .duration_ms(elapsed);
+    if let Some(detail) = detail {
+        builder = builder.detail(detail);
     }
+    for note in matches.iter().skip(1) {
+        builder = builder.match_note(note.clone());
+    }
+    builder = match evidence {
+        Some(record) => builder.evidence(record),
+        None if status == ScanStatus::Warn
+            && matches.first().is_some_and(|m| m.contains("Missing")) =>
+        {
+            builder.evidence_unavailable("no signature file exists at the expected path")
+        }
+        None => builder.evidence_unavailable(
+            "attestation state was determined without a comparable signature value",
+        ),
+    };
+    let mut finding = builder.finish();
+    if !matches.is_empty() {
+        finding.matches = matches;
+    }
+    finding
 }
 
 fn key_fingerprint(key: &VerifyingKey) -> String {

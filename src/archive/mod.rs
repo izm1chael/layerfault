@@ -96,7 +96,12 @@ pub fn inspect_opened(
             )),
             matches: vec!["[LF-ARCHIVE-FORMAT-MISMATCH] container extension and magic signature contradict".to_owned()],
             duration_ms: 0,
+            ..Default::default()
         });
+        crate::finding_evidence::ensure_finding_identity(
+            findings.last_mut().expect("just pushed"),
+            "LF-ARCHIVE-FORMAT-MISMATCH",
+        );
     }
 
     let mut budget = ArchiveBudgetTracker::new(limits.clone(), depth);

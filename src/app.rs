@@ -404,7 +404,7 @@ fn policy_result(
     status: ScanStatus,
     detail: String,
 ) -> LayerScanResult {
-    LayerScanResult {
+    let mut result = LayerScanResult {
         layer_digest: digest.to_owned(),
         media_type: media_type.to_owned(),
         check_type: CheckType::LayerPolicy,
@@ -414,11 +414,14 @@ fn policy_result(
         detail: Some(detail),
         matches: Vec::new(),
         duration_ms: 0,
-    }
+        ..Default::default()
+    };
+    crate::finding_evidence::ensure_finding_identity(&mut result, "LF-LAYERPOLICY");
+    result
 }
 
 fn scan_error(digest: &str, media_type: &str, detail: String) -> LayerScanResult {
-    LayerScanResult {
+    let mut result = LayerScanResult {
         layer_digest: digest.to_owned(),
         media_type: media_type.to_owned(),
         check_type: CheckType::ScanError,
@@ -428,7 +431,10 @@ fn scan_error(digest: &str, media_type: &str, detail: String) -> LayerScanResult
         detail: Some(detail),
         matches: vec!["[LF-SCAN-ERROR] scan error".to_owned()],
         duration_ms: 0,
-    }
+        ..Default::default()
+    };
+    crate::finding_evidence::ensure_finding_identity(&mut result, "LF-SCAN-ERROR");
+    result
 }
 
 pub fn scanner_exit_code(reports: &[EvaluatedReport]) -> i32 {

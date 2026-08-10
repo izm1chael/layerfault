@@ -596,15 +596,19 @@ fn make_finding(
     rule: &str,
     detail: String,
 ) -> LayerScanResult {
-    LayerScanResult {
-        layer_digest: digest.to_owned(),
-        media_type: "application/vnd.layerfault.archive".to_owned(),
-        check_type,
-        status,
-        finding_class: class,
-        confidence,
-        detail: Some(detail),
-        matches: vec![format!("[{rule}] archive finding")],
-        duration_ms: 0,
-    }
+    let media_type = "application/vnd.layerfault.archive";
+    let subject = crate::finding_evidence::EvidenceSubject::identity(digest, media_type)
+        .with_sha256(Some(digest.to_owned()));
+    crate::finding_evidence::FindingBuilder::new(rule, check_type, status)
+        .class(class)
+        .confidence(confidence)
+        .digest(digest)
+        .media_type(media_type)
+        .subject(subject)
+        .detail(detail)
+        .match_note("archive finding")
+        .evidence_unavailable(
+            "archive-level structural/coverage condition without a single attributable member",
+        )
+        .finish()
 }

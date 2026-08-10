@@ -258,8 +258,13 @@ struct VerifyPackageArgs {
     common: ScanCommon,
     #[command(flatten)]
     evidence: EvidenceWriteArgs,
+    #[command(flatten)]
+    evidence_bundle: EvidenceBundleArgs,
     #[arg(long, default_value_t = false)]
     json: bool,
+    /// Render the evidence-first human report instead of the table.
+    #[arg(long = "evidence", default_value_t = false)]
+    evidence_report: bool,
 }
 
 #[derive(clap::Args, Debug)]
@@ -269,12 +274,17 @@ struct PipelineArgs {
     common: ScanCommon,
     #[command(flatten)]
     evidence: EvidenceWriteArgs,
+    #[command(flatten)]
+    evidence_bundle: EvidenceBundleArgs,
     #[arg(long, default_value_t = false, conflicts_with_all = ["sarif", "summary"])]
     json: bool,
     #[arg(long, default_value_t = false, conflicts_with_all = ["json", "summary"])]
     sarif: bool,
     #[arg(long, default_value_t = false, conflicts_with_all = ["json", "sarif"])]
     summary: bool,
+    /// Render the evidence-first human report instead of the table.
+    #[arg(long = "evidence", default_value_t = false, conflicts_with_all = ["json", "sarif", "summary"])]
+    evidence_report: bool,
 }
 
 #[derive(clap::Args, Debug, Clone, Default)]
@@ -283,6 +293,17 @@ struct EvidenceWriteArgs {
     evidence_out: Option<PathBuf>,
     #[arg(long, requires = "evidence_out")]
     evidence_key: Option<PathBuf>,
+}
+
+/// Self-contained evidence bundle output. Distinct from `EvidenceWriteArgs`
+/// (`--evidence-out`), which writes a signed Ed25519 admission envelope; this
+/// writes a reviewable directory of findings, excerpts and a manifest.
+#[derive(clap::Args, Debug, Clone, Default)]
+struct EvidenceBundleArgs {
+    /// Write a self-contained evidence bundle to this directory. Must not
+    /// already contain files.
+    #[arg(long, value_name = "DIR")]
+    evidence_bundle: Option<PathBuf>,
 }
 
 #[derive(clap::Args, Debug, Clone, Default)]
