@@ -100,6 +100,21 @@ pub fn inspect(root: &Path) -> Result<PackageReport> {
     let mut member_evidence = Vec::new();
     let mut total_bytes = 0_u64;
 
+    let mut auto_map_modules = BTreeSet::new();
+    for path in &discovery.paths {
+        if let Ok(rel) = safe_relative(&root, path) {
+            if rel.to_ascii_lowercase().ends_with(".json") {
+                if let Ok(file) = open_readonly_nofollow(path) {
+                    if let Ok(ev) = capture_custom_code_evidence(&rel, &file) {
+                        if ev.auto_map {
+                            auto_map_modules.extend(ev.modules);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     for path in discovery.paths {
         let rel = safe_relative(&root, &path)?;
         let file = open_readonly_nofollow(&path)?;
@@ -123,7 +138,13 @@ pub fn inspect(root: &Path) -> Result<PackageReport> {
         });
         let evidence = capture_custom_code_evidence(&rel, &file)?;
         findings.extend(scan_package_file(
-            &path, &rel, &file, size, &digest, &evidence,
+            &path,
+            &rel,
+            &file,
+            size,
+            &digest,
+            &evidence,
+            &auto_map_modules,
         )?);
         member_evidence.push(evidence);
         let changed = if crate::hashcache::eligible(size) {
@@ -300,7 +321,16 @@ pub fn inspect_member(display_path: &Path, content_path: &Path) -> Result<Vec<La
     let digest = hash.sha256.clone();
     let rel = display_path.display().to_string();
     let evidence = capture_custom_code_evidence(&rel, &file)?;
-    let mut findings = scan_package_file(display_path, &rel, &file, size, &digest, &evidence)?;
+    let empty_auto_map = BTreeSet::new();
+    let mut findings = scan_package_file(
+        display_path,
+        &rel,
+        &file,
+        size,
+        &digest,
+        &evidence,
+        &empty_auto_map,
+    )?;
     let changed = if crate::hashcache::eligible(size) {
         !crate::hashcache::identity_unchanged(content_path, &file, &hash.identity)?
     } else {
@@ -346,6 +376,7 @@ fn scan_package_file(
     size: u64,
     digest: &str,
     evidence: &PackageMemberEvidence,
+    auto_map_modules: &BTreeSet<String>,
 ) -> Result<Vec<LayerScanResult>> {
     let mut out = Vec::new();
     let format = ArtifactFormat::detect(path, &prefix(file, 8)?);
@@ -430,6 +461,33 @@ fn scan_package_file(
             "LF-PACKAGE-CODE",
             format!("Package contains executable/custom-code artifact '{}'; weight-only packages normally do not require executable content", rel),
         ));
+    }
+
+    if ext == "py" && !is_documentation_path(rel) && !is_tokenizer_vocabulary_path(rel) {
+        let limits = crate::python_static::limits::PythonAnalysisLimits::default();
+        if size as usize <= limits.max_source_bytes {
+            let mut reader = file.try_clone()?;
+            reader.seek(SeekFrom::Start(0))?;
+            if let Ok(source_bytes) =
+                crate::safeio::read_all_from_file(&reader, limits.max_source_bytes as u64)
+            {
+                if let Ok(source_str) = std::str::from_utf8(&source_bytes) {
+                    let started = std::time::Instant::now();
+                    if let Ok(semantic_findings) =
+                        crate::python_static::analyze_and_convert_findings(
+                            rel,
+                            source_str,
+                            digest,
+                            auto_map_modules,
+                            &limits,
+                            started,
+                        )
+                    {
+                        out.extend(semantic_findings);
+                    }
+                }
+            }
+        }
     }
 
     if is_text_candidate(&ext, &lower) {

@@ -28,7 +28,7 @@ fn main() {
     // semantics, not by unrelated CLI, platform, documentation or policy edits.
     // The full build identity is still embedded separately for evidence/audit.
     let mut scanner_files = Vec::new();
-    for root in ["src/scanner", "src/formats"] {
+    for root in ["src/scanner", "src/formats", "src/python_static"] {
         collect(Path::new(root), &mut scanner_files);
     }
     for file in [

@@ -34,6 +34,7 @@ pub mod paths;
 pub mod platform;
 pub mod policy;
 pub mod provenance;
+pub mod python_static;
 pub mod quantization;
 pub mod quarantine;
 pub mod report;
