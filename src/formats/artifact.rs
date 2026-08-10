@@ -230,17 +230,50 @@ fn inspect_opened(
             matches: vec!["[LF-KERAS-HDF5-LIMIT] HDF5 model recognized with explicit bounded capability limit".to_owned()], duration_ms: 0,
         }),
         ArtifactFormat::Unknown => {
-            results.push(LayerScanResult {
-                layer_digest: identity.clone(),
-                media_type: media.to_owned(),
-                check_type: crate::scanner::CheckType::LayerPolicy,
-                status: ScanStatus::Warn,
-                finding_class: FindingClass::Compatibility,
-                confidence: Confidence::High,
-                detail: Some("Unknown artifact format: integrity can be hashed but no structural parser is available".to_owned()),
-                matches: vec!["[LF-FORMAT-UNKNOWN] unknown artifact format".to_owned()],
-                duration_ms: 0,
-            });
+            let mut prefix_buf = [0_u8; 512];
+            let mut cloned = file.try_clone()?;
+            cloned.seek(SeekFrom::Start(0))?;
+            let n = cloned.read(&mut prefix_buf).unwrap_or(0);
+            let detection = crate::archive::detect_archive_format(path, &prefix_buf[..n]);
+            if detection.format != crate::archive::ArchiveFormat::Unknown {
+                match crate::archive::inspect_opened(
+                    path,
+                    &file,
+                    &identity,
+                    &crate::archive::ArchiveLimits::default(),
+                    0,
+                ) {
+                    Ok(arch_report) => results.extend(arch_report.findings),
+                    Err(error) => results.push(LayerScanResult {
+                        layer_digest: identity.clone(),
+                        media_type: media.to_owned(),
+                        check_type: crate::scanner::CheckType::LayerPolicy,
+                        status: ScanStatus::Fail,
+                        finding_class: FindingClass::Structural,
+                        confidence: Confidence::High,
+                        detail: Some(format!(
+                            "Archive container '{}' failed inspection safely: {error}",
+                            path.display()
+                        )),
+                        matches: vec![
+                            "[LF-ARCHIVE-MALFORMED] archive inspection failed".to_owned(),
+                        ],
+                        duration_ms: 0,
+                    }),
+                }
+            } else {
+                results.push(LayerScanResult {
+                    layer_digest: identity.clone(),
+                    media_type: media.to_owned(),
+                    check_type: crate::scanner::CheckType::LayerPolicy,
+                    status: ScanStatus::Warn,
+                    finding_class: FindingClass::Compatibility,
+                    confidence: Confidence::High,
+                    detail: Some("Unknown artifact format: integrity can be hashed but no structural parser is available".to_owned()),
+                    matches: vec!["[LF-FORMAT-UNKNOWN] unknown artifact format".to_owned()],
+                    duration_ms: 0,
+                });
+            }
         }
     }
     let report = ArtifactReport {
@@ -345,13 +378,17 @@ fn known_extension(path: &Path) -> bool {
                     | "hdf5"
                     | "index"
                     | "pb"
+                    | "zip"
+                    | "whl"
+                    | "tar"
+                    | "tgz"
             )
         })
         || path
             .file_name()
             .and_then(|name| name.to_str())
             .is_some_and(|name| {
-                name.to_ascii_lowercase()
-                    .ends_with(".safetensors.index.json")
+                let lower = name.to_ascii_lowercase();
+                lower.ends_with(".safetensors.index.json") || lower.ends_with(".tar.gz")
             })
 }

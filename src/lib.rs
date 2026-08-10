@@ -5,6 +5,7 @@
 pub mod admission;
 pub mod advisory;
 pub mod app;
+pub mod archive;
 pub mod audit;
 pub mod baseline;
 pub mod behaviour;

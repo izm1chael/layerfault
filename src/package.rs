@@ -379,7 +379,34 @@ fn scan_package_file(
     auto_map_modules: &BTreeSet<String>,
 ) -> Result<Vec<LayerScanResult>> {
     let mut out = Vec::new();
-    let format = ArtifactFormat::detect(path, &prefix(file, 8)?);
+    let file_prefix = prefix(file, 512)?;
+    let archive_detection = crate::archive::detect_archive_format(path, &file_prefix);
+    if archive_detection.format != crate::archive::ArchiveFormat::Unknown {
+        let archive_limits = crate::archive::ArchiveLimits::default();
+        match crate::archive::inspect_opened(path, file, rel, &archive_limits, 0) {
+            Ok(archive_report) => {
+                out.extend(archive_report.findings);
+                return Ok(out);
+            }
+            Err(error) => {
+                out.push(finding(
+                    digest,
+                    CheckType::PackageSecurity,
+                    ScanStatus::Fail,
+                    FindingClass::Structural,
+                    Confidence::High,
+                    "LF-ARCHIVE-MALFORMED",
+                    format!(
+                        "Archive container '{}' failed inspection safely: {error}",
+                        rel
+                    ),
+                ));
+                return Ok(out);
+            }
+        }
+    }
+
+    let format = ArtifactFormat::detect(path, &file_prefix[..file_prefix.len().min(8)]);
     if format != ArtifactFormat::Unknown {
         match artifact::inspect_opened_file_with_sha256(
             path,

@@ -1,0 +1,135 @@
+pub mod detect;
+pub mod limits;
+pub mod member;
+pub mod tar;
+pub mod zip;
+
+pub use detect::{detect_archive_format, ArchiveFormat};
+pub use limits::{ArchiveBudgetTracker, ArchiveLimits};
+pub use member::{normalize_member_path, NormalizedMemberPath};
+
+use crate::safeio::open_readonly_nofollow;
+use crate::scanner::{CheckType, Confidence, FindingClass, LayerScanResult, ScanStatus};
+use anyhow::{anyhow, Context, Result};
+use std::fs::File;
+use std::io::{Read, Seek, SeekFrom};
+use std::path::Path;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CoverageState {
+    Complete,
+    Incomplete,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct ArchiveCoverage {
+    pub state: CoverageState,
+    pub inspected_members: usize,
+    pub skipped_members: usize,
+    pub total_uncompressed_bytes: u64,
+    pub details: Vec<String>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct ArchiveMemberReport {
+    pub virtual_path: String,
+    pub raw_name: String,
+    pub size_compressed: u64,
+    pub size_uncompressed: u64,
+    pub sha256: Option<String>,
+    pub is_dir: bool,
+    pub is_symlink: bool,
+    pub is_hardlink: bool,
+    pub link_target: Option<String>,
+    pub is_encrypted: bool,
+    pub format_smuggling: bool,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct ArchiveReport {
+    pub format: ArchiveFormat,
+    pub members: Vec<ArchiveMemberReport>,
+    pub findings: Vec<LayerScanResult>,
+    pub coverage: ArchiveCoverage,
+}
+
+pub fn inspect(path: &Path, limits: &ArchiveLimits) -> Result<ArchiveReport> {
+    let file = open_readonly_nofollow(path)?;
+    let identity = format!("file:{}", path.display());
+    inspect_opened(path, &file, &identity, limits, 0)
+}
+
+pub fn inspect_opened(
+    display_path: &Path,
+    file: &File,
+    identity: &str,
+    limits: &ArchiveLimits,
+    depth: usize,
+) -> Result<ArchiveReport> {
+    let mut cloned = file.try_clone().with_context(|| {
+        format!(
+            "Unable to clone file handle for '{}'",
+            display_path.display()
+        )
+    })?;
+    cloned.seek(SeekFrom::Start(0))?;
+    let mut prefix_buf = [0_u8; 512];
+    let n = cloned.read(&mut prefix_buf)?;
+    let prefix = &prefix_buf[..n];
+
+    let detection = detect_archive_format(display_path, prefix);
+    let mut findings = Vec::new();
+
+    if detection.mismatch {
+        findings.push(LayerScanResult {
+            layer_digest: identity.to_owned(),
+            media_type: "application/vnd.layerfault.archive".to_owned(),
+            check_type: CheckType::PackageSecurity,
+            status: ScanStatus::Fail,
+            finding_class: FindingClass::Integrity,
+            confidence: Confidence::High,
+            detail: Some(format!(
+                "Archive format smuggling detected: file extension suggests '{}' but container magic header matches '{}'",
+                detection.claimed_format.as_str(),
+                detection.format.as_str()
+            )),
+            matches: vec!["[LF-ARCHIVE-FORMAT-MISMATCH] container extension and magic signature contradict".to_owned()],
+            duration_ms: 0,
+        });
+    }
+
+    let mut budget = ArchiveBudgetTracker::new(limits.clone(), depth);
+
+    let is_wheel = detection.format == ArchiveFormat::Wheel;
+    let mut report = match detection.format {
+        ArchiveFormat::Zip | ArchiveFormat::Wheel => zip::inspect_zip(
+            display_path,
+            file,
+            identity,
+            &mut budget,
+            is_wheel,
+            detection.format,
+        )?,
+        ArchiveFormat::Tar | ArchiveFormat::TarGz => {
+            let is_gz = detection.format == ArchiveFormat::TarGz;
+            tar::inspect_tar(
+                display_path,
+                file,
+                identity,
+                &mut budget,
+                is_gz,
+                detection.format,
+            )?
+        }
+        ArchiveFormat::Unknown => {
+            return Err(anyhow!(
+                "Unsupported archive container format for '{}'",
+                display_path.display()
+            ));
+        }
+    };
+
+    report.findings.extend(findings);
+    Ok(report)
+}
