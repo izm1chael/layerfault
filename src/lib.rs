@@ -60,3 +60,5 @@ pub struct ThresholdConfig {
     pub max_ctx: u64,
     pub max_predict: i64,
 }
+
+pub use explain::{comparable, Comparability, FindingDescriptor};

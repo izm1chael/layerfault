@@ -115,8 +115,24 @@ pub fn emit_sarif(reports: &[ModelReport]) -> Result<()> {
                 properties.insert("evidence".to_owned(), serde_json::json!(&finding.evidence));
             }
             if let Some(explanation) = crate::explain::lookup(&rule_id) {
+                properties.insert(
+                    "ruleVersion".to_owned(),
+                    serde_json::json!(explanation.rule_version),
+                );
+                properties.insert(
+                    "detectorFamily".to_owned(),
+                    serde_json::json!(explanation.detector_family),
+                );
                 properties.insert("explanation".to_owned(), serde_json::json!(explanation));
             }
+            properties.insert(
+                "scannerRevision".to_owned(),
+                serde_json::json!(crate::explain::scanner_revision()),
+            );
+            properties.insert(
+                "rulesetSha256".to_owned(),
+                serde_json::json!(crate::explain::ruleset_sha256()),
+            );
             let locations = sarif_locations(finding);
             if !locations.is_empty() {
                 entry["locations"] = serde_json::Value::Array(locations);
@@ -311,8 +327,19 @@ pub fn emit_evaluated_json(reports: &[crate::app::EvaluatedReport]) -> Result<()
 /// omitted rather than emitted empty when a detector has nothing to say.
 pub fn enriched_finding(finding: &LayerScanResult) -> serde_json::Value {
     let rule_id = crate::policy::rule_id(finding);
+    let explanation = crate::explain::lookup(&rule_id);
+    let rule_version = explanation.as_ref().map(|e| e.rule_version).unwrap_or(1);
+    let detector_family = explanation
+        .as_ref()
+        .map(|e| e.detector_family)
+        .unwrap_or("scanner");
+
     let mut value = serde_json::json!({
         "rule_id": rule_id,
+        "rule_version": rule_version,
+        "detector_family": detector_family,
+        "scanner_revision": crate::explain::scanner_revision(),
+        "ruleset_sha256": crate::explain::ruleset_sha256(),
         "layer_digest": &finding.layer_digest,
         "media_type": &finding.media_type,
         "check_type": &finding.check_type,

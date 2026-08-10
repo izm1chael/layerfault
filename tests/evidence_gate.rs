@@ -84,6 +84,12 @@ fn every_registered_rule_has_a_complete_explanation() {
         match layerfault::explain::lookup(&rule_id) {
             None => missing.push(format!("{rule_id}: no explain::lookup entry")),
             Some(explanation) => {
+                if explanation.rule_version == 0 {
+                    missing.push(format!("{rule_id}: rule_version must be >= 1"));
+                }
+                if explanation.detector_family.trim().is_empty() {
+                    missing.push(format!("{rule_id}: empty detector_family"));
+                }
                 if explanation.why_it_matters.trim().is_empty() {
                     missing.push(format!("{rule_id}: empty why_it_matters"));
                 }

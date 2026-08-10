@@ -175,8 +175,34 @@ pub(crate) fn run_sources(args: OutputArgs) -> Result<()> {
 
 pub(crate) fn run_explain(args: ExplainArgs) -> Result<()> {
     let explanation = explain::risk_lookup(&args.rule_id);
+    let metadata = explain::lookup(&args.rule_id);
     if args.json {
-        println!("{}", serde_json::to_string_pretty(&explanation)?);
+        let mut val = serde_json::to_value(&explanation)?;
+        if let Some(m) = metadata {
+            if let Some(obj) = val.as_object_mut() {
+                obj.insert("rule_version".to_owned(), serde_json::json!(m.rule_version));
+                obj.insert(
+                    "detector_family".to_owned(),
+                    serde_json::json!(m.detector_family),
+                );
+                obj.insert(
+                    "evidence_requirement".to_owned(),
+                    serde_json::json!(m.evidence_requirement),
+                );
+                obj.insert(
+                    "scanner_revision".to_owned(),
+                    serde_json::json!(explain::scanner_revision()),
+                );
+                obj.insert(
+                    "ruleset_sha256".to_owned(),
+                    serde_json::json!(explain::ruleset_sha256()),
+                );
+                obj.insert("meaning".to_owned(), serde_json::json!(m.meaning));
+                obj.insert("limitations".to_owned(), serde_json::json!(m.limitations));
+                obj.insert("remediation".to_owned(), serde_json::json!(m.remediation));
+            }
+        }
+        println!("{}", serde_json::to_string_pretty(&val)?);
     } else {
         println!(
             "{}\n\nCategory:\n{}\n\nMeaning:\n{}\n\nWhy this matters:\n{}\n\nPotential impact:\n- {}\n\nRecommended action:\n- {}",
@@ -246,7 +272,11 @@ pub(crate) fn run_version(args: VersionArgs) -> Result<()> {
         println!(
             "{}",
             serde_json::to_string_pretty(&serde_json::json!({
-                "name":"layerfault", "version":env!("CARGO_PKG_VERSION"), "build_id":env!("LAYERFAULT_BUILD_ID"),
+                "name":"layerfault",
+                "version":env!("CARGO_PKG_VERSION"),
+                "build_id":env!("LAYERFAULT_BUILD_ID"),
+                "scanner_revision":crate::explain::scanner_revision(),
+                "ruleset_sha256":crate::explain::ruleset_sha256(),
                 "report_schema":"1.0", "policy_schema":1, "baseline_schema":1,
                 "supported_formats":["gguf","safetensors","safetensors-index","model-package"],
                 "sources":["ollama","lmstudio","llama-cpp","hf-cache","file","directory"],
@@ -255,9 +285,10 @@ pub(crate) fn run_version(args: VersionArgs) -> Result<()> {
         );
     } else {
         println!(
-            "layerfault {} ({})",
+            "layerfault {} ({}) ruleset:{}",
             env!("CARGO_PKG_VERSION"),
-            env!("LAYERFAULT_BUILD_ID")
+            env!("LAYERFAULT_BUILD_ID"),
+            crate::explain::ruleset_sha256()
         );
     }
     Ok(())

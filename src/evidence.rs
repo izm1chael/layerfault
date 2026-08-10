@@ -22,6 +22,10 @@ pub struct EvidencePayload {
     pub layerfault_version: String,
     pub build_id: String,
     pub detector_contract: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scanner_revision: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ruleset_sha256: Option<String>,
     pub policy_sha256: String,
     pub trust_store_sha256: String,
     pub runtime: Option<Value>,
@@ -73,6 +77,8 @@ pub fn create_signed(context: EvidenceContext<'_>, private_key: &Path) -> Result
         layerfault_version: env!("CARGO_PKG_VERSION").to_owned(),
         build_id: env!("LAYERFAULT_BUILD_ID").to_owned(),
         detector_contract: "layerfault-security-contract".to_owned(),
+        scanner_revision: Some(crate::explain::scanner_revision().to_owned()),
+        ruleset_sha256: Some(crate::explain::ruleset_sha256().to_owned()),
         policy_sha256: digest(&policy_bytes),
         trust_store_sha256: digest(&trust_bytes),
         runtime: context.runtime.map(serde_json::to_value).transpose()?,
