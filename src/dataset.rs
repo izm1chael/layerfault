@@ -1186,11 +1186,30 @@ mod tests {
     use super::*;
 
     fn temp(name: &str) -> PathBuf {
+        let thread_name: String = std::thread::current()
+            .name()
+            .unwrap_or("test")
+            .chars()
+            .map(|value| {
+                if value.is_ascii_alphanumeric() || matches!(value, '-' | '_') {
+                    value
+                } else {
+                    '_'
+                }
+            })
+            .collect();
         std::env::temp_dir().join(format!(
             "layerfault-dataset-{name}-{}-{}",
             std::process::id(),
-            std::thread::current().name().unwrap_or("test")
+            thread_name
         ))
+    }
+
+    #[test]
+    fn test_fixture_paths_are_windows_safe() {
+        let path = temp("portable");
+        let name = path.file_name().and_then(|value| value.to_str()).unwrap();
+        assert!(!name.contains([':', '<', '>', '"', '/', '\\', '|', '?', '*']));
     }
 
     #[test]
