@@ -593,12 +593,22 @@ fn dispatch_member_scan(
     }
 
     // Model artifact check
-    let artifact_format = crate::formats::ArtifactFormat::detect(Path::new(rel_path), prefix);
-    if artifact_format != crate::formats::ArtifactFormat::Unknown {
+    let identification =
+        crate::formats::ArtifactIdentification::identify(Path::new(rel_path), prefix);
+    if identification.selected != crate::formats::ArtifactFormat::Unknown
+        || !identification.contradictions.is_empty()
+    {
+        let scan_format = if identification.selected != crate::formats::ArtifactFormat::Unknown {
+            identification.selected
+        } else {
+            identification
+                .extension_claim
+                .unwrap_or(crate::formats::ArtifactFormat::Unknown)
+        };
         match crate::formats::artifact::inspect_opened_file_with_sha256(
             content_path,
             &file,
-            artifact_format,
+            scan_format,
             crate::formats::artifact::ArtifactScanMode::Full,
             digest,
         ) {

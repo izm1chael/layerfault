@@ -1,11 +1,16 @@
 pub mod artifact;
+pub mod extent;
 pub mod gguf;
+pub mod identification;
 pub mod keras;
 pub mod onnx;
 pub mod pickle;
 pub mod safetensors;
 pub mod tensorflow;
 pub mod tflite;
+
+pub use extent::ParsedExtent;
+pub use identification::{ArtifactIdentification, ContradictionKind, FormatContradiction};
 
 use std::path::Path;
 
@@ -27,43 +32,7 @@ pub enum ArtifactFormat {
 
 impl ArtifactFormat {
     pub fn detect(path: &Path, prefix: &[u8]) -> Self {
-        let name = path
-            .file_name()
-            .and_then(|v| v.to_str())
-            .unwrap_or("")
-            .to_ascii_lowercase();
-        let ext = path
-            .extension()
-            .and_then(|v| v.to_str())
-            .unwrap_or("")
-            .to_ascii_lowercase();
-        if prefix.starts_with(b"GGUF") || ext == "gguf" {
-            Self::Gguf
-        } else if name.ends_with(".safetensors.index.json") {
-            Self::SafetensorsIndex
-        } else if ext == "safetensors" {
-            Self::Safetensors
-        } else if matches!(
-            ext.as_str(),
-            "pkl" | "pickle" | "joblib" | "pt" | "pth" | "ckpt"
-        ) || (prefix.len() >= 2 && prefix[0] == 0x80 && (2..=5).contains(&prefix[1]))
-        {
-            Self::Pickle
-        } else if ext == "onnx" {
-            Self::Onnx
-        } else if name == "saved_model.pb" {
-            Self::TensorFlowSavedModel
-        } else if ext == "index" && !name.ends_with(".safetensors.index.json") {
-            Self::TensorFlowCheckpoint
-        } else if prefix.len() >= 8 && &prefix[4..8] == b"TFL3" || ext == "tflite" {
-            Self::TensorFlowLite
-        } else if ext == "keras" {
-            Self::KerasArchive
-        } else if matches!(ext.as_str(), "h5" | "hdf5") {
-            Self::KerasHdf5
-        } else {
-            Self::Unknown
-        }
+        ArtifactIdentification::identify(path, prefix).selected
     }
     pub fn as_str(self) -> &'static str {
         match self {

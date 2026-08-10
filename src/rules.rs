@@ -109,6 +109,13 @@ pub const RULES: &[RuleSpec] = &[
     ),
     required("LF-SERIALIZATION-UNSAFE"),
     required("LF-SERIALIZATION-BIN"),
+    // -- Format identification and polyglots ------------------------------
+    required("LF-FORMAT-CLAIM-MISMATCH"),
+    required("LF-FORMAT-CONTENT-SMUGGLING"),
+    required("LF-FORMAT-TRAILING-DATA"),
+    required("LF-FORMAT-APPENDED-ARCHIVE"),
+    required("LF-FORMAT-APPENDED-SERIALIZATION"),
+    required("LF-FORMAT-POLYGLOT"),
     // -- GGUF --------------------------------------------------------------
     required("T15-STRUCT"),
     structured(

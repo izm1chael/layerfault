@@ -87,6 +87,21 @@ pub struct GgufInventory {
     pub warnings: Vec<String>,
 }
 
+impl GgufInventory {
+    pub fn logical_extent(&self, file_len: u64) -> crate::formats::ParsedExtent {
+        let mut max_end = self.tensor_data_start;
+        for tensor in &self.tensors {
+            let tensor_end = self
+                .tensor_data_start
+                .saturating_add(tensor.offset)
+                .saturating_add(tensor.byte_len.unwrap_or(0));
+            max_end = max_end.max(tensor_end);
+        }
+        let aligned = align_up(max_end, self.alignment).unwrap_or(max_end);
+        crate::formats::ParsedExtent::new(aligned, file_len)
+    }
+}
+
 pub fn parse_path(path: &Path) -> Result<GgufInventory> {
     let file = crate::safeio::open_readonly_nofollow(path)?;
     let len = file.metadata()?.len();

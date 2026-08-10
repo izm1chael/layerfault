@@ -1,7 +1,12 @@
-use super::{keras, onnx, pickle, safetensors, tensorflow, tflite, ArtifactFormat};
+use super::{
+    gguf, keras, onnx, pickle, safetensors, tensorflow, tflite, ArtifactFormat,
+    ArtifactIdentification,
+};
+use crate::finding_evidence::{structural_invariant, EvidenceSubject, FindingBuilder};
 use crate::safeio::open_readonly_nofollow;
 use crate::scanner::{
-    BinaryScanner, Confidence, FindingClass, LayerScanResult, MetadataScanner, ScanStatus,
+    BinaryScanner, CheckType, Confidence, FindingClass, LayerScanResult, MetadataScanner,
+    ScanStatus,
 };
 use anyhow::{anyhow, Context, Result};
 use rayon::prelude::*;
@@ -48,12 +53,7 @@ impl ArtifactReport {
 
 pub fn inspect(path: &Path, mode: ArtifactScanMode) -> Result<ArtifactReport> {
     let file = open_readonly_nofollow(path)?;
-    let mut prefix = [0_u8; 8];
-    let mut cloned = file.try_clone()?;
-    cloned.seek(SeekFrom::Start(0))?;
-    let count = cloned.read(&mut prefix)?;
-    let format = ArtifactFormat::detect(path, &prefix[..count]);
-    inspect_opened(path, file, format, mode, None)
+    inspect_opened(path, file, None, mode, None)
 }
 
 pub fn inspect_with_format(
@@ -62,7 +62,7 @@ pub fn inspect_with_format(
     mode: ArtifactScanMode,
 ) -> Result<ArtifactReport> {
     let file = open_readonly_nofollow(path)?;
-    inspect_opened(path, file, format, mode, None)
+    inspect_opened(path, file, Some(format), mode, None)
 }
 
 pub fn inspect_opened_file(
@@ -71,7 +71,7 @@ pub fn inspect_opened_file(
     format: ArtifactFormat,
     mode: ArtifactScanMode,
 ) -> Result<ArtifactReport> {
-    inspect_opened(path, file.try_clone()?, format, mode, None)
+    inspect_opened(path, file.try_clone()?, Some(format), mode, None)
 }
 
 pub fn inspect_opened_file_with_sha256(
@@ -84,7 +84,7 @@ pub fn inspect_opened_file_with_sha256(
     inspect_opened(
         path,
         file.try_clone()?,
-        format,
+        Some(format),
         mode,
         Some(sha256.to_owned()),
     )
@@ -93,11 +93,25 @@ pub fn inspect_opened_file_with_sha256(
 fn inspect_opened(
     path: &Path,
     file: File,
-    format: ArtifactFormat,
+    supplied_format: Option<ArtifactFormat>,
     mode: ArtifactScanMode,
     precomputed_sha256: Option<String>,
 ) -> Result<ArtifactReport> {
     let size = file.metadata()?.len();
+    let mut prefix_buf = [0_u8; 512];
+    let mut cloned = file.try_clone()?;
+    cloned.seek(SeekFrom::Start(0))?;
+    let n = cloned.read(&mut prefix_buf).unwrap_or(0);
+
+    let identification = match supplied_format {
+        Some(fmt) => {
+            let mut id = ArtifactIdentification::identify(path, &prefix_buf[..n]);
+            id.selected = fmt;
+            id
+        }
+        None => ArtifactIdentification::identify(path, &prefix_buf[..n]),
+    };
+    let format = identification.selected;
     let before = crate::hashcache::capture_identity(path, &file)?;
     let discriminator = format!(
         "artifact:{}:{}",
@@ -187,6 +201,41 @@ fn inspect_opened(
         .unwrap_or_else(|| format!("file:{}", path.display()));
     let mut results = Vec::new();
     let mut compound_identity = None;
+
+    for contradiction in &identification.contradictions {
+        let rule_id = match contradiction.kind {
+            crate::formats::ContradictionKind::SerializationSmuggling
+            | crate::formats::ContradictionKind::ContainerSmuggling => {
+                "LF-FORMAT-CONTENT-SMUGGLING"
+            }
+            crate::formats::ContradictionKind::ExtensionMismatch => "LF-FORMAT-CLAIM-MISMATCH",
+            crate::formats::ContradictionKind::PolyglotOverlapping => "LF-FORMAT-POLYGLOT",
+        };
+        let subject = EvidenceSubject::member(&path.display().to_string())
+            .with_sha256(sha256.clone())
+            .with_media_type(media);
+        results.push(
+            FindingBuilder::new(rule_id, CheckType::LayerPolicy, ScanStatus::Fail)
+                .class(FindingClass::Structural)
+                .confidence(Confidence::High)
+                .digest(&identity)
+                .media_type(media)
+                .subject(subject.clone())
+                .detail(&contradiction.detail)
+                .evidence(structural_invariant(
+                    subject,
+                    "format extension claim contradicts observed content magic",
+                    serde_json::json!({
+                        "filename": path.file_name().and_then(|v| v.to_str()).unwrap_or(""),
+                        "extension_claim": contradiction.claim.map(|c| c.as_str()),
+                        "content_candidate": contradiction.content.as_str(),
+                        "detail": contradiction.detail,
+                    }),
+                ))
+                .finish(),
+        );
+    }
+
     match format {
         ArtifactFormat::Gguf => {
             results.extend(MetadataScanner::scan_file_results(
@@ -278,6 +327,41 @@ fn inspect_opened(
                 });
             }
         }
+    }
+
+    let trailing_subject = EvidenceSubject::member(&path.display().to_string())
+        .with_sha256(sha256.clone())
+        .with_media_type(media);
+    match format {
+        ArtifactFormat::Gguf => {
+            if let Ok(inv) = gguf::parse_file(&file, size) {
+                let extent = inv.logical_extent(size);
+                if let Ok(Some(finding)) = crate::formats::extent::inspect_trailing_data(
+                    &file,
+                    extent,
+                    &trailing_subject,
+                    &identity,
+                    media,
+                ) {
+                    results.push(finding);
+                }
+            }
+        }
+        ArtifactFormat::Safetensors => {
+            if let Ok(inv) = safetensors::inventory_file(&file, size) {
+                let extent = inv.logical_extent(size);
+                if let Ok(Some(finding)) = crate::formats::extent::inspect_trailing_data(
+                    &file,
+                    extent,
+                    &trailing_subject,
+                    &identity,
+                    media,
+                ) {
+                    results.push(finding);
+                }
+            }
+        }
+        _ => {}
     }
     // Every branch above tags `matches[0]` with a `[RULE-ID]` prefix already;
     // backfill the structured identity fields for any finding still built as

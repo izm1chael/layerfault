@@ -48,6 +48,16 @@ pub struct SafetensorsInventory {
     pub tensors: Vec<SafetensorsTensor>,
 }
 
+impl SafetensorsInventory {
+    pub fn logical_extent(&self, file_len: u64) -> crate::formats::ParsedExtent {
+        let mut max_end = self.data_start;
+        for tensor in &self.tensors {
+            max_end = max_end.max(self.data_start.saturating_add(tensor.end));
+        }
+        crate::formats::ParsedExtent::new(max_end, file_len)
+    }
+}
+
 #[derive(Debug, Clone)]
 struct TensorSpec {
     dtype: String,
@@ -417,7 +427,7 @@ pub fn inventory_file(file: &File, file_len: u64) -> Result<SafetensorsInventory
     de.end()
         .context("trailing non-whitespace data in Safetensors header")?;
 
-    let data_bytes = file_len - data_start;
+    let available_bytes = file_len.saturating_sub(data_start);
     let mut tensors = Vec::<SafetensorsTensor>::new();
     let mut metadata = BTreeMap::<String, String>::new();
     let mut unknown_dtypes = BTreeSet::new();
@@ -443,7 +453,7 @@ pub fn inventory_file(file: &File, file_len: u64) -> Result<SafetensorsInventory
             continue;
         }
         let spec = parse_tensor(&name, &value)?;
-        if spec.end > data_bytes || spec.start > spec.end {
+        if spec.end > available_bytes || spec.start > spec.end {
             bail!("tensor '{name}' data_offsets are outside the data buffer");
         }
         if let Some(bytes_per_element) = dtype_bytes(&spec.dtype) {
@@ -488,11 +498,7 @@ pub fn inventory_file(file: &File, file_len: u64) -> Result<SafetensorsInventory
         }
         cursor = spec.end;
     }
-    if cursor != data_bytes {
-        bail!(
-            "Safetensors data buffer is not fully indexed: covered {cursor} of {data_bytes} bytes"
-        );
-    }
+    let data_bytes = cursor;
 
     tensors.sort_by(|a, b| a.name.cmp(&b.name));
     let summary = SafetensorsSummary {
