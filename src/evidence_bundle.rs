@@ -31,6 +31,8 @@ pub struct BundleSubject {
     pub revision: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub fingerprint: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub merkle_identity: Option<String>,
 }
 
 /// Everything needed to write a bundle.
@@ -303,6 +305,7 @@ mod tests {
                 identity: "fixture".to_owned(),
                 revision: None,
                 fingerprint: None,
+                merkle_identity: None,
             },
             decision: "WARN",
             findings: &findings,
@@ -357,6 +360,7 @@ mod tests {
                 identity: "owner/model".to_owned(),
                 revision: Some("8e8c".to_owned()),
                 fingerprint: Some("lfpkg:sha256:dead".to_owned()),
+                merkle_identity: None,
             },
             decision: "WARN",
             findings: &findings,

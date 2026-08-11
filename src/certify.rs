@@ -98,12 +98,19 @@ pub fn certify(include_sparse: bool) -> Result<CertificationReport> {
         package_b.join("config.json"),
         br#"{"architectures":["Fixture"]}"#,
     )?;
-    let fp_a = crate::package::fingerprint(&package_a)?;
-    let fp_b = crate::package::fingerprint(&package_b)?;
+    let fp_rep_a = crate::package::fingerprint_report(&package_a)?;
+    let fp_rep_b = crate::package::fingerprint_report(&package_b)?;
     report.checks.push(check(
         "package-location-independent",
-        fp_a == fp_b && fp_a.starts_with("lfpkg:sha256:"),
+        fp_rep_a.fingerprint == fp_rep_b.fingerprint
+            && fp_rep_a.fingerprint.starts_with("lfpkg:sha256:"),
         "identical packages at different roots receive the same canonical package identity",
+    ));
+    report.checks.push(check(
+        "package-merkle-identity-versioned",
+        fp_rep_a.merkle_identity == fp_rep_b.merkle_identity
+            && fp_rep_a.merkle_identity.starts_with("lfpkg:v2:sha256:"),
+        "versioned Merkle package identity is location-independent and starts with lfpkg:v2:sha256:",
     ));
     fs::write(package_b.join("model.pkl"), [0x80_u8, 4, 1, 2, 3])?;
     let package_report = crate::package::inspect(&package_b)?;

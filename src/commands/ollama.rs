@@ -29,6 +29,7 @@ pub(crate) fn run_verify(args: VerifyArgs) -> Result<()> {
         subject_fingerprint.as_deref(),
         None,
         None,
+        None,
         &decision_label(app::policy_exit_code(&reports)),
         serde_json::to_value(&reports)?,
     )?;

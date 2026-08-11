@@ -7,7 +7,9 @@
   "properties": {
     "root": {"type":"string"},
     "fingerprint": {"type":"string","pattern":"^lfpkg:sha256:[0-9a-f]{64}$"},
+    "merkle_identity": {"type":"string","pattern":"^lfpkg:v2:sha256:[0-9a-f]{64}$"},
     "files": {"type":"array","items":{"type":"object","required":["relative_path","kind","size"],"properties":{"relative_path":{"type":"string"},"kind":{"type":"string"},"size":{"type":"integer","minimum":0},"sha256":{"type":["string","null"]}},"additionalProperties":true}},
+    "merkle_manifest": {"type":"array","items":{"type":"object","required":["path","sha256","size","leaf_hash"],"properties":{"path":{"type":"string"},"sha256":{"type":"string"},"size":{"type":"integer","minimum":0},"leaf_hash":{"type":"string"}}}},
     "total_bytes": {"type":"integer","minimum":0},
     "findings": {"type":"array","items":{"type":"object"}}
   },

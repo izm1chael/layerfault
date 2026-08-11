@@ -73,6 +73,7 @@ pub(crate) fn run_verify_file(args: VerifyFileArgs) -> Result<()> {
         result.report.sha256.as_deref(),
         None,
         None,
+        None,
         &decision,
         serde_json::to_value(&result)?,
     )?;
@@ -126,6 +127,7 @@ pub(crate) fn run_fingerprint(args: FingerprintArgs) -> Result<()> {
         );
     } else {
         println!("{}", report.fingerprint);
+        println!("{}", report.merkle_identity);
         println!(
             "files={} bytes={} blocking={}",
             report.files.len(),
@@ -163,6 +165,7 @@ pub(crate) fn run_verify_package(args: VerifyPackageArgs) -> Result<()> {
         &report.fingerprint,
         "directory",
         Some(&report.fingerprint),
+        Some(&report.merkle_identity),
         None,
         None,
         &format!("{:?}", decision.action).to_ascii_uppercase(),
@@ -174,6 +177,7 @@ pub(crate) fn run_verify_package(args: VerifyPackageArgs) -> Result<()> {
         &report.fingerprint,
         None,
         Some(&report.fingerprint),
+        Some(&report.merkle_identity),
         &format!("{:?}", decision.action).to_ascii_uppercase(),
         &report.findings,
         &report.correlations,
@@ -229,6 +233,7 @@ pub(crate) fn run_pipeline(args: PipelineArgs) -> Result<()> {
             &report.fingerprint,
             "directory",
             Some(&report.fingerprint),
+            Some(&report.merkle_identity),
             None,
             None,
             &pipeline_decision(exit),
@@ -240,6 +245,7 @@ pub(crate) fn run_pipeline(args: PipelineArgs) -> Result<()> {
             &report.fingerprint,
             None,
             Some(&report.fingerprint),
+            Some(&report.merkle_identity),
             &pipeline_decision(exit),
             &report.findings,
             &report.correlations,
@@ -298,6 +304,7 @@ pub(crate) fn run_pipeline(args: PipelineArgs) -> Result<()> {
         report.sha256.as_deref(),
         None,
         None,
+        None,
         &pipeline_decision(exit),
         output.clone(),
     )?;
@@ -307,6 +314,7 @@ pub(crate) fn run_pipeline(args: PipelineArgs) -> Result<()> {
         &identity,
         None,
         report.sha256.as_deref(),
+        None,
         &pipeline_decision(exit),
         &report.results,
         &layerfault::correlate::correlate(&report.results),
@@ -334,6 +342,7 @@ fn maybe_write_evidence_bundle(
     identity: &str,
     revision: Option<&str>,
     fingerprint: Option<&str>,
+    merkle_identity: Option<&str>,
     decision: &str,
     findings: &[layerfault::scanner::LayerScanResult],
     correlations: &[layerfault::finding_evidence::FindingCorrelation],
@@ -348,6 +357,7 @@ fn maybe_write_evidence_bundle(
             identity: identity.to_owned(),
             revision: revision.map(str::to_owned),
             fingerprint: fingerprint.map(str::to_owned),
+            merkle_identity: merkle_identity.map(str::to_owned),
         },
         decision,
         findings,

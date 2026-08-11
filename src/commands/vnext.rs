@@ -938,6 +938,7 @@ pub(crate) fn run_review(args: ReviewArgs) -> Result<()> {
                 subject: &subject,
                 source: "local-review",
                 subject_fingerprint: Some(&subject),
+                merkle_identity: None,
                 policy: &policy,
                 trust_store: &trust,
                 runtime: None,
