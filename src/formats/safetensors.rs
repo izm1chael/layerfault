@@ -160,11 +160,12 @@ pub fn scan_file(
     file_len: u64,
     digest: &str,
     media_type: &str,
+    budget: &crate::budget::ScanBudget,
 ) -> Result<LayerScanResult> {
     let started = Instant::now();
     let subject =
         EvidenceSubject::identity(digest, media_type).with_sha256(Some(digest.to_owned()));
-    match validate_file(file, file_len) {
+    match validate_file_with_budget(file, file_len, Some(budget)) {
         Ok(summary) => {
             if summary.unknown_dtypes.is_empty() {
                 Ok(FindingBuilder::new(
@@ -269,12 +270,13 @@ pub fn scan_index(
     file_len: u64,
     digest: &str,
     media_type: &str,
+    budget: &crate::budget::ScanBudget,
 ) -> Result<LayerScanResult> {
     let started = Instant::now();
     let subject = EvidenceSubject::member(&path.display().to_string())
         .with_sha256(Some(digest.to_owned()))
         .with_media_type(media_type);
-    match validate_index(path, file, file_len) {
+    match validate_index_with_budget(path, file, file_len, Some(budget)) {
         Ok((tensors, shards)) => Ok(FindingBuilder::new(
             "LF-SAFE-INDEX",
             CheckType::SafetensorsStructure,
@@ -315,6 +317,15 @@ pub fn scan_index(
 }
 
 pub fn validate_index(path: &Path, file: &File, file_len: u64) -> Result<(usize, usize)> {
+    validate_index_with_budget(path, file, file_len, None)
+}
+
+pub fn validate_index_with_budget(
+    path: &Path,
+    file: &File,
+    file_len: u64,
+    budget: Option<&crate::budget::ScanBudget>,
+) -> Result<(usize, usize)> {
     if file_len == 0 || file_len > MAX_HEADER_BYTES {
         bail!("index size {file_len} is outside the 1..={MAX_HEADER_BYTES} safety range");
     }
@@ -349,6 +360,11 @@ pub fn validate_index(path: &Path, file: &File, file_len: u64) -> Result<(usize,
     })?;
     let mut shards = BTreeSet::<String>::new();
     for (tensor, shard) in &map {
+        if let Some(budget) = budget {
+            budget
+                .check()
+                .map_err(|error| anyhow!("global scan budget exhausted: {error}"))?;
+        }
         if tensor.is_empty() || tensor.len() > 16 * 1024 {
             bail!("weight_map contains an invalid tensor name");
         }
@@ -370,6 +386,11 @@ pub fn validate_index(path: &Path, file: &File, file_len: u64) -> Result<(usize,
         bail!("index references too many shards");
     }
     for shard in &shards {
+        if let Some(budget) = budget {
+            budget
+                .check()
+                .map_err(|error| anyhow!("global scan budget exhausted: {error}"))?;
+        }
         let shard_path = parent.join(shard);
         let canonical = std::fs::canonicalize(&shard_path)
             .with_context(|| format!("referenced shard '{shard}' is missing or inaccessible"))?;
@@ -378,7 +399,7 @@ pub fn validate_index(path: &Path, file: &File, file_len: u64) -> Result<(usize,
         }
         let shard_file = crate::safeio::open_readonly_nofollow(&canonical)?;
         let shard_len = shard_file.metadata()?.len();
-        validate_file(&shard_file, shard_len)
+        validate_file_with_budget(&shard_file, shard_len, budget)
             .with_context(|| format!("referenced shard '{shard}' is structurally invalid"))?;
     }
     Ok((map.len(), shards.len()))
@@ -394,7 +415,23 @@ pub fn validate_file(file: &File, file_len: u64) -> Result<SafetensorsSummary> {
     Ok(inventory_file(file, file_len)?.summary)
 }
 
+pub fn validate_file_with_budget(
+    file: &File,
+    file_len: u64,
+    budget: Option<&crate::budget::ScanBudget>,
+) -> Result<SafetensorsSummary> {
+    Ok(inventory_file_with_budget(file, file_len, budget)?.summary)
+}
+
 pub fn inventory_file(file: &File, file_len: u64) -> Result<SafetensorsInventory> {
+    inventory_file_with_budget(file, file_len, None)
+}
+
+pub fn inventory_file_with_budget(
+    file: &File,
+    file_len: u64,
+    budget: Option<&crate::budget::ScanBudget>,
+) -> Result<SafetensorsInventory> {
     if file_len < 10 {
         bail!("file is too small to contain a Safetensors header");
     }
@@ -433,6 +470,11 @@ pub fn inventory_file(file: &File, file_len: u64) -> Result<SafetensorsInventory
     let mut unknown_dtypes = BTreeSet::new();
     let mut unknown_dtype_tensors = Vec::new();
     for (name, value) in entries {
+        if let Some(budget) = budget {
+            budget
+                .check()
+                .map_err(|error| anyhow!("global scan budget exhausted: {error}"))?;
+        }
         if name == "__metadata__" {
             let object = value
                 .as_object()
@@ -484,6 +526,11 @@ pub fn inventory_file(file: &File, file_len: u64) -> Result<SafetensorsInventory
     tensors.sort_by_key(|spec| (spec.start, spec.end, spec.name.clone()));
     let mut cursor = 0_u64;
     for spec in &tensors {
+        if let Some(budget) = budget {
+            budget
+                .check()
+                .map_err(|error| anyhow!("global scan budget exhausted: {error}"))?;
+        }
         if spec.start == spec.end {
             continue;
         }

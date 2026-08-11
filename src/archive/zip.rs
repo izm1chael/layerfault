@@ -78,6 +78,15 @@ pub fn inspect_zip(
     let mut member_digests: BTreeMap<String, (String, u64)> = BTreeMap::new();
 
     for i in 0..member_count {
+        if global_budget.check().is_err() {
+            coverage_state = CoverageState::Incomplete;
+            coverage_details.push(format!(
+                "Scan deadline/cancellation reached while reading ZIP entry index {}",
+                i
+            ));
+            skipped_members += member_count - i;
+            break;
+        }
         if budget.add_member().is_err() {
             coverage_state = CoverageState::Incomplete;
             coverage_details.push("Cumulative member limit exceeded".to_owned());

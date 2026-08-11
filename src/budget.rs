@@ -279,6 +279,14 @@ pub enum BudgetFailure {
 }
 
 impl BudgetFailure {
+    /// True for failures that represent an operator/environment-driven
+    /// interruption (deadline exceeded, cooperative cancellation) rather than
+    /// a resource cap being exceeded. Control interruptions retain whatever
+    /// findings were already produced instead of discarding the whole scan.
+    pub fn is_control(self) -> bool {
+        matches!(self, Self::Deadline | Self::Cancelled)
+    }
+
     pub fn for_dimension(dimension: BudgetDimension) -> Self {
         match dimension {
             BudgetDimension::SourceBytes => Self::ExhaustedBytes,
@@ -319,6 +327,7 @@ struct BudgetInner {
     reserved: [AtomicU64; DIMENSION_COUNT],
     held: [AtomicU64; DIMENSION_COUNT],
     cancelled: std::sync::atomic::AtomicBool,
+    started_at: Instant,
     deadline: Instant,
 }
 
@@ -334,7 +343,8 @@ pub struct ScanBudget {
 impl ScanBudget {
     pub fn new(limits: ScanBudgetLimits) -> Result<Self> {
         limits.validate()?;
-        let deadline = Instant::now()
+        let started_at = Instant::now();
+        let deadline = started_at
             .checked_add(Duration::from_millis(limits.wall_clock_ms))
             .ok_or_else(|| anyhow!("budget deadline overflow"))?;
         Ok(Self {
@@ -344,6 +354,7 @@ impl ScanBudget {
                 reserved: std::array::from_fn(|_| AtomicU64::new(0)),
                 held: std::array::from_fn(|_| AtomicU64::new(0)),
                 cancelled: std::sync::atomic::AtomicBool::new(false),
+                started_at,
                 deadline,
             }),
             local_limits: limits,
@@ -385,6 +396,29 @@ impl ScanBudget {
             return Err(BudgetFailure::Deadline);
         }
         Ok(())
+    }
+
+    /// Wall-clock time elapsed since this invocation's budget was created.
+    pub fn elapsed_ms(&self) -> u64 {
+        self.inner.started_at.elapsed().as_millis() as u64
+    }
+
+    /// Cheap cooperative-cancellation checkpoint for long-running loops. On a
+    /// deadline/cancellation, `usage` describes the WallClock dimension so the
+    /// caller can record it on `Coverage` without discarding whatever partial
+    /// results were already produced.
+    pub fn checkpoint(&self, operation: &str) -> Result<(), (BudgetFailure, BudgetUsage)> {
+        match self.check() {
+            Ok(()) => Ok(()),
+            Err(failure) => {
+                let usage = self
+                    .snapshot_with_operation(Some(failure), operation)
+                    .into_iter()
+                    .find(|item| item.dimension == BudgetDimension::WallClock)
+                    .expect("wall clock dimension exists");
+                Err((failure, usage))
+            }
+        }
     }
 
     pub fn remaining(&self, dimension: BudgetDimension) -> u64 {
@@ -622,6 +656,45 @@ mod tests {
         let budget = ScanBudget::new(ScanBudgetProfile::Constrained.limits())?;
         budget.cancel();
         assert_eq!(budget.check(), Err(BudgetFailure::Cancelled));
+        Ok(())
+    }
+
+    #[test]
+    fn checkpoint_reports_wall_clock_usage_on_cancellation() -> Result<()> {
+        let budget = ScanBudget::new(ScanBudgetProfile::Constrained.limits())?;
+        assert!(budget.checkpoint("loop").is_ok());
+        budget.cancel();
+        let (failure, usage) = budget.checkpoint("loop").expect_err("cancelled");
+        assert_eq!(failure, BudgetFailure::Cancelled);
+        assert_eq!(usage.dimension, BudgetDimension::WallClock);
+        assert_eq!(usage.failure, Some(BudgetFailure::Cancelled));
+        Ok(())
+    }
+
+    #[test]
+    fn control_failures_are_distinguished_from_resource_exhaustion() {
+        assert!(BudgetFailure::Deadline.is_control());
+        assert!(BudgetFailure::Cancelled.is_control());
+        assert!(!BudgetFailure::ExhaustedBytes.is_control());
+        assert!(!BudgetFailure::ExhaustedObjects.is_control());
+    }
+
+    #[test]
+    fn cancellation_propagates_to_child_scopes() -> Result<()> {
+        let budget = ScanBudget::new(ScanBudgetProfile::Default.limits())?;
+        let child = budget.child("archive", "member", None)?;
+        assert!(child.check().is_ok());
+        budget.cancel();
+        assert_eq!(child.check(), Err(BudgetFailure::Cancelled));
+        Ok(())
+    }
+
+    #[test]
+    fn elapsed_ms_increases_over_time() -> Result<()> {
+        let budget = ScanBudget::new(ScanBudgetProfile::Default.limits())?;
+        let first = budget.elapsed_ms();
+        std::thread::sleep(Duration::from_millis(5));
+        assert!(budget.elapsed_ms() >= first);
         Ok(())
     }
 }

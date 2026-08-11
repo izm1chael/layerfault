@@ -76,6 +76,14 @@ pub fn inspect_tar(
     };
 
     for (index, entry_res) in entries.enumerate() {
+        if global_budget.check().is_err() {
+            coverage_state = CoverageState::Incomplete;
+            coverage_details.push(format!(
+                "Scan deadline/cancellation reached while reading TAR entry index {}",
+                index
+            ));
+            break;
+        }
         if budget.add_member().is_err() {
             coverage_state = CoverageState::Incomplete;
             coverage_details.push("Cumulative member limit exceeded".to_owned());

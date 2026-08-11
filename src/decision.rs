@@ -115,6 +115,20 @@ impl SecurityDecision {
         0
     }
 
+    /// Escalate a computed exit code to 6 ("scan incomplete: deadline or
+    /// cancellation") when the scan was interrupted by a deadline/cancel
+    /// checkpoint. Findings already discovered still win: if `code` is
+    /// already 2/3/4 (integrity failure, scanner Fail, or policy Block), it
+    /// is returned unchanged, since those describe real security-relevant
+    /// conditions in the bytes already examined.
+    pub fn escalate_for_control_interruption(code: i32, control_interrupted: bool) -> i32 {
+        if control_interrupted && matches!(code, 0 | 1) {
+            6
+        } else {
+            code
+        }
+    }
+
     pub const fn from_differential_behaviour_state(
         state: crate::transformation::DifferentialBehaviourState,
     ) -> Self {
@@ -202,5 +216,39 @@ mod tests {
             SecurityDecision::scanner_finding_exit_code([&integrity, &ordinary]),
             2
         );
+    }
+
+    #[test]
+    fn control_interruption_escalates_clean_or_warn_results_only() {
+        assert_eq!(
+            SecurityDecision::escalate_for_control_interruption(0, true),
+            6
+        );
+        assert_eq!(
+            SecurityDecision::escalate_for_control_interruption(1, true),
+            6
+        );
+        assert_eq!(
+            SecurityDecision::escalate_for_control_interruption(0, false),
+            0
+        );
+        assert_eq!(
+            SecurityDecision::escalate_for_control_interruption(1, false),
+            1
+        );
+    }
+
+    #[test]
+    fn control_interruption_never_masks_existing_findings() {
+        // 2 = integrity, 3 = scanner Fail, 4 = policy Block: all already
+        // describe a real security-relevant condition in bytes that were
+        // actually examined, so an interrupted-but-still-blocking scan must
+        // report the finding, not the operational incomplete tier.
+        for code in [2, 3, 4] {
+            assert_eq!(
+                SecurityDecision::escalate_for_control_interruption(code, true),
+                code
+            );
+        }
     }
 }

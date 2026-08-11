@@ -131,13 +131,14 @@ pub fn scan(
     size: u64,
     identity: &str,
     media: &str,
+    budget: &crate::budget::ScanBudget,
 ) -> Result<Vec<LayerScanResult>> {
     let mut magic = [0u8; 4];
     let mut prefix = file.try_clone()?;
     prefix.seek(SeekFrom::Start(0))?;
     let count = prefix.read(&mut magic)?;
     if count >= 4 && magic == *b"PK\x03\x04" {
-        return Ok(match scan_zip(path, file, identity, media) {
+        return Ok(match scan_zip(path, file, identity, media, budget) {
             Ok(results) => results,
             Err(error) => vec![FindingBuilder::new(
                 "LF-PICKLE-MALFORMED",
@@ -163,12 +164,13 @@ pub fn scan(
         identity,
         media,
         None,
+        budget,
     )])
 }
 
 pub fn analyze_bytes(bytes: &[u8]) -> Result<PickleAnalysis> {
     let cursor = Cursor::new(bytes);
-    analyze_reader(cursor, bytes.len() as u64)
+    analyze_reader(cursor, bytes.len() as u64, None)
 }
 
 fn scan_stream<R: Read + Seek>(
@@ -177,13 +179,14 @@ fn scan_stream<R: Read + Seek>(
     identity: &str,
     media: &str,
     member: Option<&str>,
+    budget: &crate::budget::ScanBudget,
 ) -> LayerScanResult {
     let started = Instant::now();
     let label = member
         .map(|name| format!("pickle member '{name}'"))
         .unwrap_or_else(|| "pickle stream".to_owned());
     let subject = pickle_subject(identity, media, member);
-    match analyze_reader(reader, len) {
+    match analyze_reader(reader, len, Some(budget)) {
         Ok(analysis) => finding_from_analysis(analysis, identity, media, &label, subject, started),
         Err(error) => {
             let offset = pickle_error_offset(&error);
@@ -352,7 +355,13 @@ fn opcode_evidence(
     }
 }
 
-fn scan_zip(path: &Path, file: &File, identity: &str, media: &str) -> Result<Vec<LayerScanResult>> {
+fn scan_zip(
+    path: &Path,
+    file: &File,
+    identity: &str,
+    media: &str,
+    budget: &crate::budget::ScanBudget,
+) -> Result<Vec<LayerScanResult>> {
     let started = Instant::now();
     let mut archive =
         zip::ZipArchive::new(file.try_clone()?).context("invalid PyTorch/joblib ZIP container")?;
@@ -363,6 +372,9 @@ fn scan_zip(path: &Path, file: &File, identity: &str, media: &str) -> Result<Vec
     let mut total = 0u64;
     let mut pickle_members = 0usize;
     for index in 0..archive.len() {
+        budget
+            .check()
+            .map_err(|error| anyhow!("global scan budget exhausted: {error}"))?;
         let mut member = archive.by_index(index)?;
         let name = member.name().replace('\\', "/");
         validate_zip_member_name(&name)?;
@@ -404,6 +416,7 @@ fn scan_zip(path: &Path, file: &File, identity: &str, media: &str) -> Result<Vec
             identity,
             media,
             Some(&name),
+            budget,
         ));
     }
     if results.is_empty() {
@@ -470,7 +483,11 @@ fn opcode_mnemonic(opcode: u8) -> &'static str {
     }
 }
 
-fn analyze_reader<R: Read + Seek>(mut reader: R, len: u64) -> Result<PickleAnalysis> {
+fn analyze_reader<R: Read + Seek>(
+    mut reader: R,
+    len: u64,
+    budget: Option<&crate::budget::ScanBudget>,
+) -> Result<PickleAnalysis> {
     if len == 0 {
         bail!("empty pickle stream");
     }
@@ -482,6 +499,13 @@ fn analyze_reader<R: Read + Seek>(mut reader: R, len: u64) -> Result<PickleAnaly
         state.analysis.opcode_count = state.analysis.opcode_count.saturating_add(1);
         if state.analysis.opcode_count > MAX_OPCODES {
             bail!("pickle opcode count exceeds safety cap");
+        }
+        if state.analysis.opcode_count % 256 == 0 {
+            if let Some(budget) = budget {
+                budget
+                    .check()
+                    .map_err(|error| anyhow!("global scan budget exhausted: {error}"))?;
+            }
         }
         // Record where this opcode starts before consuming its byte, so any
         // dangerous/unknown entry it produces can be attributed to this exact
@@ -1096,12 +1120,16 @@ mod tests {
     #[test]
     fn malformed_stream_reports_available_byte_offset() {
         let bytes = b"\x80\x04cfoo\nbar";
+        let budget =
+            crate::budget::ScanBudget::new(crate::budget::ScanBudgetProfile::Default.limits())
+                .expect("budget");
         let finding = scan_stream(
             std::io::Cursor::new(bytes.to_vec()),
             bytes.len() as u64,
             "sha256:abcd",
             "application/octet-stream",
             None,
+            &budget,
         );
         assert_eq!(crate::policy::rule_id(&finding), "LF-PICKLE-MALFORMED");
         assert!(matches!(

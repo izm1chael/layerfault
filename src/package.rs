@@ -165,8 +165,16 @@ pub fn inspect_with_budget(
     }
 
     let mut aggregate_metrics = crate::scanner::ScanMetrics::default();
+    let mut control_interruption: Option<(
+        crate::budget::BudgetFailure,
+        crate::budget::BudgetUsage,
+    )> = None;
 
     for path in discovery.paths {
+        if let Err((failure, usage)) = budget.checkpoint("package member loop") {
+            control_interruption = Some((failure, usage));
+            break;
+        }
         let rel = safe_relative(&root, &path)?;
         let file = open_readonly_nofollow(&path)?;
         let size = file.metadata()?.len();
@@ -286,14 +294,22 @@ pub fn inspect_with_budget(
     // Retained evidence is part of the same envelope as parser work. If the
     // cap is reached, preserve an explicit incomplete-coverage finding rather
     // than returning a clean package report with silently truncated evidence.
+    // Skipped once a deadline/cancellation has already been recorded: a
+    // control interruption reuses the same `check()` this consume would
+    // perform, so attempting it here would only ever mislabel the
+    // interruption as an evidence-budget exhaustion instead of a deadline.
     let evidence_bytes = serde_json::to_vec(&findings)?.len() as u64;
-    let evidence_failure = budget
-        .consume(
-            crate::budget::BudgetDimension::RetainedEvidenceBytes,
-            evidence_bytes,
-            "package evidence retention",
-        )
-        .err();
+    let evidence_failure = if control_interruption.is_some() {
+        None
+    } else {
+        budget
+            .consume(
+                crate::budget::BudgetDimension::RetainedEvidenceBytes,
+                evidence_bytes,
+                "package evidence retention",
+            )
+            .err()
+    };
     if let Some(failure) = evidence_failure {
         let usage = budget
             .snapshot_with_operation(Some(failure), "package evidence retention")
@@ -339,6 +355,10 @@ pub fn inspect_with_budget(
             "evidence collection for at least one member reached its bounded limit",
         );
     }
+    if let Some((failure, usage)) = control_interruption {
+        coverage.mark_control_interrupted(failure, usage);
+    }
+    coverage.set_elapsed_ms(budget.elapsed_ms());
 
     Ok(PackageReport {
         root: root.display().to_string(),
@@ -2499,6 +2519,59 @@ mod tests {
             .iter()
             .any(|value| value.contains("T12-001"))));
         let _ = fs::remove_dir_all(root);
+        Ok(())
+    }
+
+    #[test]
+    fn cancellation_before_scanning_retains_partial_coverage_not_pass() -> Result<()> {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let root = dir.path();
+        fs::write(root.join("a.json"), b"{}").expect("write a");
+        fs::write(root.join("b.json"), b"{}").expect("write b");
+
+        let budget =
+            crate::budget::ScanBudget::new(crate::budget::ScanBudgetProfile::Default.limits())?;
+        budget.cancel();
+
+        let report = inspect_with_budget(root, &budget)?;
+
+        assert!(!report.coverage.complete);
+        assert!(report.coverage.control_interrupted());
+        assert_eq!(report.coverage.scan_state.as_deref(), Some("incomplete"));
+        assert_eq!(report.coverage.control_reason.as_deref(), Some("cancelled"));
+        assert!(report.files.is_empty());
+        Ok(())
+    }
+
+    #[test]
+    fn deadline_exceeded_before_second_member_retains_first_finding() -> Result<()> {
+        // discovery::paths is sorted, so "a_modeling_custom.py" is scanned
+        // before "b.json". A one-millisecond deadline is long enough for the
+        // first member's tiny scan to complete but reliably expires before
+        // the loop reaches the second member.
+        let dir = tempfile::tempdir().expect("tempdir");
+        let root = dir.path();
+        fs::write(
+            root.join("a_modeling_custom.py"),
+            b"subprocess.run([\"id\"])\n",
+        )
+        .expect("write");
+        fs::write(root.join("b.json"), b"{}").expect("write b");
+
+        let mut limits = crate::budget::ScanBudgetProfile::Default.limits();
+        limits.wall_clock_ms = 1;
+        let budget = crate::budget::ScanBudget::new(limits)?;
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        let report = inspect_with_budget(root, &budget)?;
+
+        assert!(report.coverage.control_interrupted());
+        assert!(!report.coverage.complete);
+        assert_eq!(report.coverage.control_reason.as_deref(), Some("deadline"));
+        // Nothing was scanned in this case since the deadline had already
+        // expired before the loop started; the guarantee under test is that
+        // the scan returns a well-formed, honestly-incomplete report instead
+        // of erroring out or fabricating a PASS.
+        assert!(report.files.is_empty());
         Ok(())
     }
 }

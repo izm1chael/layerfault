@@ -171,6 +171,12 @@ struct ScanCommon {
     /// Versioned JSON resource-budget configuration. Overrides --budget-profile.
     #[arg(long)]
     budget_file: Option<PathBuf>,
+
+    /// Wall-clock deadline for this scan invocation, overriding the budget
+    /// profile's own wall-clock limit. On expiry the scan stops cooperatively,
+    /// retains findings already produced, and reports incomplete coverage.
+    #[arg(long)]
+    timeout_seconds: Option<u64>,
 }
 
 impl Default for ScanCommon {
@@ -187,6 +193,7 @@ impl Default for ScanCommon {
             jobs: None,
             budget_profile: "default".to_owned(),
             budget_file: None,
+            timeout_seconds: None,
         }
     }
 }
@@ -219,6 +226,10 @@ pub(crate) struct InspectArgs {
     budget_profile: String,
     #[arg(long)]
     budget_file: Option<PathBuf>,
+    /// Wall-clock deadline for this scan, overriding the budget profile's own
+    /// wall-clock limit.
+    #[arg(long)]
+    timeout_seconds: Option<u64>,
 }
 
 #[derive(clap::Args, Debug)]
@@ -262,6 +273,10 @@ struct ScanDirArgs {
     budget_profile: String,
     #[arg(long)]
     budget_file: Option<PathBuf>,
+    /// Wall-clock deadline for this scan, overriding the budget profile's own
+    /// wall-clock limit.
+    #[arg(long)]
+    timeout_seconds: Option<u64>,
 }
 
 #[derive(clap::Args, Debug)]
@@ -1354,7 +1369,12 @@ fn prepare(common: &ScanCommon) -> Result<Prepared> {
             limits: None,
         },
     };
-    let budget = layerfault::budget::ScanBudget::new(budget_config.limits()?)?;
+    let mut limits = budget_config.limits()?;
+    if let Some(timeout_seconds) = common.timeout_seconds {
+        limits.wall_clock_ms = timeout_seconds.saturating_mul(1000);
+    }
+    let budget = layerfault::budget::ScanBudget::new(limits)?;
+    arm_ctrlc_cancellation(&budget);
     Ok(Prepared {
         thresholds,
         verifying_key,
@@ -1364,9 +1384,21 @@ fn prepare(common: &ScanCommon) -> Result<Prepared> {
     })
 }
 
+/// Map Ctrl-C (SIGINT) to cooperative cancellation of this invocation's scan
+/// budget, so an interactive scan can be interrupted without losing findings
+/// already produced. Best-effort: a handler can only be installed once per
+/// process, so a failure here (e.g. a second budget created later in the same
+/// run) is not fatal — the first-installed handler still cancels its budget's
+/// shared inner state via any child scope that was cloned from it.
+fn arm_ctrlc_cancellation(budget: &layerfault::budget::ScanBudget) {
+    let cancel_budget = budget.clone();
+    let _ = ctrlc::set_handler(move || cancel_budget.cancel());
+}
+
 pub(crate) fn standalone_budget(
     profile: &str,
     file: Option<&Path>,
+    timeout_seconds: Option<u64>,
 ) -> Result<layerfault::budget::ScanBudget> {
     let config = match file {
         Some(path) => layerfault::budget::ScanBudgetConfig::load(path)?,
@@ -1375,7 +1407,13 @@ pub(crate) fn standalone_budget(
             limits: None,
         },
     };
-    layerfault::budget::ScanBudget::new(config.limits()?)
+    let mut limits = config.limits()?;
+    if let Some(timeout_seconds) = timeout_seconds {
+        limits.wall_clock_ms = timeout_seconds.saturating_mul(1000);
+    }
+    let budget = layerfault::budget::ScanBudget::new(limits)?;
+    arm_ctrlc_cancellation(&budget);
+    Ok(budget)
 }
 
 fn scan_options<'a>(common: &ScanCommon, prepared: &'a Prepared, quiet: bool) -> ScanOptions<'a> {

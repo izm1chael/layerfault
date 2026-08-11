@@ -1,7 +1,11 @@
 use crate::*;
 
 pub(crate) fn run_inspect(args: InspectArgs) -> Result<()> {
-    let budget = standalone_budget(&args.budget_profile, args.budget_file.as_deref())?;
+    let budget = standalone_budget(
+        &args.budget_profile,
+        args.budget_file.as_deref(),
+        args.timeout_seconds,
+    )?;
     if args.normalized {
         let norm = layerfault::formats::extract_normalized(&args.path)?;
         println!("{}", serde_json::to_string_pretty(&norm)?);
@@ -77,7 +81,11 @@ pub(crate) fn run_verify_file(args: VerifyFileArgs) -> Result<()> {
 }
 
 pub(crate) fn run_scan_dir(args: ScanDirArgs) -> Result<()> {
-    let budget = standalone_budget(&args.budget_profile, args.budget_file.as_deref())?;
+    let budget = standalone_budget(
+        &args.budget_profile,
+        args.budget_file.as_deref(),
+        args.timeout_seconds,
+    )?;
     let mode = if args.structure_only {
         ArtifactScanMode::StructureOnly
     } else {
@@ -103,7 +111,7 @@ pub(crate) fn run_scan_dir(args: ScanDirArgs) -> Result<()> {
 }
 
 pub(crate) fn run_fingerprint(args: FingerprintArgs) -> Result<()> {
-    let budget = standalone_budget("default", None)?;
+    let budget = standalone_budget("default", None, None)?;
     let report = package::inspect_with_budget(&args.path, &budget)?;
     if args.json {
         println!(
@@ -553,9 +561,13 @@ fn package_report_exit(
         layerfault::decision::SecurityDecision::scanner_finding_exit_code(report.findings.iter());
     let policy_block = decision.is_some_and(|value| value.action == policy::PolicyAction::Block);
     let policy_warn = decision.is_some_and(|value| value.action == policy::PolicyAction::Warn);
-    layerfault::decision::SecurityDecision::combine_scanner_and_policy_exit_code(
+    let code = layerfault::decision::SecurityDecision::combine_scanner_and_policy_exit_code(
         scanner,
         policy_block,
         policy_warn,
+    );
+    layerfault::decision::SecurityDecision::escalate_for_control_interruption(
+        code,
+        report.coverage.control_interrupted(),
     )
 }

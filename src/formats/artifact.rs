@@ -315,7 +315,7 @@ fn inspect_opened(
             }
         }
         ArtifactFormat::Safetensors => {
-            results.push(safetensors::scan_file(&file, size, &identity, media)?);
+            results.push(safetensors::scan_file(&file, size, &identity, media, budget)?);
             if mode == ArtifactScanMode::Full {
                 results.push(match fused_binary.take() {
                     Some(result) => result,
@@ -324,7 +324,7 @@ fn inspect_opened(
             }
         }
         ArtifactFormat::SafetensorsIndex => {
-            results.push(safetensors::scan_index(path, &file, size, &identity, media)?);
+            results.push(safetensors::scan_index(path, &file, size, &identity, media, budget)?);
         }
         ArtifactFormat::Onnx => {
             let (finding, compound) = onnx::scan(path, &file, size, &identity, media)?;
@@ -332,7 +332,7 @@ fn inspect_opened(
             results.push(finding);
         }
         ArtifactFormat::Pickle => {
-            results.extend(pickle::scan(path, &file, size, &identity, media)?);
+            results.extend(pickle::scan(path, &file, size, &identity, media, budget)?);
         }
         ArtifactFormat::PyTorchZip
         | ArtifactFormat::TorchScript
@@ -560,7 +560,26 @@ pub fn inspect_dir_with_budget(
     pool.install(|| {
         paths
             .into_par_iter()
-            .map(|path| inspect_with_budget(&path, mode, budget))
+            .filter_map(|path| {
+                // Cooperative cancellation: don't start scanning a queued
+                // path once the deadline/cancellation has already tripped,
+                // and don't let a deadline hit mid-file discard every other
+                // file's already-completed report — only a genuine (non
+                // control) error still aborts the whole directory scan.
+                if budget.check().is_err() {
+                    return None;
+                }
+                match inspect_with_budget(&path, mode, budget) {
+                    Ok(report) => Some(Ok(report)),
+                    Err(error) => {
+                        if budget.check().is_err() {
+                            None
+                        } else {
+                            Some(Err(error))
+                        }
+                    }
+                }
+            })
             .collect()
     })
 }

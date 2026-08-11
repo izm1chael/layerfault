@@ -33,6 +33,15 @@ pub struct Coverage {
     /// Additive accounting detail for an invocation budget exhaustion.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub budget: Vec<crate::budget::BudgetUsage>,
+    /// "incomplete" once a deadline/cancellation checkpoint has tripped.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scan_state: Option<String>,
+    /// "deadline" | "cancelled", set alongside `scan_state`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub control_reason: Option<String>,
+    /// Wall-clock milliseconds from invocation start to completion/interruption.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub elapsed_ms: Option<u64>,
 }
 
 impl Coverage {
@@ -88,6 +97,50 @@ impl Coverage {
         }
     }
 
+    /// Record that a checkpoint tripped a deadline/cancellation. Unlike other
+    /// budget exhaustion, callers use this alongside retaining whatever
+    /// findings were already produced, since the scan was interrupted rather
+    /// than exceeding a resource cap on the work it attempted.
+    pub fn mark_control_interrupted(
+        &mut self,
+        failure: crate::budget::BudgetFailure,
+        usage: crate::budget::BudgetUsage,
+    ) {
+        let (reason, code) = match failure {
+            crate::budget::BudgetFailure::Deadline => ("scan deadline exceeded", "deadline"),
+            crate::budget::BudgetFailure::Cancelled => ("scan cancelled", "cancelled"),
+            _ => ("scan interrupted", "interrupted"),
+        };
+        self.complete = false;
+        self.note(reason);
+        // Upsert rather than the plain insert-if-absent `budget_exhausted`
+        // uses: an unconditional per-dimension snapshot (taken with
+        // `failure: None`) is commonly recorded on `self.budget` earlier in
+        // the same report, and that entry must not shadow this one — a
+        // silently-dropped control failure would leave `control_interrupted`
+        // seeing no evidence of the interruption at all.
+        self.budget
+            .retain(|item| !(item.dimension == usage.dimension && item.scope == usage.scope));
+        self.budget.push(usage);
+        self.scan_state = Some("incomplete".to_owned());
+        self.control_reason = Some(code.to_owned());
+    }
+
+    /// Record the total wall-clock elapsed time for this invocation.
+    pub fn set_elapsed_ms(&mut self, elapsed_ms: u64) {
+        self.elapsed_ms = Some(elapsed_ms);
+    }
+
+    /// True when this coverage gap was caused by a deadline/cancellation
+    /// rather than by an ordinary resource-budget cap or parser limitation.
+    /// Used to decide whether an interrupted scan may report PASS/WARN.
+    pub fn control_interrupted(&self) -> bool {
+        self.budget.iter().any(|item| {
+            item.failure
+                .is_some_and(crate::budget::BudgetFailure::is_control)
+        })
+    }
+
     fn note(&mut self, reason: &str) {
         let reason = reason.to_owned();
         if !self.reasons.contains(&reason) {
@@ -121,6 +174,14 @@ impl Coverage {
         for reason in &other.reasons {
             self.note(reason);
         }
+        if other.scan_state.is_some() {
+            self.scan_state = other.scan_state.clone();
+            self.control_reason = other.control_reason.clone();
+        }
+        self.elapsed_ms = match (self.elapsed_ms, other.elapsed_ms) {
+            (Some(a), Some(b)) => Some(a.max(b)),
+            (a, b) => a.or(b),
+        };
     }
 
     /// Evidence records describing each coverage gap, for attachment to a
@@ -176,5 +237,51 @@ mod tests {
         assert!(coverage
             .gap_evidence(&EvidenceSubject::member("a"))
             .is_empty());
+    }
+
+    fn wall_clock_usage(failure: crate::budget::BudgetFailure) -> crate::budget::BudgetUsage {
+        crate::budget::BudgetUsage {
+            dimension: crate::budget::BudgetDimension::WallClock,
+            configured_limit: 1000,
+            consumed: 0,
+            reserved: 0,
+            subsystem: "root".to_owned(),
+            operation: "test".to_owned(),
+            scope: "invocation".to_owned(),
+            failure: Some(failure),
+        }
+    }
+
+    #[test]
+    fn control_interrupted_only_true_for_deadline_or_cancelled() {
+        let mut coverage = Coverage::complete(1, 1);
+        assert!(!coverage.control_interrupted());
+        coverage.mark_control_interrupted(
+            crate::budget::BudgetFailure::Deadline,
+            wall_clock_usage(crate::budget::BudgetFailure::Deadline),
+        );
+        assert!(!coverage.complete);
+        assert!(coverage.control_interrupted());
+        assert_eq!(coverage.scan_state.as_deref(), Some("incomplete"));
+        assert_eq!(coverage.control_reason.as_deref(), Some("deadline"));
+    }
+
+    #[test]
+    fn ordinary_incompleteness_does_not_set_control_interrupted() {
+        let mut coverage = Coverage::complete(1, 1);
+        coverage.evidence_limited("evidence budget exhausted");
+        assert!(!coverage.complete);
+        assert!(!coverage.control_interrupted());
+        assert!(coverage.scan_state.is_none());
+    }
+
+    #[test]
+    fn elapsed_ms_is_absorbed_as_max() {
+        let mut first = Coverage::complete(1, 1);
+        first.set_elapsed_ms(10);
+        let mut second = Coverage::complete(1, 1);
+        second.set_elapsed_ms(50);
+        first.absorb(&second);
+        assert_eq!(first.elapsed_ms, Some(50));
     }
 }
