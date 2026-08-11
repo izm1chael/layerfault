@@ -180,7 +180,8 @@ pub(crate) fn run_fingerprint(args: FingerprintArgs) -> Result<()> {
 
 pub(crate) fn run_verify_package(args: VerifyPackageArgs) -> Result<()> {
     let prepared = prepare(&args.common)?;
-    let report = package::inspect_with_budget(&args.path, &prepared.budget)?;
+    let report =
+        package::inspect_with_scheduler(&args.path, &prepared.budget, &prepared.scheduler)?;
     let context = policy::PolicyContext {
         source: Some("directory".to_owned()),
         format: Some("model-package".to_owned()),
@@ -245,7 +246,8 @@ pub(crate) fn run_verify_package(args: VerifyPackageArgs) -> Result<()> {
 pub(crate) fn run_pipeline(args: PipelineArgs) -> Result<()> {
     let prepared = prepare(&args.common)?;
     if args.path.is_dir() {
-        let report = package::inspect_with_budget(&args.path, &prepared.budget)?;
+        let report =
+            package::inspect_with_scheduler(&args.path, &prepared.budget, &prepared.scheduler)?;
         let context = policy::PolicyContext {
             source: Some("directory".to_owned()),
             format: Some("model-package".to_owned()),

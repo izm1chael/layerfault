@@ -257,6 +257,8 @@ impl SchedulerConfig {
 #[derive(Debug, Default, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct SchedulerDiagnostics {
     pub queued_tasks: usize,
+    pub peak_queued_tasks: usize,
+    pub peak_active_workers: usize,
     pub active_by_class: BTreeMap<String, usize>,
     pub peak_reserved_memory: u64,
     pub peak_inflight_bytes: u64,
@@ -273,6 +275,8 @@ struct SchedulerCounters {
     active_temp_disk_bytes: u64,
     active_by_class: BTreeMap<TaskClass, usize>,
     queued_tasks: usize,
+    peak_queued_tasks: usize,
+    peak_active_workers: usize,
     peak_reserved_memory: u64,
     peak_inflight_bytes: u64,
     permit_wait_time_ms: u64,
@@ -324,6 +328,7 @@ impl AdaptiveScheduler {
 
         let mut state = self.inner.state.lock().unwrap();
         state.queued_tasks += 1;
+        state.peak_queued_tasks = state.peak_queued_tasks.max(state.queued_tasks);
 
         loop {
             if let Err(err) = budget.check() {
@@ -392,6 +397,7 @@ impl AdaptiveScheduler {
 
                 state.queued_tasks = state.queued_tasks.saturating_sub(1);
                 state.active_workers = state.active_workers.saturating_add(cost.cpu_units as usize);
+                state.peak_active_workers = state.peak_active_workers.max(state.active_workers);
                 state.active_memory_bytes = state
                     .active_memory_bytes
                     .saturating_add(cost.memory_reservation);
@@ -456,6 +462,8 @@ impl AdaptiveScheduler {
         }
         SchedulerDiagnostics {
             queued_tasks: state.queued_tasks,
+            peak_queued_tasks: state.peak_queued_tasks,
+            peak_active_workers: state.peak_active_workers,
             active_by_class,
             peak_reserved_memory: state.peak_reserved_memory,
             peak_inflight_bytes: state.peak_inflight_bytes,
