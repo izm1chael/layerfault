@@ -1,6 +1,6 @@
 //! Semantic analysis of `setup.py` install/build hooks.
 //!
-//! `setup.py` is never executed. This module reuses the Spec-01 semantic
+//! `setup.py` is never executed. This module reuses the semantic
 //! Python engine (`crate::python_static`) for the generic capability findings
 //! (`LF-CODE-SUBPROCESS` etc.) that already fire on any `.py` file, and adds
 //! setuptools-specific structure on top: classes that subclass

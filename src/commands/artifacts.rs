@@ -1,6 +1,12 @@
 use crate::*;
 
 pub(crate) fn run_inspect(args: InspectArgs) -> Result<()> {
+    if args.normalized {
+        let norm = layerfault::formats::extract_normalized(&args.path)?;
+        println!("{}", serde_json::to_string_pretty(&norm)?);
+        return Ok(());
+    }
+
     if args.path.is_dir() {
         let result = package::inspect(&args.path)?;
         if args.json {

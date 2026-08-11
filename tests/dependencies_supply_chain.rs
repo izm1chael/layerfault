@@ -1,4 +1,4 @@
-//! Spec 03 — dependency/installation supply-chain analysis, end to end
+//! Dependency and installation supply-chain analysis, end to end
 //! through `package::inspect`.
 
 use anyhow::Result;

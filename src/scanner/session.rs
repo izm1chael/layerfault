@@ -1,6 +1,6 @@
 //! Single-pass / shared-read static scan session and stream observer pipeline.
 //!
-//! Spec 11 — Generalizes single-pass scanning so one physical read stream feeds
+//! Generalizes single-pass scanning so one physical read stream feeds
 //! multiple compatible observers (hashing, binary object discovery, text heuristics,
 //! line/offset tracking) simultaneously while preserving random-access descriptor
 //! sharing and strict TOCTOU identity validation.

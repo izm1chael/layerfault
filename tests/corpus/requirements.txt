@@ -1,0 +1,3 @@
+safetensors==0.4.3
+onnx==1.16.1
+gguf==0.10.0

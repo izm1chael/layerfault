@@ -1,0 +1,82 @@
+{
+  "version": 1,
+  "fixtures": [
+    {
+      "id": "safetensors-v1-u8",
+      "format": "safetensors",
+      "path": "safetensors/u8_vector.safetensors",
+      "sha256": "548225a2cdfd3e6d171ec2ad4a4c4ea0f85c653703148dcaec84bd9ac352c7a7",
+      "expected": {
+        "tensor_count": 1,
+        "metadata_count": 0
+      }
+    },
+    {
+      "id": "safetensors-v1-multi",
+      "format": "safetensors",
+      "path": "safetensors/multi_tensor.safetensors",
+      "sha256": "cdcf4e154cefdc19d8e7681b3bddba1940b631b204e9ed9062a35850f7ff588c",
+      "expected": {
+        "tensor_count": 2,
+        "metadata_count": 1
+      }
+    },
+    {
+      "id": "gguf-v3-basic",
+      "format": "gguf",
+      "path": "gguf/v3_basic.gguf",
+      "sha256": "d79682bd4114b523709bcfa612817a5267152b93b7d35f7268bb19d1e1bd377a",
+      "expected": {
+        "tensor_count": 1,
+        "metadata_count": 2
+      }
+    },
+    {
+      "id": "onnx-v1-basic",
+      "format": "onnx",
+      "path": "onnx/basic.onnx",
+      "sha256": "3d4453f2b826847a4c1ee2e815d2d669e5399aa0903240ab17285f675e1ac0a5",
+      "expected": {
+        "metadata_count": 2
+      }
+    },
+    {
+      "id": "pickle-opcode-benign",
+      "format": "pickle",
+      "path": "pickle/benign_opcodes.pkl",
+      "sha256": "2038d6c8e217acf362770c7644cbe9becfe4de4d188c7ba82df5d5f958e3a3f3",
+      "expected": {
+        "global_refs": [
+          "torch.FloatStorage"
+        ]
+      }
+    },
+    {
+      "id": "tflite-basic",
+      "format": "tflite",
+      "path": "tflite/basic.tflite",
+      "sha256": "7f087f59466b6e2ee2f91d738c487a6e5beab693bb82589c875992fca4b450e6",
+      "expected": {
+        "schema_version": 3
+      }
+    },
+    {
+      "id": "tensorflow-saved-model",
+      "format": "tensorflow",
+      "path": "tensorflow/saved_model.pb",
+      "sha256": "ce7139059d23857cb27a5686dfec58ab79f417a6bddbd14351c8825b60da7e85",
+      "expected": {
+        "kind": "SavedModel"
+      }
+    },
+    {
+      "id": "keras-archive-basic",
+      "format": "keras",
+      "path": "keras/model.keras",
+      "sha256": "3c9b779cc3a2a5e9a60e9330d27d163677a3d29947ad4dfe9a5e99bd8aba380d",
+      "expected": {
+        "has_config": true
+      }
+    }
+  ]
+}

@@ -1,5 +1,6 @@
 pub mod artifact;
 pub mod coreml;
+pub mod differential;
 pub mod executorch;
 pub mod extent;
 pub mod gguf;
@@ -15,6 +16,10 @@ pub mod tensorflow;
 pub mod tensorrt;
 pub mod tflite;
 
+pub use differential::{
+    extract_normalized, extract_normalized_opened, NormalizedMetadataEntry, NormalizedModel,
+    NormalizedTensor,
+};
 pub use extent::ParsedExtent;
 pub use identification::{ArtifactIdentification, ContradictionKind, FormatContradiction};
 

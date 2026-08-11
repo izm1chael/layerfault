@@ -197,12 +197,14 @@ struct ScanArgs {
 }
 
 #[derive(clap::Args, Debug)]
-struct InspectArgs {
+pub(crate) struct InspectArgs {
     path: PathBuf,
     #[arg(long, default_value_t = false)]
     structure_only: bool,
     #[arg(long, default_value_t = false)]
     json: bool,
+    #[arg(long, default_value_t = false)]
+    normalized: bool,
 }
 
 #[derive(clap::Args, Debug)]
