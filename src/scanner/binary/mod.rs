@@ -40,29 +40,48 @@ impl BinaryStreamScanner {
         }
     }
 
+    pub(crate) fn observe_at_offset(&mut self, offset: u64, bytes: &[u8]) -> Result<()> {
+        self.observe_with_file(None, offset, bytes)
+    }
+
     pub(crate) fn observe(&mut self, file: &File, file_len: u64, bytes: &[u8]) -> Result<()> {
+        let offset = self.absolute_read;
+        self.observe_with_file(Some((file, file_len)), offset, bytes)
+    }
+
+    pub(crate) fn observe_with_file(
+        &mut self,
+        file_info: Option<(&File, u64)>,
+        offset: u64,
+        bytes: &[u8],
+    ) -> Result<()> {
         if bytes.is_empty() || self.findings.len() >= MAX_FINDINGS {
-            self.absolute_read = self.absolute_read.saturating_add(bytes.len() as u64);
+            self.absolute_read = offset.saturating_add(bytes.len() as u64);
             return Ok(());
         }
 
-        let chunk_start = self.absolute_read;
-        self.absolute_read = self.absolute_read.saturating_add(bytes.len() as u64);
+        self.absolute_read = offset.saturating_add(bytes.len() as u64);
         let mut window = Vec::with_capacity(self.carry.len() + bytes.len());
         window.extend_from_slice(&self.carry);
         window.extend_from_slice(bytes);
-        let window_start = chunk_start.saturating_sub(self.carry.len() as u64);
+        let window_start = offset.saturating_sub(self.carry.len() as u64);
 
-        for (offset, magic) in window.windows(4).enumerate() {
+        for (offset_in_win, magic) in window.windows(4).enumerate() {
             if self.findings.len() >= MAX_FINDINGS {
                 break;
             }
-            let absolute = window_start.saturating_add(offset as u64);
+            let absolute = window_start.saturating_add(offset_in_win as u64);
             if magic == b"\x7fELF" {
-                if looks_like_elf_header(&window[offset..])
-                    && validate_elf(file, file_len, absolute)?
-                {
-                    let metadata = elf::parse_elf(file, file_len, absolute).ok().flatten();
+                let valid = if let Some((file, file_len)) = file_info {
+                    looks_like_elf_header(&window[offset_in_win..])
+                        && validate_elf(file, file_len, absolute)?
+                } else {
+                    looks_like_elf_header(&window[offset_in_win..])
+                };
+                if valid {
+                    let metadata = file_info.and_then(|(file, file_len)| {
+                        elf::parse_elf(file, file_len, absolute).ok().flatten()
+                    });
                     self.push(
                         1,
                         absolute,
@@ -77,8 +96,15 @@ impl BinaryStreamScanner {
                 continue;
             }
             if magic == b"\0asm" {
-                if validate_wasm(file, file_len, absolute)? {
-                    let metadata = wasm::parse_wasm(file, file_len, absolute).ok().flatten();
+                let valid = if let Some((file, file_len)) = file_info {
+                    validate_wasm(file, file_len, absolute)?
+                } else {
+                    true
+                };
+                if valid {
+                    let metadata = file_info.and_then(|(file, file_len)| {
+                        wasm::parse_wasm(file, file_len, absolute).ok().flatten()
+                    });
                     self.push(
                         4,
                         absolute,
@@ -94,32 +120,48 @@ impl BinaryStreamScanner {
             }
             let maybe_macho = matches!(magic[0], 0xfe | 0xce | 0xca | 0xbe | 0xbf | 0xcf)
                 && MACHO_MAGICS.iter().any(|candidate| magic == *candidate);
-            if maybe_macho && validate_macho(file, file_len, absolute)? {
-                let metadata = macho::parse_macho(file, file_len, absolute).ok().flatten();
-                self.push(
-                    3,
-                    absolute,
-                    "T12-003",
-                    "Mach-O",
-                    format!(
-                        "[T12-003] Structurally valid embedded Mach-O object at file offset 0x{absolute:x}"
-                    ),
-                    metadata,
-                );
+            if maybe_macho {
+                let valid = if let Some((file, file_len)) = file_info {
+                    validate_macho(file, file_len, absolute)?
+                } else {
+                    true
+                };
+                if valid {
+                    let metadata = file_info.and_then(|(file, file_len)| {
+                        macho::parse_macho(file, file_len, absolute).ok().flatten()
+                    });
+                    self.push(
+                        3,
+                        absolute,
+                        "T12-003",
+                        "Mach-O",
+                        format!(
+                            "[T12-003] Structurally valid embedded Mach-O object at file offset 0x{absolute:x}"
+                        ),
+                        metadata,
+                    );
+                }
             }
         }
 
         if self.findings.len() < MAX_FINDINGS {
-            for offset in find_all(&window, b"MZ") {
+            for offset_in_win in find_all(&window, b"MZ") {
                 if self.findings.len() >= MAX_FINDINGS {
                     break;
                 }
-                if !looks_like_dos_header(&window[offset..]) {
+                if !looks_like_dos_header(&window[offset_in_win..]) {
                     continue;
                 }
-                let absolute = window_start.saturating_add(offset as u64);
-                if validate_pe(file, file_len, absolute)? {
-                    let metadata = pe::parse_pe(file, file_len, absolute).ok().flatten();
+                let absolute = window_start.saturating_add(offset_in_win as u64);
+                let valid = if let Some((file, file_len)) = file_info {
+                    validate_pe(file, file_len, absolute)?
+                } else {
+                    true
+                };
+                if valid {
+                    let metadata = file_info.and_then(|(file, file_len)| {
+                        pe::parse_pe(file, file_len, absolute).ok().flatten()
+                    });
                     self.push(
                         2,
                         absolute,

@@ -38,6 +38,16 @@ pub struct FileIdentity {
     ctime_nanos: i64,
 }
 
+impl FileIdentity {
+    pub fn len(&self) -> u64 {
+        self.len
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len == 0
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct HashOutcome {
     pub sha256: String,
@@ -508,7 +518,7 @@ fn guard_sha256(file: &File, len: u64) -> Result<String> {
     Ok(format!("sha256:{}", hex::encode(hasher.finalize())))
 }
 
-fn cache_validation_sha256(
+pub(crate) fn cache_validation_sha256(
     file: &File,
     len: u64,
     known_full_digest: Option<&str>,

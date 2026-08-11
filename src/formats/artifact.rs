@@ -40,6 +40,8 @@ pub struct ArtifactReport {
     pub compound_identity: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cache: Option<ArtifactCacheInfo>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub metrics: Option<crate::scanner::ScanMetrics>,
     pub results: Vec<LayerScanResult>,
 }
 
@@ -171,6 +173,7 @@ fn inspect_opened(
         ArtifactFormat::KerasHdf5 => "application/x-hdf5",
         ArtifactFormat::Unknown => "application/octet-stream",
     };
+    let session = crate::scanner::ScanSession::new(path, &file)?;
     let fuse_binary = mode == ArtifactScanMode::Full
         && matches!(format, ArtifactFormat::Gguf | ArtifactFormat::Safetensors)
         && precomputed_sha256.is_none();
@@ -182,25 +185,21 @@ fn inspect_opened(
                 digest_cache_state = "PRECOMPUTED".to_owned();
                 Some(value)
             }
-            None if fuse_binary => {
-                let mut stream = crate::scanner::binary::BinaryStreamScanner::new();
-                let (outcome, streamed) =
-                    crate::hashcache::sha256_prefixed_with_observer(path, &file, |bytes| {
-                        stream.observe(&file, size, bytes)
-                    })?;
-                digest_cache_state = if outcome.cache_hit { "HIT" } else { "MISS" }.to_owned();
-                let identity = outcome.sha256.clone();
-                fused_binary = Some(if streamed {
-                    stream.finish(&identity, media)
-                } else {
-                    BinaryScanner::scan_file(&file, size, &identity, media)?
-                });
-                Some(identity)
-            }
             None => {
-                let outcome = crate::hashcache::sha256_prefixed(path, &file)?;
-                digest_cache_state = if outcome.cache_hit { "HIT" } else { "MISS" }.to_owned();
-                Some(outcome.sha256)
+                let mut observers: Vec<Box<dyn crate::scanner::StreamObserver>> = Vec::new();
+                if fuse_binary {
+                    observers.push(Box::new(crate::scanner::BinaryStreamObserver::new()));
+                }
+                let (digest_val, obs_results) = session.run(media, observers)?;
+                digest_cache_state = if session.metrics.borrow().cache_hits > 0 {
+                    "HIT".to_owned()
+                } else {
+                    "MISS".to_owned()
+                };
+                if fuse_binary {
+                    fused_binary = obs_results.into_iter().next();
+                }
+                Some(digest_val)
             }
         }
     } else {
@@ -434,6 +433,7 @@ fn inspect_opened(
                 evidence_revision: policy.evidence_revision.to_owned(),
             })
         },
+        metrics: Some(session.metrics.into_inner()),
         results,
     };
     if !crate::hashcache::identity_unchanged(path, &file, &before)? {

@@ -3,6 +3,12 @@ pub mod config;
 pub mod heuristics;
 pub mod integrity;
 pub mod metadata;
+pub mod session;
+
+pub use session::{
+    BinaryStreamObserver, HasherObserver, ScanMetrics, ScanPlan, ScanSession, StreamObserver,
+    TextStreamObserver, STREAM_CHUNK_BYTES,
+};
 
 use crate::finding_evidence::{EvidenceState, EvidenceSubject, FindingEvidence};
 use std::time::Instant;

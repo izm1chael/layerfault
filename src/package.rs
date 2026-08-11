@@ -49,6 +49,8 @@ pub struct PackageReport {
     pub correlations: Vec<crate::finding_evidence::FindingCorrelation>,
     /// What the scan actually examined.
     pub coverage: crate::coverage::Coverage,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub metrics: Option<crate::scanner::ScanMetrics>,
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
@@ -153,20 +155,57 @@ pub fn inspect(root: &Path) -> Result<PackageReport> {
         }
     }
 
+    let mut aggregate_metrics = crate::scanner::ScanMetrics::default();
+
     for path in discovery.paths {
         let rel = safe_relative(&root, &path)?;
         let file = open_readonly_nofollow(&path)?;
         let size = file.metadata()?.len();
         total_bytes = checked_package_total(total_bytes, size)?;
-        let hash = crate::hashcache::sha256_prefixed(&path, &file)?;
-        let digest = hash.sha256.clone();
+
+        let session = crate::scanner::ScanSession::new(&path, &file)?;
+        let ext = path
+            .extension()
+            .and_then(|v| v.to_str())
+            .unwrap_or("")
+            .to_ascii_lowercase();
+        let lower = rel.to_ascii_lowercase();
+
+        let mut observers: Vec<Box<dyn crate::scanner::StreamObserver>> = Vec::new();
+
+        let file_prefix = prefix(&file, 512)?;
+        let executable_candidate = crate::scanner::BinaryScanner::looks_executable_prefix(
+            &file_prefix[..file_prefix.len().min(8)],
+        );
+        if executable_candidate {
+            observers.push(Box::new(crate::scanner::BinaryStreamObserver::new()));
+        }
+
+        let is_text = is_text_candidate(&ext, &lower) && !is_tokenizer_vocabulary_path(&rel);
+        if is_text {
+            observers.push(Box::new(crate::scanner::TextStreamObserver::new(&rel)));
+        }
+
+        let (digest, session_findings) =
+            session.run("application/vnd.layerfault.package-member", observers)?;
+
+        {
+            let m = session.metrics.borrow();
+            aggregate_metrics.bytes_read_sequential += m.bytes_read_sequential;
+            aggregate_metrics.full_passes += m.full_passes;
+            aggregate_metrics.cache_hits += m.cache_hits;
+            aggregate_metrics.cache_misses += m.cache_misses;
+            aggregate_metrics.random_read_bytes += m.random_read_bytes;
+        }
+
+        let cache_hit = session.metrics.borrow().cache_hits > 0;
         let kind = classify(&path);
         files.push(PackageEntry {
             relative_path: rel.clone(),
             kind: kind.to_owned(),
             size,
             sha256: Some(digest.clone()),
-            digest_cache: Some(if hash.cache_hit {
+            digest_cache: Some(if cache_hit {
                 "HIT".to_owned()
             } else if crate::hashcache::digest_eligible(size) {
                 "MISS".to_owned()
@@ -174,6 +213,7 @@ pub fn inspect(root: &Path) -> Result<PackageReport> {
                 "BYPASS_SMALL".to_owned()
             }),
         });
+
         let evidence = capture_custom_code_evidence(&rel, &file)?;
         findings.extend(scan_package_file(
             Some(&root),
@@ -184,10 +224,11 @@ pub fn inspect(root: &Path) -> Result<PackageReport> {
             &digest,
             &evidence,
             &auto_map_modules,
+            &session_findings,
         )?);
         member_evidence.push(evidence);
         let changed = if crate::hashcache::eligible(size) {
-            !crate::hashcache::identity_unchanged(&path, &file, &hash.identity)?
+            !crate::hashcache::identity_unchanged(&path, &file, &session.identity_before)?
         } else {
             crate::hashcache::sha256_uncached_prefixed(&file)? != digest
         };
@@ -243,6 +284,7 @@ pub fn inspect(root: &Path) -> Result<PackageReport> {
         findings,
         correlations,
         coverage,
+        metrics: Some(aggregate_metrics),
     })
 }
 
@@ -380,9 +422,33 @@ fn checked_package_total(current: u64, next: u64) -> Result<u64> {
 pub fn inspect_member(display_path: &Path, content_path: &Path) -> Result<Vec<LayerScanResult>> {
     let file = open_readonly_nofollow(content_path)?;
     let size = file.metadata()?.len();
-    let hash = crate::hashcache::sha256_prefixed(content_path, &file)?;
-    let digest = hash.sha256.clone();
     let rel = display_path.display().to_string();
+    let ext = display_path
+        .extension()
+        .and_then(|v| v.to_str())
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    let lower = rel.to_ascii_lowercase();
+
+    let session = crate::scanner::ScanSession::new(content_path, &file)?;
+    let mut observers: Vec<Box<dyn crate::scanner::StreamObserver>> = Vec::new();
+
+    let file_prefix = prefix(&file, 512)?;
+    let executable_candidate = crate::scanner::BinaryScanner::looks_executable_prefix(
+        &file_prefix[..file_prefix.len().min(8)],
+    );
+    if executable_candidate {
+        observers.push(Box::new(crate::scanner::BinaryStreamObserver::new()));
+    }
+
+    let is_text = is_text_candidate(&ext, &lower) && !is_tokenizer_vocabulary_path(&rel);
+    if is_text {
+        observers.push(Box::new(crate::scanner::TextStreamObserver::new(&rel)));
+    }
+
+    let (digest, session_findings) =
+        session.run("application/vnd.layerfault.package-member", observers)?;
+
     let evidence = capture_custom_code_evidence(&rel, &file)?;
     let empty_auto_map = BTreeSet::new();
     let mut findings = scan_package_file(
@@ -394,9 +460,10 @@ pub fn inspect_member(display_path: &Path, content_path: &Path) -> Result<Vec<La
         &digest,
         &evidence,
         &empty_auto_map,
+        &session_findings,
     )?;
     let changed = if crate::hashcache::eligible(size) {
-        !crate::hashcache::identity_unchanged(content_path, &file, &hash.identity)?
+        !crate::hashcache::identity_unchanged(content_path, &file, &session.identity_before)?
     } else {
         crate::hashcache::sha256_uncached_prefixed(&file)? != digest
     };
@@ -448,6 +515,7 @@ fn scan_package_file(
     digest: &str,
     evidence: &PackageMemberEvidence,
     auto_map_modules: &BTreeSet<String>,
+    session_findings: &[LayerScanResult],
 ) -> Result<Vec<LayerScanResult>> {
     let mut out = Vec::new();
     let subject = member_subject(rel, digest, Some(size));
@@ -577,14 +645,23 @@ fn scan_package_file(
     let executable_prefix = prefix(file, 8)?;
     let mut native_metadata = None;
     if crate::scanner::BinaryScanner::looks_executable_prefix(&executable_prefix) {
-        let binary = crate::scanner::BinaryScanner::scan_file(
-            file,
-            size,
-            digest,
-            "application/vnd.layerfault.package-member",
-        )?;
-        if binary.status == ScanStatus::Fail {
-            out.push(binary);
+        let binary_finding = session_findings
+            .iter()
+            .find(|f| f.check_type == CheckType::BinarySteganography);
+        if let Some(binary) = binary_finding {
+            if binary.status == ScanStatus::Fail {
+                out.push(binary.clone());
+            }
+        } else {
+            let binary = crate::scanner::BinaryScanner::scan_file(
+                file,
+                size,
+                digest,
+                "application/vnd.layerfault.package-member",
+            )?;
+            if binary.status == ScanStatus::Fail {
+                out.push(binary);
+            }
         }
         if let Ok((meta, capability_findings)) =
             crate::scanner::BinaryScanner::inspect_file_capabilities(file, size, digest, rel)
@@ -1106,7 +1183,7 @@ fn floor_boundary(value: &str, mut index: usize) -> usize {
     index
 }
 
-fn is_tokenizer_vocabulary_path(rel: &str) -> bool {
+pub(crate) fn is_tokenizer_vocabulary_path(rel: &str) -> bool {
     let name = rel.rsplit('/').next().unwrap_or(rel).to_ascii_lowercase();
     matches!(
         name.as_str(),
@@ -1114,7 +1191,7 @@ fn is_tokenizer_vocabulary_path(rel: &str) -> bool {
     ) || name.starts_with("vocab.")
 }
 
-fn is_documentation_path(rel: &str) -> bool {
+pub(crate) fn is_documentation_path(rel: &str) -> bool {
     let lower = rel.to_ascii_lowercase();
     lower.split('/').any(|part| part == "docs")
         || lower.ends_with(".md")
