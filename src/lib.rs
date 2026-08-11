@@ -53,6 +53,7 @@ pub mod research;
 pub mod rules;
 pub mod safeio;
 pub mod scanner;
+pub mod scheduler;
 pub mod sigstore;
 pub mod sources;
 pub mod transformation;

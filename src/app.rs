@@ -37,6 +37,7 @@ pub struct ScanOptions<'a> {
     pub jobs: usize,
     pub quiet: bool,
     pub budget: crate::budget::ScanBudget,
+    pub scheduler: crate::scheduler::AdaptiveScheduler,
 }
 
 pub fn resolve_base_dir(override_dir: Option<&Path>) -> Result<PathBuf> {

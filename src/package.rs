@@ -117,9 +117,47 @@ pub fn inspect(root: &Path) -> Result<PackageReport> {
     inspect_with_budget(root, &budget)
 }
 
+fn estimate_member_cost(path: &Path, size: u64) -> crate::scheduler::TaskCost {
+    let ext = path
+        .extension()
+        .and_then(|v| v.to_str())
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    match ext.as_str() {
+        "py" | "pyw" => crate::scheduler::TaskCost::ast_parse(size),
+        "zip" | "tar" | "tgz" | "gz" | "whl" => {
+            crate::scheduler::TaskCost::archive_decompression(size.saturating_mul(2))
+        }
+        "so" | "dll" | "dylib" | "elf" | "exe" => crate::scheduler::TaskCost::native_parse(size),
+        _ => {
+            if size > 10 * 1024 * 1024 {
+                crate::scheduler::TaskCost::large_sequential_io(size, 8 * 1024 * 1024)
+            } else {
+                crate::scheduler::TaskCost::small_io(size)
+            }
+        }
+    }
+}
+
 pub fn inspect_with_budget(
     root: &Path,
     budget: &crate::budget::ScanBudget,
+) -> Result<PackageReport> {
+    let scheduler =
+        crate::scheduler::AdaptiveScheduler::new(crate::scheduler::SchedulerConfig::detect(
+            None,
+            None,
+            None,
+            crate::scheduler::SchedulerMode::Adaptive,
+            crate::budget::ScanBudgetProfile::Default,
+        ));
+    inspect_with_scheduler(root, budget, &scheduler)
+}
+
+pub fn inspect_with_scheduler(
+    root: &Path,
+    budget: &crate::budget::ScanBudget,
+    scheduler: &crate::scheduler::AdaptiveScheduler,
 ) -> Result<PackageReport> {
     let metadata = std::fs::symlink_metadata(root)
         .with_context(|| format!("Unable to inspect package root '{}'", root.display()))?;
@@ -194,6 +232,12 @@ pub fn inspect_with_budget(
         let rel = safe_relative(&root, &path)?;
         let file = open_readonly_nofollow(&path)?;
         let size = file.metadata()?.len();
+
+        let cost = estimate_member_cost(&path, size);
+        let _permit = scheduler
+            .acquire(cost, budget)
+            .map_err(|error| anyhow!("global scan budget/scheduler exhausted: {error}"))?;
+
         budget
             .consume(crate::budget::BudgetDimension::Objects, 1, "package member")
             .map_err(|error| anyhow!("global scan budget exhausted: {error}"))?;

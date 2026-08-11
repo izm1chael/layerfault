@@ -177,6 +177,18 @@ struct ScanCommon {
     /// retains findings already produced, and reports incomplete coverage.
     #[arg(long)]
     timeout_seconds: Option<u64>,
+
+    /// Scheduler concurrency mode: adaptive or fixed.
+    #[arg(long, default_value = "adaptive", value_parser = parse_scheduler)]
+    scheduler: String,
+
+    /// Maximum estimated resident memory reservation in MiB.
+    #[arg(long)]
+    max_memory_mib: Option<u64>,
+
+    /// Maximum in-flight large sequential I/O bytes.
+    #[arg(long)]
+    max_inflight_bytes: Option<u64>,
 }
 
 impl Default for ScanCommon {
@@ -194,6 +206,9 @@ impl Default for ScanCommon {
             budget_profile: "default".to_owned(),
             budget_file: None,
             timeout_seconds: None,
+            scheduler: "adaptive".to_owned(),
+            max_memory_mib: None,
+            max_inflight_bytes: None,
         }
     }
 }
@@ -1368,6 +1383,7 @@ struct Prepared {
     trust_store: TrustStore,
     policy: policy::EffectivePolicy,
     budget: layerfault::budget::ScanBudget,
+    scheduler: layerfault::scheduler::AdaptiveScheduler,
 }
 
 fn prepare(common: &ScanCommon) -> Result<Prepared> {
@@ -1386,10 +1402,11 @@ fn prepare(common: &ScanCommon) -> Result<Prepared> {
         None => PolicyDocument::builtin(PolicyProfile::parse(&common.policy)?),
     };
     policy_doc.validate()?;
+    let profile = layerfault::budget::ScanBudgetProfile::parse(&common.budget_profile)?;
     let budget_config = match common.budget_file.as_deref() {
         Some(path) => layerfault::budget::ScanBudgetConfig::load(path)?,
         None => layerfault::budget::ScanBudgetConfig {
-            profile: layerfault::budget::ScanBudgetProfile::parse(&common.budget_profile)?,
+            profile,
             limits: None,
         },
     };
@@ -1399,12 +1416,24 @@ fn prepare(common: &ScanCommon) -> Result<Prepared> {
     }
     let budget = layerfault::budget::ScanBudget::new(limits)?;
     arm_ctrlc_cancellation(&budget);
+
+    let mode = layerfault::scheduler::SchedulerMode::parse(&common.scheduler)?;
+    let scheduler_config = layerfault::scheduler::SchedulerConfig::detect(
+        common.jobs,
+        common.max_memory_mib,
+        common.max_inflight_bytes,
+        mode,
+        profile,
+    );
+    let scheduler = layerfault::scheduler::AdaptiveScheduler::new(scheduler_config);
+
     Ok(Prepared {
         thresholds,
         verifying_key,
         trust_store,
         policy: policy_doc.effective(),
         budget,
+        scheduler,
     })
 }
 
@@ -1449,6 +1478,7 @@ fn scan_options<'a>(common: &ScanCommon, prepared: &'a Prepared, quiet: bool) ->
         jobs: common.jobs.unwrap_or_else(app::default_jobs),
         quiet,
         budget: prepared.budget.clone(),
+        scheduler: prepared.scheduler.clone(),
     }
 }
 
@@ -1728,6 +1758,12 @@ fn parse_jobs(value: &str) -> std::result::Result<usize, String> {
         return Err("jobs must be between 1 and 64".to_owned());
     }
     Ok(parsed)
+}
+fn parse_scheduler(value: &str) -> std::result::Result<String, String> {
+    match layerfault::scheduler::SchedulerMode::parse(value) {
+        Ok(mode) => Ok(mode.as_str().to_owned()),
+        Err(err) => Err(err.to_string()),
+    }
 }
 fn parse_nonnegative_i64(value: &str) -> std::result::Result<i64, String> {
     let parsed: i64 = value
