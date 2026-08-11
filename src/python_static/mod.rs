@@ -27,19 +27,34 @@ pub struct PythonAnalysis {
     pub coverage: PythonCoverage,
 }
 
-pub fn analyze(
-    relative_path: &str,
-    source: &str,
-    _sha256: &str,
-    auto_map_modules: &BTreeSet<String>,
-    limits: &PythonAnalysisLimits,
-) -> Result<PythonAnalysis> {
-    let parse_res = parse_python_source(source, relative_path, limits);
+/// Content-intrinsic Python facts: parsing, symbol table and call-site
+/// extraction over exact source bytes. Contains no `relative_path` or
+/// `auto_map_modules` influence, so it is safe to reuse across paths and
+/// packages for identical source bytes via [`crate::content_cache`].
+///
+/// Reachability (`entry_points`/`relationships`, and any auto_map-flavoured
+/// finding derived from them) is deliberately *not* part of this struct: it
+/// depends on `auto_map_modules`, which is contextual per-package
+/// configuration, and must always be recomputed fresh.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+struct PythonContentFacts {
+    syntax_state: PythonSyntaxState,
+    imports: Vec<ImportBinding>,
+    call_sites: Vec<CallSite>,
+    definitions: Vec<Definition>,
+    coverage: PythonCoverage,
+}
+
+const PYTHON_CONTENT_CACHE_DISCRIMINATOR: &str = "python-ast:v1";
+/// Fixed source label used only for parser error-message text when computing
+/// cacheable content facts, so the cached record never embeds a real path.
+const CONTENT_FACTS_SOURCE_LABEL: &str = "<content>";
+
+fn analyze_content(source: &str, limits: &PythonAnalysisLimits) -> PythonContentFacts {
+    let parse_res = parse_python_source(source, CONTENT_FACTS_SOURCE_LABEL, limits);
     let line_index = LineIndex::new(source);
     let mut symbol_table = SymbolTable::new();
     let mut call_sites = Vec::new();
-    let mut entry_points = Vec::new();
-    let mut relationships = Vec::new();
 
     if let Some(ref suite) = parse_res.ast {
         // Step 1: Collect symbols & imports
@@ -49,26 +64,76 @@ pub fn analyze(
         let mut extractor = CallSiteExtractor::new(&symbol_table, limits, &line_index);
         extractor.extract_suite(suite, ExecutionContext::ModuleScope);
         call_sites = extractor.call_sites;
-
-        // Step 3: Compute reachability and auto_map relationships
-        let reach_graph =
-            ReachabilityGraph::compute(&call_sites, auto_map_modules, relative_path, limits);
-        entry_points = reach_graph.entry_points;
-        relationships = reach_graph.relationships;
     }
 
     let imports = symbol_table.imports.into_values().collect();
     let definitions = symbol_table.definitions;
 
-    Ok(PythonAnalysis {
-        relative_path: relative_path.to_owned(),
+    PythonContentFacts {
         syntax_state: parse_res.syntax_state,
         imports,
         call_sites,
         definitions,
+        coverage: parse_res.coverage,
+    }
+}
+
+/// Content facts, from the content cache when eligible and available,
+/// otherwise computed fresh (and opportunistically cached for next time).
+/// `sha256` must already be a verified content digest for `source`'s exact
+/// bytes — never recomputed here.
+fn content_facts(source: &str, sha256: &str, limits: &PythonAnalysisLimits) -> PythonContentFacts {
+    let size = source.len() as u64;
+    if crate::content_cache::eligible(size) {
+        if let Ok(Some(cached)) = crate::content_cache::lookup::<PythonContentFacts>(
+            sha256,
+            size,
+            PYTHON_CONTENT_CACHE_DISCRIMINATOR,
+        ) {
+            return cached;
+        }
+        let facts = analyze_content(source, limits);
+        let _ =
+            crate::content_cache::store(sha256, size, PYTHON_CONTENT_CACHE_DISCRIMINATOR, &facts);
+        return facts;
+    }
+    analyze_content(source, limits)
+}
+
+pub fn analyze(
+    relative_path: &str,
+    source: &str,
+    sha256: &str,
+    auto_map_modules: &BTreeSet<String>,
+    limits: &PythonAnalysisLimits,
+) -> Result<PythonAnalysis> {
+    let facts = content_facts(source, sha256, limits);
+
+    // Reachability and auto_map relationships are always recomputed fresh:
+    // they depend on `auto_map_modules`, which is contextual (per-package)
+    // configuration that must never be baked into cached content facts.
+    let (entry_points, relationships) = match facts.syntax_state {
+        PythonSyntaxState::Valid => {
+            let reach_graph = ReachabilityGraph::compute(
+                &facts.call_sites,
+                auto_map_modules,
+                relative_path,
+                limits,
+            );
+            (reach_graph.entry_points, reach_graph.relationships)
+        }
+        _ => (Vec::new(), Vec::new()),
+    };
+
+    Ok(PythonAnalysis {
+        relative_path: relative_path.to_owned(),
+        syntax_state: facts.syntax_state,
+        imports: facts.imports,
+        call_sites: facts.call_sites,
+        definitions: facts.definitions,
         entry_points,
         relationships,
-        coverage: parse_res.coverage,
+        coverage: facts.coverage,
     })
 }
 
@@ -279,6 +344,97 @@ mod tests {
     use super::*;
     use calls::{ExecutionContext, PythonCapabilityCategory};
     use std::collections::BTreeSet;
+
+    // Shared with `content_cache`'s own tests: env vars are process-global
+    // and `cargo test` runs all tests in one process, so both modules must
+    // serialize through the same lock.
+    use crate::content_cache::ENV_TEST_LOCK as ENV_LOCK;
+
+    struct ContentCacheEnvGuard {
+        _lock: std::sync::MutexGuard<'static, ()>,
+        root: std::path::PathBuf,
+    }
+
+    impl ContentCacheEnvGuard {
+        fn new(name: &str) -> Self {
+            let lock = ENV_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+            let root = std::env::temp_dir().join(format!(
+                "layerfault-python-content-cache-{name}-{}-{}",
+                std::process::id(),
+                crate::paths::now_unix()
+            ));
+            std::fs::create_dir_all(&root).expect("create cache root");
+            std::env::set_var("LAYERFAULT_CACHE_DIR", &root);
+            std::env::set_var("LAYERFAULT_CONTENT_CACHE", "on");
+            std::env::set_var("LAYERFAULT_CONTENT_CACHE_MIN_BYTES", "0");
+            Self { _lock: lock, root }
+        }
+    }
+
+    impl Drop for ContentCacheEnvGuard {
+        fn drop(&mut self) {
+            std::env::remove_var("LAYERFAULT_CACHE_DIR");
+            std::env::remove_var("LAYERFAULT_CONTENT_CACHE");
+            std::env::remove_var("LAYERFAULT_CONTENT_CACHE_MIN_BYTES");
+            let _ = std::fs::remove_dir_all(&self.root);
+        }
+    }
+
+    #[test]
+    fn python_content_facts_ignore_auto_map() {
+        let _guard = ContentCacheEnvGuard::new("auto-map-independence");
+        let code = r#"
+import subprocess
+
+class CustomModel:
+    def __init__(self):
+        subprocess.run(["echo", "hi"])
+"#;
+        let limits = PythonAnalysisLimits::default();
+        let sha256 = "sha256:python-content-facts-test";
+
+        let mut mapped = BTreeSet::new();
+        mapped.insert("modeling_custom".to_owned());
+        let with_auto_map = analyze("modeling_custom.py", code, sha256, &mapped, &limits).unwrap();
+
+        let without_auto_map = analyze(
+            "modeling_custom.py",
+            code,
+            sha256,
+            &BTreeSet::new(),
+            &limits,
+        )
+        .unwrap();
+
+        // Content-intrinsic facts (parsed/cached under the same content
+        // sha256) must be identical regardless of auto_map configuration.
+        assert_eq!(
+            with_auto_map.call_sites.len(),
+            without_auto_map.call_sites.len()
+        );
+        assert_eq!(with_auto_map.imports.len(), without_auto_map.imports.len());
+        assert_eq!(
+            with_auto_map.definitions.len(),
+            without_auto_map.definitions.len()
+        );
+        assert!(matches!(
+            with_auto_map.syntax_state,
+            PythonSyntaxState::Valid
+        ));
+        assert!(matches!(
+            without_auto_map.syntax_state,
+            PythonSyntaxState::Valid
+        ));
+
+        // Reachability/auto_map relationships are always recomputed fresh
+        // and must differ: the mapped call sees an auto_map entry point,
+        // the unmapped call does not.
+        assert!(with_auto_map.entry_points.iter().any(|ep| ep.is_auto_map));
+        assert!(without_auto_map
+            .entry_points
+            .iter()
+            .all(|ep| !ep.is_auto_map));
+    }
 
     #[test]
     fn test_import_alias_resolution() {

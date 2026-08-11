@@ -439,6 +439,16 @@ pub(crate) fn run_quarantine(args: QuarantineArgs) -> Result<()> {
 }
 
 pub(crate) fn run_gc(args: GcArgs) -> Result<()> {
+    if matches!(args.target, GcTarget::Blobs | GcTarget::All) {
+        run_blob_gc(&args)?;
+    }
+    if matches!(args.target, GcTarget::ContentCache | GcTarget::All) {
+        run_content_cache_gc(&args)?;
+    }
+    Ok(())
+}
+
+fn run_blob_gc(args: &GcArgs) -> Result<()> {
     let base_dir = app::resolve_base_dir(args.ollama_dir.as_deref())?;
     let plan = gc::plan(&base_dir)?;
     if args.json {
@@ -457,6 +467,34 @@ pub(crate) fn run_gc(args: GcArgs) -> Result<()> {
     if args.execute {
         let deleted = gc::execute(&base_dir, &plan)?;
         println!("Deleted {deleted} bytes of demonstrably unreferenced Ollama blobs");
+    }
+    Ok(())
+}
+
+fn run_content_cache_gc(args: &GcArgs) -> Result<()> {
+    let plan = content_cache::gc::plan()?;
+    if args.json {
+        println!(
+            "{}",
+            serde_json::json!({
+                "total_entries": plan.total_entries,
+                "total_bytes": plan.total_bytes,
+                "evict_candidates": plan.evict.len(),
+                "bytes_reclaimable": plan.bytes_reclaimed,
+            })
+        );
+    } else {
+        println!("Content cache entries: {}", plan.total_entries);
+        println!("Content cache bytes: {}", plan.total_bytes);
+        println!(
+            "Eviction candidates: {} ({} bytes reclaimable)",
+            plan.evict.len(),
+            plan.bytes_reclaimed
+        );
+    }
+    if args.execute {
+        let removed = content_cache::gc::execute(&plan)?;
+        println!("Removed {removed} content-cache records");
     }
     Ok(())
 }

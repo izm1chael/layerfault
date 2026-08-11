@@ -27,6 +27,11 @@ pub struct ArtifactCacheInfo {
     pub digest_min_bytes: u64,
     pub evidence_min_bytes: u64,
     pub evidence_revision: String,
+    /// Content-sha256-keyed structural evidence cache status: "HIT", "MISS",
+    /// "BYPASS_COMPOUND" (formats with external sidecars, e.g. ONNX) or
+    /// "NOT_USED" (structure-only mode / no verified content digest yet).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub content: Option<String>,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -202,6 +207,7 @@ fn inspect_opened(
                     digest_min_bytes: policy.digest_min_bytes,
                     evidence_min_bytes: policy.evidence_min_bytes,
                     evidence_revision: policy.evidence_revision.to_owned(),
+                    content: Some("NOT_USED".to_owned()),
                 });
                 return Ok(report);
             }
@@ -302,157 +308,214 @@ fn inspect_opened(
         );
     }
 
-    match format {
-        ArtifactFormat::Gguf => {
-            results.extend(MetadataScanner::scan_file_results(
-                &file, size, &identity, media,
-            )?);
-            if mode == ArtifactScanMode::Full {
-                results.push(match fused_binary.take() {
-                    Some(result) => result,
-                    None => BinaryScanner::scan_file(&file, size, &identity, media)?,
-                });
-            }
+    // Content-sha256-keyed evidence cache for the expensive structural dispatch
+    // below. Unlike the whole-report `hashcache::load_evidence` short-circuit
+    // above (path/inode-identity keyed), this reuses intrinsic structural
+    // findings across different paths/packages/sources for identical bytes.
+    // The earlier format/extension-contradiction checks are deliberately left
+    // out of the cached region: they depend on the filename's claimed
+    // extension, which is a path property, not a content property.
+    let content_parser_discriminator = format!(
+        "artifact:{}:{}",
+        format.as_str(),
+        match mode {
+            ArtifactScanMode::Full => "full",
+            ArtifactScanMode::StructureOnly => "structure",
         }
-        ArtifactFormat::Safetensors => {
-            results.push(safetensors::scan_file(&file, size, &identity, media, budget)?);
-            if mode == ArtifactScanMode::Full {
-                results.push(match fused_binary.take() {
-                    Some(result) => result,
-                    None => BinaryScanner::scan_file(&file, size, &identity, media)?,
-                });
-            }
-        }
-        ArtifactFormat::SafetensorsIndex => {
-            results.push(safetensors::scan_index(path, &file, size, &identity, media, budget)?);
-        }
-        ArtifactFormat::Onnx => {
-            let (finding, compound) = onnx::scan(path, &file, size, &identity, media)?;
-            compound_identity = compound;
-            results.push(finding);
-        }
-        ArtifactFormat::Pickle => {
-            results.extend(pickle::scan(path, &file, size, &identity, media, budget)?);
-        }
-        ArtifactFormat::PyTorchZip
-        | ArtifactFormat::TorchScript
-        | ArtifactFormat::TorchPackage => {
-            results.extend(pytorch::scan(path, &file, size, &identity, media)?);
-        }
-        ArtifactFormat::ExecuTorch => {
-            results.extend(executorch::scan(path, &file, size, &identity, media)?);
-        }
-        ArtifactFormat::OpenVinoIr => {
-            results.extend(openvino::scan(path, &file, size, &identity, media)?);
-        }
-        ArtifactFormat::TensorRtEngine => {
-            results.extend(tensorrt::scan(path, &file, size, &identity, media)?);
-        }
-        ArtifactFormat::CoreMlModel => {
-            results.extend(coreml::scan_model(path, &file, size, &identity, media)?);
-        }
-        ArtifactFormat::CoreMlPackage => {
-            results.extend(coreml::scan_package(path, &identity, media)?);
-        }
-        ArtifactFormat::MlxPackage => {
-            results.extend(mlx::scan_package(path, &identity, media)?);
-        }
-
-        ArtifactFormat::TensorFlowSavedModel => results.push(tensorflow::scan_saved_model(&file, size, &identity, media)?),
-        ArtifactFormat::TensorFlowCheckpoint => results.push(tensorflow::scan_checkpoint(path, &file, size, &identity, media)?),
-        ArtifactFormat::TensorFlowLite => results.push(tflite::scan(&file, size, &identity, media)?),
-        ArtifactFormat::KerasArchive => results.push(keras::scan(&file, size, &identity, media)?),
-        ArtifactFormat::KerasHdf5 => results.push(LayerScanResult {
-            layer_digest: identity.clone(), media_type: media.to_owned(), check_type: crate::scanner::CheckType::KerasStructure,
-            status: ScanStatus::Warn, finding_class: FindingClass::Compatibility, confidence: Confidence::High,
-            detail: Some("Keras/TensorFlow HDF5 container recognized. This build hashes and package-scans the file but does not execute or fully decode arbitrary HDF5 object graphs.".to_owned()),
-            matches: vec!["[LF-KERAS-HDF5-LIMIT] HDF5 model recognized with explicit bounded capability limit".to_owned()], duration_ms: 0,
-            ..Default::default()
-        }),
-        ArtifactFormat::Unknown => {
-            let mut prefix_buf = [0_u8; 512];
-            let mut cloned = file.try_clone()?;
-            cloned.seek(SeekFrom::Start(0))?;
-            let n = cloned.read(&mut prefix_buf).unwrap_or(0);
-            let detection = crate::archive::detect_archive_format(path, &prefix_buf[..n]);
-            if detection.format != crate::archive::ArchiveFormat::Unknown {
-                match crate::archive::inspect_opened(
-                    path,
-                    &file,
-                    &identity,
-                    &crate::archive::ArchiveLimits::default(),
-                    0,
-                    budget,
-                ) {
-                    Ok(arch_report) => results.extend(arch_report.findings),
-                    Err(error) => results.push(LayerScanResult {
-                        layer_digest: identity.clone(),
-                        media_type: media.to_owned(),
-                        check_type: crate::scanner::CheckType::LayerPolicy,
-                        status: ScanStatus::Fail,
-                        finding_class: FindingClass::Structural,
-                        confidence: Confidence::High,
-                        detail: Some(format!(
-                            "Archive container '{}' failed inspection safely: {error}",
-                            path.display()
-                        )),
-                        matches: vec![
-                            "[LF-ARCHIVE-MALFORMED] archive inspection failed".to_owned(),
-                        ],
-                        duration_ms: 0,
-                        ..Default::default()
-                    }),
+    );
+    let content_cache_safe = evidence_cache_safe;
+    let mut content_cache_state = if content_cache_safe {
+        "NOT_USED".to_owned()
+    } else {
+        "BYPASS_COMPOUND".to_owned()
+    };
+    let mut structural_cache_hit = false;
+    if content_cache_safe {
+        if let Some(sha) = sha256.as_deref() {
+            match crate::content_cache::lookup::<Vec<LayerScanResult>>(
+                sha,
+                size,
+                &content_parser_discriminator,
+            ) {
+                Ok(Some(mut cached)) => {
+                    crate::content_cache::rehydrate_path(&mut cached, &path.display().to_string());
+                    results.extend(cached);
+                    structural_cache_hit = true;
+                    content_cache_state = "HIT".to_owned();
                 }
-            } else {
-                results.push(LayerScanResult {
-                    layer_digest: identity.clone(),
-                    media_type: media.to_owned(),
-                    check_type: crate::scanner::CheckType::LayerPolicy,
-                    status: ScanStatus::Warn,
-                    finding_class: FindingClass::Compatibility,
-                    confidence: Confidence::High,
-                    detail: Some("Unknown artifact format: integrity can be hashed but no structural parser is available".to_owned()),
-                    matches: vec!["[LF-FORMAT-UNKNOWN] unknown artifact format".to_owned()],
-                    duration_ms: 0,
-                    ..Default::default()
-                });
+                Ok(None) => content_cache_state = "MISS".to_owned(),
+                Err(_) => content_cache_state = "MISS".to_owned(),
             }
         }
     }
 
-    let trailing_subject = EvidenceSubject::member(&path.display().to_string())
-        .with_sha256(sha256.clone())
-        .with_media_type(media);
-    match format {
-        ArtifactFormat::Gguf => {
-            if let Ok(inv) = gguf::parse_file(&file, size) {
-                let extent = inv.logical_extent(size);
-                if let Ok(Some(finding)) = crate::formats::extent::inspect_trailing_data(
-                    &file,
-                    extent,
-                    &trailing_subject,
-                    &identity,
-                    media,
-                ) {
-                    results.push(finding);
+    let structural_start = results.len();
+    if !structural_cache_hit {
+        match format {
+            ArtifactFormat::Gguf => {
+                results.extend(MetadataScanner::scan_file_results(
+                    &file, size, &identity, media,
+                )?);
+                if mode == ArtifactScanMode::Full {
+                    results.push(match fused_binary.take() {
+                        Some(result) => result,
+                        None => BinaryScanner::scan_file(&file, size, &identity, media)?,
+                    });
+                }
+            }
+            ArtifactFormat::Safetensors => {
+                results.push(safetensors::scan_file(&file, size, &identity, media, budget)?);
+                if mode == ArtifactScanMode::Full {
+                    results.push(match fused_binary.take() {
+                        Some(result) => result,
+                        None => BinaryScanner::scan_file(&file, size, &identity, media)?,
+                    });
+                }
+            }
+            ArtifactFormat::SafetensorsIndex => {
+                results.push(safetensors::scan_index(path, &file, size, &identity, media, budget)?);
+            }
+            ArtifactFormat::Onnx => {
+                let (finding, compound) = onnx::scan(path, &file, size, &identity, media)?;
+                compound_identity = compound;
+                results.push(finding);
+            }
+            ArtifactFormat::Pickle => {
+                results.extend(pickle::scan(path, &file, size, &identity, media, budget)?);
+            }
+            ArtifactFormat::PyTorchZip
+            | ArtifactFormat::TorchScript
+            | ArtifactFormat::TorchPackage => {
+                results.extend(pytorch::scan(path, &file, size, &identity, media)?);
+            }
+            ArtifactFormat::ExecuTorch => {
+                results.extend(executorch::scan(path, &file, size, &identity, media)?);
+            }
+            ArtifactFormat::OpenVinoIr => {
+                results.extend(openvino::scan(path, &file, size, &identity, media)?);
+            }
+            ArtifactFormat::TensorRtEngine => {
+                results.extend(tensorrt::scan(path, &file, size, &identity, media)?);
+            }
+            ArtifactFormat::CoreMlModel => {
+                results.extend(coreml::scan_model(path, &file, size, &identity, media)?);
+            }
+            ArtifactFormat::CoreMlPackage => {
+                results.extend(coreml::scan_package(path, &identity, media)?);
+            }
+            ArtifactFormat::MlxPackage => {
+                results.extend(mlx::scan_package(path, &identity, media)?);
+            }
+
+            ArtifactFormat::TensorFlowSavedModel => results.push(tensorflow::scan_saved_model(&file, size, &identity, media)?),
+            ArtifactFormat::TensorFlowCheckpoint => results.push(tensorflow::scan_checkpoint(path, &file, size, &identity, media)?),
+            ArtifactFormat::TensorFlowLite => results.push(tflite::scan(&file, size, &identity, media)?),
+            ArtifactFormat::KerasArchive => results.push(keras::scan(&file, size, &identity, media)?),
+            ArtifactFormat::KerasHdf5 => results.push(LayerScanResult {
+                layer_digest: identity.clone(), media_type: media.to_owned(), check_type: crate::scanner::CheckType::KerasStructure,
+                status: ScanStatus::Warn, finding_class: FindingClass::Compatibility, confidence: Confidence::High,
+                detail: Some("Keras/TensorFlow HDF5 container recognized. This build hashes and package-scans the file but does not execute or fully decode arbitrary HDF5 object graphs.".to_owned()),
+                matches: vec!["[LF-KERAS-HDF5-LIMIT] HDF5 model recognized with explicit bounded capability limit".to_owned()], duration_ms: 0,
+                ..Default::default()
+            }),
+            ArtifactFormat::Unknown => {
+                let mut prefix_buf = [0_u8; 512];
+                let mut cloned = file.try_clone()?;
+                cloned.seek(SeekFrom::Start(0))?;
+                let n = cloned.read(&mut prefix_buf).unwrap_or(0);
+                let detection = crate::archive::detect_archive_format(path, &prefix_buf[..n]);
+                if detection.format != crate::archive::ArchiveFormat::Unknown {
+                    match crate::archive::inspect_opened(
+                        path,
+                        &file,
+                        &identity,
+                        &crate::archive::ArchiveLimits::default(),
+                        0,
+                        budget,
+                    ) {
+                        Ok(arch_report) => results.extend(arch_report.findings),
+                        Err(error) => results.push(LayerScanResult {
+                            layer_digest: identity.clone(),
+                            media_type: media.to_owned(),
+                            check_type: crate::scanner::CheckType::LayerPolicy,
+                            status: ScanStatus::Fail,
+                            finding_class: FindingClass::Structural,
+                            confidence: Confidence::High,
+                            detail: Some(format!(
+                                "Archive container '{}' failed inspection safely: {error}",
+                                path.display()
+                            )),
+                            matches: vec![
+                                "[LF-ARCHIVE-MALFORMED] archive inspection failed".to_owned(),
+                            ],
+                            duration_ms: 0,
+                            ..Default::default()
+                        }),
+                    }
+                } else {
+                    results.push(LayerScanResult {
+                        layer_digest: identity.clone(),
+                        media_type: media.to_owned(),
+                        check_type: crate::scanner::CheckType::LayerPolicy,
+                        status: ScanStatus::Warn,
+                        finding_class: FindingClass::Compatibility,
+                        confidence: Confidence::High,
+                        detail: Some("Unknown artifact format: integrity can be hashed but no structural parser is available".to_owned()),
+                        matches: vec!["[LF-FORMAT-UNKNOWN] unknown artifact format".to_owned()],
+                        duration_ms: 0,
+                        ..Default::default()
+                    });
                 }
             }
         }
-        ArtifactFormat::Safetensors => {
-            if let Ok(inv) = safetensors::inventory_file(&file, size) {
-                let extent = inv.logical_extent(size);
-                if let Ok(Some(finding)) = crate::formats::extent::inspect_trailing_data(
-                    &file,
-                    extent,
-                    &trailing_subject,
-                    &identity,
-                    media,
-                ) {
-                    results.push(finding);
+
+        let trailing_subject = EvidenceSubject::member(&path.display().to_string())
+            .with_sha256(sha256.clone())
+            .with_media_type(media);
+        match format {
+            ArtifactFormat::Gguf => {
+                if let Ok(inv) = gguf::parse_file(&file, size) {
+                    let extent = inv.logical_extent(size);
+                    if let Ok(Some(finding)) = crate::formats::extent::inspect_trailing_data(
+                        &file,
+                        extent,
+                        &trailing_subject,
+                        &identity,
+                        media,
+                    ) {
+                        results.push(finding);
+                    }
                 }
             }
+            ArtifactFormat::Safetensors => {
+                if let Ok(inv) = safetensors::inventory_file(&file, size) {
+                    let extent = inv.logical_extent(size);
+                    if let Ok(Some(finding)) = crate::formats::extent::inspect_trailing_data(
+                        &file,
+                        extent,
+                        &trailing_subject,
+                        &identity,
+                        media,
+                    ) {
+                        results.push(finding);
+                    }
+                }
+            }
+            _ => {}
         }
-        _ => {}
+
+        if content_cache_safe {
+            if let Some(sha) = sha256.as_deref() {
+                let normalized =
+                    crate::content_cache::normalize_for_cache(&results[structural_start..]);
+                let _ = crate::content_cache::store(
+                    sha,
+                    size,
+                    &content_parser_discriminator,
+                    &normalized,
+                );
+            }
+        }
     }
     // Every branch above tags `matches[0]` with a `[RULE-ID]` prefix already;
     // backfill the structured identity fields for any finding still built as
@@ -489,6 +552,7 @@ fn inspect_opened(
                 digest_min_bytes: policy.digest_min_bytes,
                 evidence_min_bytes: policy.evidence_min_bytes,
                 evidence_revision: policy.evidence_revision.to_owned(),
+                content: Some(content_cache_state),
             })
         },
         metrics: Some(session.metrics.into_inner()),

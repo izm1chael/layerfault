@@ -40,6 +40,7 @@ fn main() {
         "src/package.rs",
         "src/safeio.rs",
         "src/hashcache.rs",
+        "src/content_cache.rs",
         "Cargo.toml",
         "Cargo.lock",
         "build.rs",

@@ -12,6 +12,7 @@ pub mod behaviour;
 pub mod binding;
 pub mod budget;
 pub mod certify;
+pub mod content_cache;
 pub mod correlate;
 pub mod coverage;
 pub mod dataset;

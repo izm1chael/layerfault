@@ -13,9 +13,9 @@ use layerfault::policy::{PolicyDocument, PolicyProfile};
 use layerfault::sources::SourceKind;
 use layerfault::trust::TrustStore;
 use layerfault::{
-    advisory, audit, baseline, binding, certify, doctor, evidence, explain, gc, inventory,
-    manifest, modeldiff, package, policy, provenance, quarantine, report, safeio, sigstore,
-    sources, ThresholdConfig,
+    advisory, audit, baseline, binding, certify, content_cache, doctor, evidence, explain, gc,
+    inventory, manifest, modeldiff, package, policy, provenance, quarantine, report, safeio,
+    sigstore, sources, ThresholdConfig,
 };
 use std::collections::BTreeMap;
 use std::fs;
@@ -937,6 +937,17 @@ enum NewsletterCommand {
     },
 }
 
+#[derive(clap::ValueEnum, Clone, Copy, Debug, Default, PartialEq, Eq)]
+enum GcTarget {
+    /// Orphaned content-addressed model blobs (the pre-existing GC domain).
+    #[default]
+    Blobs,
+    /// The content-sha256-keyed structural/Python evidence cache.
+    ContentCache,
+    /// Both of the above.
+    All,
+}
+
 #[derive(clap::Args, Debug)]
 struct GcArgs {
     #[arg(long)]
@@ -945,6 +956,10 @@ struct GcArgs {
     execute: bool,
     #[arg(long, default_value_t = false)]
     json: bool,
+    /// What to garbage-collect. Defaults to `blobs`, preserving prior
+    /// `layerfault gc` behavior exactly for callers that don't pass `--target`.
+    #[arg(long, value_enum, default_value_t = GcTarget::Blobs)]
+    target: GcTarget,
 }
 
 #[derive(clap::Args, Debug)]
@@ -1290,6 +1305,7 @@ fn main() -> Result<()> {
     let cli = Cli::parse();
     if cli.no_cache {
         std::env::set_var("LAYERFAULT_HASH_CACHE", "off");
+        std::env::set_var("LAYERFAULT_CONTENT_CACHE", "off");
     }
     if let Some(cache_dir) = cli.cache_dir.as_ref() {
         std::env::set_var("LAYERFAULT_CACHE_DIR", cache_dir.as_os_str());
