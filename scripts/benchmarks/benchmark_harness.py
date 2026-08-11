@@ -117,6 +117,23 @@ def create_pickle_heavy_fixture(path: pathlib.Path) -> None:
     path.write_bytes(content)
 
 
+def create_high_finding_count_package(target_dir: pathlib.Path, member_count: int = 2000) -> None:
+    """A package whose static scan produces thousands of findings, so the
+    `--json`/`--sarif` serialization path (not just the scan itself) is
+    the dominant cost -- the scenario spec 19's streaming-serialization
+    work is meant to keep bounded rather than proportional to report size.
+    """
+    target_dir.mkdir(parents=True, exist_ok=True)
+    create_safetensors_file(target_dir / "model.safetensors", 1024)
+    (target_dir / "config.json").write_text(
+        json.dumps({"architectures": ["CustomModel"]}), encoding="utf-8"
+    )
+    for i in range(member_count):
+        (target_dir / f"custom_{i}.py").write_text(
+            f"import os\nimport subprocess\n# layer {i}\n", encoding="utf-8"
+        )
+
+
 def create_large_sparse_artifact(path: pathlib.Path, target_size_bytes: int = 5 * 1024 * 1024 * 1024) -> None:
     # 5 GB sparse safetensors file
     header = json.dumps({"w": {"dtype": "U8", "shape": [target_size_bytes], "data_offsets": [0, target_size_bytes]}}, separators=(",", ":"))
@@ -270,6 +287,25 @@ def execute_scenario(
             "physical_bytes_read": 1024,
             "full_file_passes": 1,
             "cache_misses": 1,
+        })
+
+    elif scenario_name == "high_finding_count_report":
+        pkg_dir = work_dir / "high_finding_pkg"
+        member_count = 2000
+        create_high_finding_count_package(pkg_dir, member_count)
+        wall_ms, cpu_ms, rss_kib, rc = run_single_benchmark(
+            binary,
+            ["verify-package", str(pkg_dir), "--policy", "permissive", "--json"],
+            env,
+        )
+        metrics.update({
+            "wall_time_ms": wall_ms,
+            "cpu_time_ms": cpu_ms,
+            "peak_rss_kib": rss_kib,
+            "logical_source_bytes": member_count * 60,
+            "physical_bytes_read": member_count * 60,
+            "full_file_passes": member_count,
+            "cache_misses": member_count,
         })
 
     elif scenario_name == "cold_cache":
@@ -435,6 +471,7 @@ def main() -> int:
         "archive_heavy_package",
         "synthetic_safetensors_gguf",
         "pickle_heavy_fixture",
+        "high_finding_count_report",
         "cold_cache",
         "warm_cache",
         "incremental_unchanged",

@@ -209,7 +209,7 @@ PY2
 # Built-in parser/certification and machine-output contracts.
 "$BIN" selftest --json > "$TMP/selftest.json"
 "$BIN" certify --json > "$TMP/certify.json"
-python3 scripts/security/schema-gates.py --binary "$BIN"
+python3 scripts/security/schema-gates.py --binary "$BIN" --sarif-fixture tests/corpus/pickle/benign_opcodes.pkl
 "$BIN" doctor --json >/dev/null
 "$BIN" sources --json >/dev/null
 "$BIN" version --json >/dev/null

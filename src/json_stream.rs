@@ -50,8 +50,15 @@ where
             .borrow_mut()
             .take()
             .expect("IterStream must only be serialized once");
-        let (lower, upper) = iter.size_hint();
-        let mut seq = serializer.serialize_seq(upper.or(Some(lower)))?;
+        // Deliberately pass `None` rather than an `Iterator::size_hint()`
+        // guess: for chains built from `filter`/`flat_map` (as SARIF's
+        // report-then-finding stream is), the lower bound is commonly an
+        // undercount (often 0) while the true element count is higher. At
+        // least one serde_json release panics with an indent-tracking
+        // underflow in its pretty formatter when a `serialize_seq` length
+        // hint undercounts the elements actually written, so an honest
+        // "unknown" hint is required here, not merely a fast one.
+        let mut seq = serializer.serialize_seq(None)?;
         for item in iter {
             seq.serialize_element(&item)?;
         }
@@ -137,5 +144,39 @@ mod tests {
         let mut buffer = Vec::new();
         write_json(&mut buffer, &serde_json::json!({"a": 1}), false).expect("write json");
         assert_eq!(buffer, b"{\"a\":1}\n");
+    }
+
+    /// `to_value` uses a different serializer than `to_writer`/`to_writer_pretty`
+    /// and does not exercise the writer-based pretty formatter, so a
+    /// regression here must go through the writer path (as report/pipeline
+    /// emission actually does) to be caught. `flat_map`/`filter` chains are
+    /// exactly the shape whose `size_hint()` lower bound can undercount the
+    /// true element count, which previously caused a panic when that
+    /// undercount was passed through as a `serialize_seq` length hint.
+    #[test]
+    fn iter_stream_pretty_prints_flat_map_filter_chains_without_panicking() {
+        #[derive(Serialize)]
+        struct Inner {
+            val: i32,
+        }
+        #[derive(Serialize)]
+        struct Outer<S: Serialize> {
+            tool: &'static str,
+            results: S,
+        }
+
+        let groups: Vec<Vec<i32>> = vec![vec![1, 2], vec![3]];
+        let results = stream_iter(
+            groups
+                .iter()
+                .flat_map(|group| group.iter().filter(|v| **v > 0).map(|v| Inner { val: *v })),
+        );
+        let outer = Outer {
+            tool: "example",
+            results,
+        };
+        let pretty = serde_json::to_string_pretty(&outer).expect("pretty serialize");
+        let value: serde_json::Value = serde_json::from_str(&pretty).expect("valid json");
+        assert_eq!(value["results"].as_array().expect("array").len(), 3);
     }
 }

@@ -3,7 +3,7 @@ use crate::{
     PlatformCommand, ResearchArgs, ResearchCommand,
 };
 use anyhow::{anyhow, bail, Context, Result};
-use serde_json::json;
+use layerfault::json_stream::write_stdout_json;
 use std::path::Path;
 
 pub(crate) fn run_dataset(args: DatasetArgs) -> Result<()> {
@@ -23,7 +23,7 @@ pub(crate) fn run_dataset(args: DatasetArgs) -> Result<()> {
                 jobs.unwrap_or_else(layerfault::app::default_jobs),
             )?;
             if emit_json {
-                println!("{}", serde_json::to_string_pretty(&report)?);
+                write_stdout_json(&report, true)?;
             } else {
                 println!(
                     "DATASET\n{}\nfiles: {}\nbytes: {}\nrecords sampled: {}",
@@ -55,7 +55,7 @@ pub(crate) fn run_dataset(args: DatasetArgs) -> Result<()> {
                 jobs.unwrap_or_else(layerfault::app::default_jobs),
             )?;
             if emit_json {
-                println!("{}", serde_json::to_string_pretty(&report)?);
+                write_stdout_json(&report, true)?;
             } else {
                 println!(
                     "DATASET DIFFERENTIAL\n{} change(s)",
@@ -76,7 +76,7 @@ pub(crate) fn run_dataset(args: DatasetArgs) -> Result<()> {
                 jobs.unwrap_or_else(layerfault::app::default_jobs),
             )?;
             if emit_json {
-                println!("{}", serde_json::to_string_pretty(&report)?);
+                write_stdout_json(&report, true)?;
             } else {
                 println!(
                     "DATASET POISONING EVIDENCE\n{}\n{} record(s) analysed\n{} indicator(s)\n\n{}",
@@ -250,9 +250,33 @@ pub(crate) fn run_research(args: ResearchArgs) -> Result<()> {
                 layerfault::behaviour::BehaviourLimits::for_profile("standard")?,
             )
             .ok();
-            let report = json!({"schema_version":"1.0","lineage":comparison,"weight_deltas":weight,"embedded_differential":behaviour,"activation_capture":{"state":"SUPPORTED_WITH_CAPABILITY_LIMIT","detail":"The current embedded candelabra backend does not expose arbitrary hidden-state tensors through its public API. Layerfault records weight and identical-backend behavioural differentials without fabricating activation evidence."},"boundary":"Absence of captured hidden-state anomalies is not evidence that no hidden trigger exists."});
+            #[derive(serde::Serialize)]
+            struct ActivationCapture {
+                state: &'static str,
+                detail: &'static str,
+            }
+            #[derive(serde::Serialize)]
+            struct ActivationDiffReport {
+                schema_version: &'static str,
+                lineage: layerfault::lineage::ComparisonReport,
+                weight_deltas: Option<Vec<layerfault::weights::TensorDeltaStatistics>>,
+                embedded_differential: Option<layerfault::behaviour::DifferentialReport>,
+                activation_capture: ActivationCapture,
+                boundary: &'static str,
+            }
+            let report = ActivationDiffReport {
+                schema_version: "1.0",
+                lineage: comparison,
+                weight_deltas: weight,
+                embedded_differential: behaviour,
+                activation_capture: ActivationCapture {
+                    state: "SUPPORTED_WITH_CAPABILITY_LIMIT",
+                    detail: "The current embedded candelabra backend does not expose arbitrary hidden-state tensors through its public API. Layerfault records weight and identical-backend behavioural differentials without fabricating activation evidence.",
+                },
+                boundary: "Absence of captured hidden-state anomalies is not evidence that no hidden trigger exists.",
+            };
             if emit_json {
-                println!("{}", serde_json::to_string_pretty(&report)?);
+                write_stdout_json(&report, true)?;
             } else {
                 println!("ACTIVATION / EMBEDDED DIFFERENTIAL\nCapability-limited hidden-state capture; weight and same-backend behavioural evidence were collected where supported.");
             }
@@ -261,7 +285,7 @@ pub(crate) fn run_research(args: ResearchArgs) -> Result<()> {
             let store = layerfault::observations::ObservationStore::load()?;
             let report = layerfault::research::campaign(&store);
             if emit_json {
-                println!("{}", serde_json::to_string_pretty(&report)?);
+                write_stdout_json(&report, true)?;
             } else {
                 println!("MODEL CAMPAIGN CORRELATION\n{} observation(s), {} shared component correlation(s)",report.records_examined,report.shared_component_hashes.len());
             }
@@ -280,7 +304,7 @@ pub(crate) fn run_hub(args: HubArgs) -> Result<()> {
         } => {
             let report = client.model(&repo, revision.as_deref())?;
             if emit_json {
-                println!("{}", serde_json::to_string_pretty(&report)?);
+                write_stdout_json(&report, true)?;
             } else {
                 println!(
                     "{}@{}\n{} file(s)",
@@ -297,7 +321,7 @@ pub(crate) fn run_hub(args: HubArgs) -> Result<()> {
         } => {
             let report = client.model(&repo, revision.as_deref())?;
             if emit_json {
-                println!("{}", serde_json::to_string_pretty(&report.files)?);
+                write_stdout_json(&report.files, true)?;
             } else {
                 for file in report.files {
                     println!(
@@ -320,7 +344,7 @@ pub(crate) fn run_hub(args: HubArgs) -> Result<()> {
         } => {
             let report = client.download(&repo, &revision, &file, &staging, max_bytes)?;
             if emit_json {
-                println!("{}", serde_json::to_string_pretty(&report)?);
+                write_stdout_json(&report, true)?;
             } else {
                 println!("{}\n{} bytes\n{}", report.path, report.bytes, report.sha256);
             }
@@ -333,16 +357,11 @@ pub(crate) fn run_hub(args: HubArgs) -> Result<()> {
         } => {
             let report = direct_hub_review(&client, &repo, &revision, staging.as_deref())?;
             if emit_json {
-                println!("{}", serde_json::to_string_pretty(&report)?);
+                write_stdout_json(&report, true)?;
             } else {
                 println!(
                     "HUB REVISION REVIEW\n{}@{}\nFINAL {}",
-                    repo,
-                    revision,
-                    report
-                        .get("final_decision")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("WARN")
+                    repo, revision, report.final_decision
                 );
             }
         }
@@ -353,7 +372,7 @@ pub(crate) fn run_hub(args: HubArgs) -> Result<()> {
         } => {
             let page = client.list_models(limit, cursor.as_deref())?;
             if emit_json {
-                println!("{}", serde_json::to_string_pretty(&page)?);
+                write_stdout_json(&page, true)?;
             } else {
                 for model in page.models {
                     println!(
@@ -386,7 +405,7 @@ pub(crate) fn run_platform(args: PlatformArgs) -> Result<()> {
             db.migrate()?;
             let state = db.aggregate()?;
             if emit_json {
-                println!("{}", serde_json::to_string_pretty(&state)?);
+                write_stdout_json(&state, true)?;
             } else {
                 println!("PLATFORM OK\n{}", serde_json::to_string_pretty(&state)?);
             }
@@ -417,7 +436,7 @@ pub(crate) fn run_platform(args: PlatformArgs) -> Result<()> {
                     db.set_crawl_cursor("huggingface:models", value)?;
                 }
                 if emit_json {
-                    println!("{}", serde_json::to_string(&page)?);
+                    write_stdout_json(&page, false)?;
                 } else {
                     println!(
                         "Queued up to {} immutable revision review job(s). Next cursor: {}",
@@ -442,7 +461,7 @@ pub(crate) fn run_platform(args: PlatformArgs) -> Result<()> {
             db.migrate()?;
             let review = layerfault::platform::weekly::generate(&mut db)?;
             if emit_json {
-                println!("{}", serde_json::to_string_pretty(&review)?);
+                write_stdout_json(&review, true)?;
             } else {
                 println!("Published local weekly review {}", review.period);
             }
@@ -511,12 +530,43 @@ fn run_newsletter(command: NewsletterCommand) -> Result<()> {
     Ok(())
 }
 
+#[derive(serde::Serialize)]
+struct HubReviewCoverage {
+    complete: bool,
+    security_relevant_members: usize,
+    downloaded_members: usize,
+    members_downloaded: usize,
+    members_with_remote_hash_expectation: usize,
+    members_hash_verified: usize,
+    members_size_verified: usize,
+    members_without_remote_hash_expectation: usize,
+    integrity_failures: usize,
+    omitted_examples: Vec<String>,
+    download_errors: Vec<String>,
+    max_files: usize,
+    max_bytes: u64,
+}
+
+#[derive(serde::Serialize)]
+pub(crate) struct HubReviewReport {
+    schema_version: &'static str,
+    source: &'static str,
+    repo: String,
+    revision: String,
+    metadata: layerfault::hub::HubRevision,
+    downloads: Vec<layerfault::hub::DownloadResult>,
+    coverage: HubReviewCoverage,
+    static_package: layerfault::package::PackageReport,
+    final_decision: &'static str,
+    boundary: &'static str,
+}
+
 fn direct_hub_review(
     client: &layerfault::hub::HubClient,
     repo: &str,
     revision: &str,
     staging: Option<&Path>,
-) -> Result<serde_json::Value> {
+) -> Result<HubReviewReport> {
     let metadata = client.model(repo, Some(revision))?;
     if metadata.commit_sha != revision {
         bail!(
@@ -542,6 +592,7 @@ fn direct_hub_review(
         .iter()
         .filter(|f| layerfault::hub::is_security_relevant_member(&f.path))
         .collect();
+    let relevant_count = relevant.len();
     let mut candidates = Vec::new();
     let mut declared = 0u64;
     let mut omitted = Vec::new();
@@ -625,32 +676,32 @@ fn direct_hub_review(
         .iter()
         .filter(|d| d.expected_sha256.is_none())
         .count();
-    let report = json!({
-        "schema_version":"1.0",
-        "source":"huggingface",
-        "repo":repo,
-        "revision":revision,
-        "metadata":metadata,
-        "downloads":downloads,
-        "coverage": {
-            "complete": !incomplete,
-            "security_relevant_members": relevant.len(),
-            "downloaded_members": downloaded_members,
-            "members_downloaded": downloaded_members,
-            "members_with_remote_hash_expectation": members_with_remote_hash_expectation,
-            "members_hash_verified": members_hash_verified,
-            "members_size_verified": members_size_verified,
-            "members_without_remote_hash_expectation": members_without_remote_hash_expectation,
-            "integrity_failures": integrity_failures,
-            "omitted_examples": omitted,
-            "download_errors": errors,
-            "max_files": MAX_REVIEW_FILES,
-            "max_bytes": MAX_REVIEW_BYTES
+    let report = HubReviewReport {
+        schema_version: "1.0",
+        source: "huggingface",
+        repo: repo.to_owned(),
+        revision: revision.to_owned(),
+        metadata,
+        downloads,
+        coverage: HubReviewCoverage {
+            complete: !incomplete,
+            security_relevant_members: relevant_count,
+            downloaded_members,
+            members_downloaded: downloaded_members,
+            members_with_remote_hash_expectation,
+            members_hash_verified,
+            members_size_verified,
+            members_without_remote_hash_expectation,
+            integrity_failures,
+            omitted_examples: omitted,
+            download_errors: errors,
+            max_files: MAX_REVIEW_FILES,
+            max_bytes: MAX_REVIEW_BYTES,
         },
-        "static_package":static_report,
-        "final_decision":decision,
-        "boundary":"This is a bounded review of the exact pinned Hub revision. WARN/INCOMPLETE is forced whenever security-relevant members could not be covered; PASS does not prove absence of hidden behaviour."
-    });
+        static_package: static_report,
+        final_decision: decision,
+        boundary: "This is a bounded review of the exact pinned Hub revision. WARN/INCOMPLETE is forced whenever security-relevant members could not be covered; PASS does not prove absence of hidden behaviour.",
+    };
     if staging.is_none() {
         let _ = std::fs::remove_dir_all(&root);
     }
@@ -661,7 +712,7 @@ fn emit_research(
     json_output: bool,
 ) -> Result<()> {
     if json_output {
-        println!("{}", serde_json::to_string_pretty(report)?);
+        write_stdout_json(report, true)?;
     } else {
         println!("TRIGGER / BACKDOOR RESEARCH\n{} candidate(s) executed\n{} suspicious transition(s)\n\n{}",report.executed,report.suspicious.len(),report.boundary);
         for hit in report.suspicious.iter().take(100) {

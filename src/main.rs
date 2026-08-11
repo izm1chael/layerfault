@@ -14,8 +14,8 @@ use layerfault::sources::SourceKind;
 use layerfault::trust::TrustStore;
 use layerfault::{
     advisory, audit, baseline, binding, certify, content_cache, doctor, evidence, explain, gc,
-    inventory, manifest, modeldiff, package, policy, provenance, quarantine, report, safeio,
-    sigstore, sources, ThresholdConfig,
+    inventory, json_stream, manifest, modeldiff, package, policy, provenance, quarantine, report,
+    safeio, sigstore, sources, ThresholdConfig,
 };
 use std::collections::BTreeMap;
 use std::fs;
@@ -221,11 +221,14 @@ struct ScanArgs {
     #[command(flatten)]
     common: ScanCommon,
     /// Emit versioned JSON to stdout.
-    #[arg(long, default_value_t = false, conflicts_with = "sarif")]
+    #[arg(long, default_value_t = false, conflicts_with_all = ["sarif", "jsonl"])]
     json: bool,
     /// Emit SARIF 2.1.0 to stdout.
-    #[arg(long, default_value_t = false, conflicts_with = "json")]
+    #[arg(long, default_value_t = false, conflicts_with_all = ["json", "jsonl"])]
     sarif: bool,
+    /// Emit a versioned, newline-delimited JSON record stream to stdout.
+    #[arg(long, default_value_t = false, conflicts_with_all = ["json", "sarif"])]
+    jsonl: bool,
 }
 
 #[derive(clap::Args, Debug)]
@@ -332,15 +335,18 @@ struct PipelineArgs {
     evidence: EvidenceWriteArgs,
     #[command(flatten)]
     evidence_bundle: EvidenceBundleArgs,
-    #[arg(long, default_value_t = false, conflicts_with_all = ["sarif", "summary"])]
+    #[arg(long, default_value_t = false, conflicts_with_all = ["sarif", "summary", "jsonl"])]
     json: bool,
-    #[arg(long, default_value_t = false, conflicts_with_all = ["json", "summary"])]
+    #[arg(long, default_value_t = false, conflicts_with_all = ["json", "summary", "jsonl"])]
     sarif: bool,
-    #[arg(long, default_value_t = false, conflicts_with_all = ["json", "sarif"])]
+    #[arg(long, default_value_t = false, conflicts_with_all = ["json", "sarif", "jsonl"])]
     summary: bool,
     /// Render the evidence-first human report instead of the table.
-    #[arg(long = "evidence", default_value_t = false, conflicts_with_all = ["json", "sarif", "summary"])]
+    #[arg(long = "evidence", default_value_t = false, conflicts_with_all = ["json", "sarif", "summary", "jsonl"])]
     evidence_report: bool,
+    /// Emit a versioned, newline-delimited JSON record stream to stdout.
+    #[arg(long, default_value_t = false, conflicts_with_all = ["json", "sarif", "summary", "evidence_report"])]
+    jsonl: bool,
 }
 
 #[derive(clap::Args, Debug, Clone, Default)]
@@ -1518,7 +1524,7 @@ fn sigstore_request<'a>(
 
 fn emit_admission(result: &ArtifactAdmission, json: bool) -> Result<()> {
     if json {
-        println!("{}", serde_json::to_string_pretty(&admission_json(result))?);
+        json_stream::write_stdout_json(&admission_json(result), true)?;
     } else {
         print_artifact_report(&result.report);
         println!(
@@ -1547,34 +1553,110 @@ fn print_artifact_report(result: &artifact::ArtifactReport) {
     print_actionable_findings(&result.results);
 }
 
-fn artifact_json_report(result: &artifact::ArtifactReport) -> serde_json::Value {
-    let mut output = serde_json::to_value(result).expect("artifact report is serializable");
-    if let Some(object) = output.as_object_mut() {
-        object.insert(
-            "results".to_owned(),
-            serde_json::Value::Array(report::enriched_findings(&result.results)),
-        );
-    }
-    output
+fn is_empty_slice<T>(items: &&[T]) -> bool {
+    items.is_empty()
 }
 
-fn package_json_report(result: &package::PackageReport) -> serde_json::Value {
-    let mut output = serde_json::to_value(result).expect("package report is serializable");
-    if let Some(object) = output.as_object_mut() {
-        object.insert(
-            "findings".to_owned(),
-            serde_json::Value::Array(report::enriched_findings(&result.findings)),
-        );
-    }
-    output
+/// Typed mirror of [`artifact::ArtifactReport`] with `results` replaced by a
+/// streamed, enriched projection instead of a `serde_json::Value` array
+/// built by re-serializing the whole report and then overwriting one field.
+#[derive(serde::Serialize)]
+struct ArtifactJsonReport<'a, S: serde::Serialize> {
+    path: &'a str,
+    name: &'a str,
+    format: &'a layerfault::formats::ArtifactFormat,
+    size: u64,
+    sha256: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    compound_identity: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    cache: Option<&'a artifact::ArtifactCacheInfo>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    metrics: Option<&'a layerfault::scanner::ScanMetrics>,
+    results: S,
+    #[serde(skip_serializing_if = "is_empty_slice")]
+    budget: &'a [layerfault::budget::BudgetUsage],
 }
 
-fn admission_json(result: &ArtifactAdmission) -> serde_json::Value {
-    let mut output = serde_json::to_value(result).expect("admission report is serializable");
-    if let Some(report) = output.get_mut("report") {
-        *report = artifact_json_report(&result.report);
+fn artifact_json_report(
+    result: &artifact::ArtifactReport,
+) -> ArtifactJsonReport<'_, impl serde::Serialize + '_> {
+    ArtifactJsonReport {
+        path: &result.path,
+        name: &result.name,
+        format: &result.format,
+        size: result.size,
+        sha256: result.sha256.as_deref(),
+        compound_identity: result.compound_identity.as_deref(),
+        cache: result.cache.as_ref(),
+        metrics: result.metrics.as_ref(),
+        results: json_stream::stream_seq(&result.results, report::enriched_finding_ref),
+        budget: &result.budget,
     }
-    output
+}
+
+/// Typed mirror of [`package::PackageReport`] with `findings` streamed the
+/// same way.
+#[derive(serde::Serialize)]
+struct PackageJsonReport<'a, S: serde::Serialize> {
+    root: &'a str,
+    fingerprint: &'a str,
+    merkle_identity: &'a str,
+    files: &'a [package::PackageEntry],
+    #[serde(skip_serializing_if = "is_empty_slice")]
+    merkle_manifest: &'a [package::PackageMerkleLeaf],
+    total_bytes: u64,
+    findings: S,
+    #[serde(skip_serializing_if = "is_empty_slice")]
+    correlations: &'a [layerfault::finding_evidence::FindingCorrelation],
+    coverage: &'a layerfault::coverage::Coverage,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    metrics: Option<&'a layerfault::scanner::ScanMetrics>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    incremental_diagnostics: Option<&'a layerfault::incremental::IncrementalDiagnostics>,
+}
+
+fn package_json_report(
+    result: &package::PackageReport,
+) -> PackageJsonReport<'_, impl serde::Serialize + '_> {
+    PackageJsonReport {
+        root: &result.root,
+        fingerprint: &result.fingerprint,
+        merkle_identity: &result.merkle_identity,
+        files: &result.files,
+        merkle_manifest: &result.merkle_manifest,
+        total_bytes: result.total_bytes,
+        findings: json_stream::stream_seq(&result.findings, report::enriched_finding_ref),
+        correlations: &result.correlations,
+        coverage: &result.coverage,
+        metrics: result.metrics.as_ref(),
+        incremental_diagnostics: result.incremental_diagnostics.as_ref(),
+    }
+}
+
+#[derive(serde::Serialize)]
+struct AdmissionJsonReport<'a, S: serde::Serialize> {
+    identity: &'a str,
+    source: &'a SourceKind,
+    report: ArtifactJsonReport<'a, S>,
+    trust_state: provenance::TrustState,
+    trusted_signatures: usize,
+    signer_fingerprints: &'a [String],
+    policy: &'a policy::PolicyDecision,
+}
+
+fn admission_json(
+    result: &ArtifactAdmission,
+) -> AdmissionJsonReport<'_, impl serde::Serialize + '_> {
+    AdmissionJsonReport {
+        identity: &result.identity,
+        source: &result.source,
+        report: artifact_json_report(&result.report),
+        trust_state: result.trust_state,
+        trusted_signatures: result.trusted_signatures,
+        signer_fingerprints: &result.signer_fingerprints,
+        policy: &result.policy,
+    }
 }
 
 fn print_actionable_findings(findings: &[layerfault::scanner::LayerScanResult]) {

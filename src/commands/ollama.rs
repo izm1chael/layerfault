@@ -3,12 +3,18 @@ use crate::*;
 pub(crate) fn run_scan(args: ScanArgs) -> Result<()> {
     let prepared = prepare(&args.common)?;
     let base_dir = app::resolve_base_dir(args.common.ollama_dir.as_deref())?;
-    let options = scan_options(&args.common, &prepared, args.json || args.sarif);
+    let options = scan_options(
+        &args.common,
+        &prepared,
+        args.json || args.sarif || args.jsonl,
+    );
     let reports = app::scan_selected(&base_dir, args.model.as_deref(), &options)?;
     if args.json {
         report::emit_evaluated_json(&reports)?;
     } else if args.sarif {
         report::emit_evaluated_sarif(&reports)?;
+    } else if args.jsonl {
+        layerfault::jsonl::emit_evaluated_jsonl(&reports)?;
     } else {
         report::emit_evaluated_table(&reports);
     }

@@ -50,7 +50,7 @@ cargo clippy --locked --all-targets --all-features -- -D warnings
 
 log "Layerfault security and schema contracts"
 bash scripts/security/gates.sh
-python3 scripts/security/schema-gates.py --binary target/debug/layerfault
+python3 scripts/security/schema-gates.py --binary target/debug/layerfault --sarif-fixture tests/corpus/pickle/benign_opcodes.pkl
 
 log "Dependency lock requirements"
 python3 - <<'PY'

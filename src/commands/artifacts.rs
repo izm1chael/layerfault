@@ -55,10 +55,7 @@ pub(crate) fn run_inspect(args: InspectArgs) -> Result<()> {
         let result =
             layerfault::incremental::inspect_incremental_with_budget(&args.path, &budget, options)?;
         if args.json {
-            println!(
-                "{}",
-                serde_json::to_string_pretty(&package_json_report(&result))?
-            );
+            json_stream::write_stdout_json(&package_json_report(&result), true)?;
         } else {
             print_package_report(&result);
         }
@@ -72,10 +69,7 @@ pub(crate) fn run_inspect(args: InspectArgs) -> Result<()> {
     };
     let result = artifact::inspect_with_budget(&args.path, mode, &budget)?;
     if args.json {
-        println!(
-            "{}",
-            serde_json::to_string_pretty(&artifact_json_report(&result))?
-        );
+        json_stream::write_stdout_json(&artifact_json_report(&result), true)?;
     } else {
         print_artifact_report(&result);
     }
@@ -140,8 +134,8 @@ pub(crate) fn run_scan_dir(args: ScanDirArgs) -> Result<()> {
         &budget,
     )?;
     if args.json {
-        let output = reports.iter().map(artifact_json_report).collect::<Vec<_>>();
-        println!("{}", serde_json::to_string_pretty(&output)?);
+        let output = json_stream::stream_seq(&reports, artifact_json_report);
+        json_stream::write_stdout_json(&output, true)?;
     } else {
         for report in &reports {
             print_artifact_report(report);
@@ -195,11 +189,11 @@ pub(crate) fn run_verify_package(args: VerifyPackageArgs) -> Result<()> {
         provenance::TrustState::Unsigned,
         &context,
     );
-    let output = serde_json::json!({
-        "package": package_json_report(&report),
-        "trust_state": provenance::TrustState::Unsigned,
-        "policy": &decision
-    });
+    let evidence_details = if args.evidence.evidence_out.is_some() {
+        serde_json::to_value(verify_package_report(&report, &decision))?
+    } else {
+        serde_json::Value::Null
+    };
     commands::security::maybe_write_evidence(
         &args.evidence,
         &prepared,
@@ -210,7 +204,7 @@ pub(crate) fn run_verify_package(args: VerifyPackageArgs) -> Result<()> {
         None,
         None,
         &format!("{:?}", decision.action).to_ascii_uppercase(),
-        output.clone(),
+        evidence_details,
     )?;
     maybe_write_evidence_bundle(
         args.evidence_bundle.evidence_bundle.as_deref(),
@@ -225,7 +219,7 @@ pub(crate) fn run_verify_package(args: VerifyPackageArgs) -> Result<()> {
         Some(&report.coverage),
     )?;
     if args.json {
-        println!("{}", serde_json::to_string_pretty(&output)?);
+        json_stream::write_stdout_json(&verify_package_report(&report, &decision), true)?;
     } else if args.evidence_report {
         report::emit_evidence_report(
             &report.fingerprint,
@@ -241,6 +235,24 @@ pub(crate) fn run_verify_package(args: VerifyPackageArgs) -> Result<()> {
         }
     }
     std::process::exit(package_report_exit(&report, Some(&decision)));
+}
+
+#[derive(serde::Serialize)]
+struct VerifyPackageReport<'a, P: serde::Serialize> {
+    package: P,
+    trust_state: provenance::TrustState,
+    policy: &'a policy::PolicyDecision,
+}
+
+fn verify_package_report<'a>(
+    report: &'a package::PackageReport,
+    decision: &'a policy::PolicyDecision,
+) -> VerifyPackageReport<'a, impl serde::Serialize + 'a> {
+    VerifyPackageReport {
+        package: package_json_report(report),
+        trust_state: provenance::TrustState::Unsigned,
+        policy: decision,
+    }
 }
 
 pub(crate) fn run_pipeline(args: PipelineArgs) -> Result<()> {
@@ -262,13 +274,14 @@ pub(crate) fn run_pipeline(args: PipelineArgs) -> Result<()> {
             &context,
         );
         let exit = package_report_exit(&report, Some(&decision));
-        let output = pipeline_json(
+        let evidence_details = pipeline_evidence_details(
+            &args.evidence,
             &report.root,
             Some(&report.fingerprint),
             &report.findings,
             &decision,
             exit,
-        );
+        )?;
         commands::security::maybe_write_evidence(
             &args.evidence,
             &prepared,
@@ -279,7 +292,7 @@ pub(crate) fn run_pipeline(args: PipelineArgs) -> Result<()> {
             None,
             None,
             &pipeline_decision(exit),
-            output.clone(),
+            evidence_details,
         )?;
         maybe_write_evidence_bundle(
             args.evidence_bundle.evidence_bundle.as_deref(),
@@ -300,7 +313,6 @@ pub(crate) fn run_pipeline(args: PipelineArgs) -> Result<()> {
             &report.findings,
             &decision,
             exit,
-            output,
         )?;
         std::process::exit(exit);
     }
@@ -331,13 +343,14 @@ pub(crate) fn run_pipeline(args: PipelineArgs) -> Result<()> {
         decision.action == policy::PolicyAction::Block,
         decision.action == policy::PolicyAction::Warn,
     );
-    let output = pipeline_json(
+    let evidence_details = pipeline_evidence_details(
+        &args.evidence,
         &report.path,
         Some(&identity),
         &report.results,
         &decision,
         exit,
-    );
+    )?;
     commands::security::maybe_write_evidence(
         &args.evidence,
         &prepared,
@@ -348,7 +361,7 @@ pub(crate) fn run_pipeline(args: PipelineArgs) -> Result<()> {
         None,
         None,
         &pipeline_decision(exit),
-        output.clone(),
+        evidence_details,
     )?;
     maybe_write_evidence_bundle(
         args.evidence_bundle.evidence_bundle.as_deref(),
@@ -369,7 +382,6 @@ pub(crate) fn run_pipeline(args: PipelineArgs) -> Result<()> {
         &report.results,
         &decision,
         exit,
-        output,
     )?;
     std::process::exit(exit);
 }
@@ -411,13 +423,37 @@ fn maybe_write_evidence_bundle(
     Ok(())
 }
 
-fn pipeline_json(
-    target: &str,
-    identity: Option<&str>,
-    findings: &[layerfault::scanner::LayerScanResult],
-    decision: &policy::PolicyDecision,
+/// Typed mirror of the pipeline JSON contract, with `findings` streamed
+/// element-by-element instead of collected into an intermediate `Vec` of
+/// `serde_json::Value`s first.
+#[derive(serde::Serialize)]
+struct PipelineSummary {
+    blocking: usize,
+    warnings: usize,
+    informational: usize,
+    primary_risk: Option<explain::RiskExplanation>,
+}
+
+#[derive(serde::Serialize)]
+struct PipelineReport<'a, S: serde::Serialize> {
+    schema_version: &'static str,
+    tool_version: &'static str,
+    target: &'a str,
+    identity: Option<&'a str>,
+    decision: String,
+    exit_code: i32,
+    policy: &'a policy::PolicyDecision,
+    summary: PipelineSummary,
+    findings: S,
+}
+
+fn pipeline_report<'a>(
+    target: &'a str,
+    identity: Option<&'a str>,
+    findings: &'a [layerfault::scanner::LayerScanResult],
+    decision: &'a policy::PolicyDecision,
     exit: i32,
-) -> serde_json::Value {
+) -> PipelineReport<'a, impl serde::Serialize + 'a> {
     let blocking = findings
         .iter()
         .filter(|finding| finding.status == layerfault::scanner::ScanStatus::Fail)
@@ -430,33 +466,48 @@ fn pipeline_json(
         .iter()
         .filter(|finding| finding.status == layerfault::scanner::ScanStatus::Pass)
         .count();
-    let primary = findings
+    let primary_risk = findings
         .iter()
         .filter(|finding| finding.status != layerfault::scanner::ScanStatus::Pass)
         .min_by_key(|finding| (pipeline_priority(finding), policy::rule_id(finding)))
-        .map(|finding| {
-            let mut value = report::enriched_finding(finding);
-            if let Some(object) = value.as_object_mut() {
-                object.insert("detail".to_owned(), serde_json::json!(finding.detail));
-            }
-            value
-        });
-    serde_json::json!({
-        "schema_version": "1.0",
-        "tool_version": env!("CARGO_PKG_VERSION"),
-        "target": target,
-        "identity": identity,
-        "decision": pipeline_decision(exit),
-        "exit_code": exit,
-        "policy": decision,
-        "summary": {
-            "blocking": blocking,
-            "warnings": warnings,
-            "informational": informational,
-            "primary_risk": primary.as_ref().and_then(|value| value.get("risk"))
+        .map(|finding| explain::risk_lookup(&policy::rule_id(finding)));
+    PipelineReport {
+        schema_version: "1.0",
+        tool_version: env!("CARGO_PKG_VERSION"),
+        target,
+        identity,
+        decision: pipeline_decision(exit),
+        exit_code: exit,
+        policy: decision,
+        summary: PipelineSummary {
+            blocking,
+            warnings,
+            informational,
+            primary_risk,
         },
-        "findings": findings.iter().map(report::enriched_finding).collect::<Vec<_>>()
-    })
+        findings: json_stream::stream_seq(findings, report::enriched_finding_ref),
+    }
+}
+
+/// Build the pipeline report as a `serde_json::Value` for the signed
+/// evidence envelope, but only when `--evidence-out` was actually
+/// requested: `evidence::create_signed` needs an owned `Value`, but building
+/// one on every pipeline run regardless of whether it's used would defeat
+/// the point of streaming `--json` output straight to the writer.
+fn pipeline_evidence_details(
+    evidence_args: &EvidenceWriteArgs,
+    target: &str,
+    identity: Option<&str>,
+    findings: &[layerfault::scanner::LayerScanResult],
+    decision: &policy::PolicyDecision,
+    exit: i32,
+) -> Result<serde_json::Value> {
+    if evidence_args.evidence_out.is_none() {
+        return Ok(serde_json::Value::Null);
+    }
+    Ok(serde_json::to_value(pipeline_report(
+        target, identity, findings, decision, exit,
+    ))?)
 }
 
 fn emit_pipeline(
@@ -466,10 +517,15 @@ fn emit_pipeline(
     findings: &[layerfault::scanner::LayerScanResult],
     decision: &policy::PolicyDecision,
     exit: i32,
-    output: serde_json::Value,
 ) -> Result<()> {
     if args.json {
-        println!("{}", serde_json::to_string_pretty(&output)?);
+        json_stream::write_stdout_json(
+            &pipeline_report(target, Some(identity), findings, decision, exit),
+            true,
+        )?;
+    } else if args.jsonl {
+        let correlations = layerfault::correlate::correlate(findings);
+        layerfault::jsonl::emit_pipeline_jsonl(target, findings, &correlations, exit)?;
     } else if args.evidence_report {
         let correlations = layerfault::correlate::correlate(findings);
         report::emit_evidence_report(identity, findings, &correlations, None);

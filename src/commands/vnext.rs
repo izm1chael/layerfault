@@ -3,6 +3,7 @@ use crate::{
     ModelsArgs, ModelsCommand, ReviewArgs,
 };
 use anyhow::{anyhow, bail, Result};
+use layerfault::json_stream::write_stdout_json;
 use serde_json::{json, Value};
 use std::path::Path;
 
@@ -32,17 +33,25 @@ pub(crate) fn run_models(args: ModelsArgs) -> Result<()> {
             let observation = observation.clone();
             store.save()?;
             if emit_json {
-                println!(
-                    "{}",
-                    serde_json::to_string_pretty(&json!({"record":key,"observation":observation}))?
-                );
+                #[derive(serde::Serialize)]
+                struct Remembered<'a> {
+                    record: &'a str,
+                    observation: &'a layerfault::observations::StoredObservation,
+                }
+                write_stdout_json(
+                    &Remembered {
+                        record: &key,
+                        observation: &observation,
+                    },
+                    true,
+                )?;
             } else {
                 println!("Remembered {} as {}", observation.id, key);
             }
         }
         ModelsCommand::List { json: emit_json } => {
             if emit_json {
-                println!("{}", serde_json::to_string_pretty(&store)?);
+                write_stdout_json(&store, true)?;
             } else {
                 for record in &store.records {
                     println!(
@@ -62,7 +71,7 @@ pub(crate) fn run_models(args: ModelsArgs) -> Result<()> {
                 .record(&id)
                 .ok_or_else(|| anyhow!("model record/observation '{id}' was not found"))?;
             if emit_json {
-                println!("{}", serde_json::to_string_pretty(record)?);
+                write_stdout_json(record, true)?;
             } else if let Some(last) = record.observations.last() {
                 println!(
                     "{}\nidentity: {}\nobserved: {}\nformat: {}",
@@ -81,7 +90,7 @@ pub(crate) fn run_models(args: ModelsArgs) -> Result<()> {
                 .record(&id)
                 .ok_or_else(|| anyhow!("model record/observation '{id}' was not found"))?;
             if emit_json {
-                println!("{}", serde_json::to_string_pretty(&record.observations)?);
+                write_stdout_json(&record.observations, true)?;
             } else {
                 for obs in &record.observations {
                     println!(
@@ -100,7 +109,18 @@ pub(crate) fn run_models(args: ModelsArgs) -> Result<()> {
                 store.save()?;
             }
             if emit_json {
-                println!("{}", json!({"forgotten":id,"removed":removed}));
+                #[derive(serde::Serialize)]
+                struct Forgotten<'a> {
+                    forgotten: &'a str,
+                    removed: bool,
+                }
+                write_stdout_json(
+                    &Forgotten {
+                        forgotten: &id,
+                        removed,
+                    },
+                    false,
+                )?;
             } else {
                 println!("{} {}", if removed { "Forgot" } else { "Not found" }, id);
             }
@@ -122,7 +142,7 @@ pub(crate) fn run_drift(args: DriftArgs) -> Result<()> {
     .ok_or_else(|| anyhow!("no matching prior observation was selected"))?;
     let report = layerfault::observations::drift(prior, &snapshot);
     if args.json {
-        println!("{}", serde_json::to_string_pretty(&report)?);
+        write_stdout_json(&report, true)?;
     } else {
         println!(
             "DRIFT\n{}\n\n{} material change(s)",
@@ -149,7 +169,7 @@ pub(crate) fn run_lineage(args: LineageArgs) -> Result<()> {
             let trust = layerfault::trust::TrustStore::load(None)?;
             let report = layerfault::transformation::verify_chain(&chain, &trust)?;
             if emit_json {
-                println!("{}", serde_json::to_string_pretty(&report)?);
+                write_stdout_json(&report, true)?;
             } else {
                 println!(
                     "LINEAGE CHAIN\n{:?}\n\n{} link(s) verified",
@@ -240,9 +260,30 @@ pub(crate) fn run_compare(args: CompareArgs) -> Result<()> {
     } else {
         SecurityDecision::Warn
     };
-    let result = json!({"schema_version":"1.0","comparison":&comparison,"weight_analysis":weight_analysis,"lora":lora_analysis,"lora_merge_verification":lora_merge,"quantization_reproducibility":quantization,"final_decision":final_decision});
+    #[derive(serde::Serialize)]
+    struct CompareReport<'a> {
+        schema_version: &'static str,
+        comparison: &'a layerfault::lineage::ComparisonReport,
+        // `weight_analysis` genuinely varies in underlying report shape at
+        // runtime (numeric differential vs. unavailable/failed reasons), so
+        // it stays a `Value` here rather than forcing a single static type.
+        weight_analysis: Value,
+        lora: Option<layerfault::lora::LoraReport>,
+        lora_merge_verification: Option<layerfault::lora::LoraMergeVerification>,
+        quantization_reproducibility: Option<layerfault::quantization::QuantizationReproduction>,
+        final_decision: SecurityDecision,
+    }
+    let result = CompareReport {
+        schema_version: "1.0",
+        comparison: &comparison,
+        weight_analysis,
+        lora: lora_analysis,
+        lora_merge_verification: lora_merge,
+        quantization_reproducibility: quantization,
+        final_decision,
+    };
     if args.json {
-        println!("{}", serde_json::to_string_pretty(&result)?);
+        write_stdout_json(&result, true)?;
     } else {
         println!(
             "LINEAGE / DERIVATION COMPARISON\n{:?}\n\nFINAL {}",
@@ -425,7 +466,7 @@ pub(crate) fn run_compare_behaviour(args: CompareBehaviourArgs) -> Result<()> {
         }
     };
     if args.json {
-        println!("{}", serde_json::to_string_pretty(&report)?);
+        write_stdout_json(&report, true)?;
     } else {
         println!(
             "DIFFERENTIAL BEHAVIOUR\n{:?}\n\n{} comparison row(s)",
@@ -952,7 +993,7 @@ pub(crate) fn run_review(args: ReviewArgs) -> Result<()> {
     }
 
     if args.json {
-        println!("{}", serde_json::to_string_pretty(&result)?);
+        write_stdout_json(&result, true)?;
     } else {
         let lineage = comparison
             .as_ref()
@@ -1200,7 +1241,7 @@ fn emit_behaviour(
     json_output: bool,
 ) -> Result<()> {
     if json_output {
-        println!("{}", serde_json::to_string_pretty(report)?);
+        write_stdout_json(report, true)?;
     } else {
         println!(
             "BEHAVIOURAL SECURITY\n{:?}\n\n{} probe execution(s)",

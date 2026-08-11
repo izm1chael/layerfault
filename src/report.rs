@@ -294,7 +294,7 @@ fn sarif_locations(finding: &LayerScanResult) -> Vec<SarifLocation<'_>> {
     locations
 }
 
-fn overall_status(results: &[LayerScanResult]) -> ScanStatus {
+pub fn overall_status(results: &[LayerScanResult]) -> ScanStatus {
     if results
         .iter()
         .any(|result| result.status == ScanStatus::Fail)
@@ -905,6 +905,51 @@ mod tests {
         assert_eq!(array.len(), 1);
         assert_eq!(array[0]["level"], "error");
         assert_eq!(array[0]["ruleId"], "LF-LAYERPOLICY");
+    }
+
+    /// Exercises the real `emit_sarif` writer path end to end (pretty
+    /// `to_writer_pretty`, not `to_value`), across multiple reports each
+    /// with a mix of Pass/Warn/Fail findings, since the streaming SARIF
+    /// results array is built from a `flat_map` over reports whose
+    /// `size_hint` can undercount the true element count -- exactly the
+    /// shape that previously panicked in the pretty formatter.
+    #[test]
+    fn emit_sarif_writer_path_handles_multi_report_flat_map_without_panicking() {
+        let reports = [
+            ModelReport {
+                model_name: "model-a".to_owned(),
+                results: vec![result(ScanStatus::Pass), result(ScanStatus::Warn)],
+            },
+            ModelReport {
+                model_name: "model-b".to_owned(),
+                results: vec![result(ScanStatus::Fail)],
+            },
+        ];
+        let mut buffer = Vec::new();
+        let results = crate::json_stream::stream_iter(reports.iter().flat_map(|report| {
+            report
+                .results
+                .iter()
+                .filter(|finding| finding.status != ScanStatus::Pass)
+                .map(move |finding| sarif_result(&report.model_name, finding))
+        }));
+        let log = SarifLog {
+            schema: "https://json.schemastore.org/sarif-2.1.0.json",
+            version: "2.1.0",
+            runs: [SarifRun {
+                tool: SarifTool {
+                    driver: SarifDriver {
+                        name: "Layerfault",
+                        semantic_version: "0.0.0",
+                    },
+                },
+                results,
+            }],
+        };
+        crate::json_stream::write_json(&mut buffer, &log, true).expect("write pretty sarif");
+        let value: serde_json::Value = serde_json::from_slice(&buffer).expect("valid json");
+        let results = value["runs"][0]["results"].as_array().expect("array");
+        assert_eq!(results.len(), 2);
     }
 
     #[test]

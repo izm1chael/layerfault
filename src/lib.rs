@@ -32,6 +32,7 @@ pub mod hub;
 pub mod incremental;
 pub mod inventory;
 pub mod json_stream;
+pub mod jsonl;
 pub mod judge;
 pub mod lineage;
 pub mod lora;
