@@ -7,6 +7,8 @@ use std::path::{Path, PathBuf};
 use std::process::{Child, Command};
 use std::time::{Duration, Instant};
 
+use crate::behaviour::ActiveExecutionOptions;
+
 const MAX_SNAPSHOT_FILES: usize = 4096;
 const MAX_TRACE_BYTES: u64 = 32 * 1024 * 1024;
 const MAX_TELEMETRY_ROWS: usize = 128;
@@ -14,9 +16,39 @@ const MIN_ADDRESS_SPACE_LIMIT_MB: u64 = 512;
 const MAX_ADDRESS_SPACE_LIMIT_MB: u64 = 256 * 1024;
 const ACTIVE_MODEL_ENTRY_LIMIT: usize = 100_000;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum SandboxKind {
+    #[default]
+    Bwrap,
+    Microvm,
+}
+
+impl std::fmt::Display for SandboxKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Bwrap => write!(f, "bwrap"),
+            Self::Microvm => write!(f, "microvm"),
+        }
+    }
+}
+
+impl std::str::FromStr for SandboxKind {
+    type Err = anyhow::Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.to_ascii_lowercase().as_str() {
+            "bwrap" | "bubblewrap" => Ok(Self::Bwrap),
+            "microvm" | "vm" | "firecracker" | "qemu" => Ok(Self::Microvm),
+            other => bail!("unsupported sandbox kind '{other}' (expected 'bwrap' or 'microvm')"),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(default)]
 pub struct SandboxCapabilities {
+    pub sandbox_kind: SandboxKind,
     pub workspace_isolated: bool,
     pub home_isolated: bool,
     pub environment_scrubbed: bool,
@@ -34,6 +66,10 @@ pub struct SandboxCapabilities {
     pub seccomp_filter: bool,
     pub syscall_trace: bool,
     pub syscall_trace_mechanism: Option<String>,
+    pub microvm_available: bool,
+    pub microvm_kvm_accelerated: bool,
+    pub microvm_hypervisor: Option<String>,
+    pub microvm_image_hash: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -344,7 +380,15 @@ pub fn capabilities(wrapper: Option<&(PathBuf, String)>) -> SandboxCapabilities 
     let strong = wrapper.is_some_and(|(_, mechanism)| mechanism.starts_with("bwrap-fs-net"));
     let trace = strong && crate::sources::find_executable("strace").is_some();
     let limits = strong && crate::sources::find_executable("prlimit").is_some();
+    let hypervisor = crate::behaviour::microvm::detect_hypervisor();
+    let microvm_avail = hypervisor.is_some();
+    let kvm = hypervisor
+        .as_ref()
+        .map(|h| h.kvm_available)
+        .unwrap_or(false);
+
     SandboxCapabilities {
+        sandbox_kind: SandboxKind::Bwrap,
         workspace_isolated: strong,
         home_isolated: strong,
         environment_scrubbed: strong,
@@ -361,6 +405,48 @@ pub fn capabilities(wrapper: Option<&(PathBuf, String)>) -> SandboxCapabilities 
         seccomp_filter: strong && seccomp_filter_supported(),
         syscall_trace: trace,
         syscall_trace_mechanism: trace.then_some("strace-file-process-network".to_owned()),
+        microvm_available: microvm_avail,
+        microvm_kvm_accelerated: kvm,
+        microvm_hypervisor: hypervisor.map(|h| h.name),
+        microvm_image_hash: None,
+    }
+}
+
+pub trait SandboxBackend: Send + Sync {
+    fn kind(&self) -> SandboxKind;
+    fn capabilities(&self) -> SandboxCapabilities;
+    fn require_execution_stack(&self, active: ActiveExecutionOptions) -> Result<()>;
+}
+
+pub struct BwrapBackend;
+
+impl SandboxBackend for BwrapBackend {
+    fn kind(&self) -> SandboxKind {
+        SandboxKind::Bwrap
+    }
+
+    fn capabilities(&self) -> SandboxCapabilities {
+        capabilities(detect_network_wrapper().as_ref())
+    }
+
+    fn require_execution_stack(&self, active: ActiveExecutionOptions) -> Result<()> {
+        require_external_execution_stack()?;
+        if active.allow_static_blocked || active.execute_custom_code {
+            require_high_risk_observation_stack()?;
+        }
+        Ok(())
+    }
+}
+
+pub fn get_backend(
+    kind: SandboxKind,
+    microvm_config: crate::behaviour::microvm::MicrovmConfig,
+) -> Box<dyn SandboxBackend> {
+    match kind {
+        SandboxKind::Bwrap => Box::new(BwrapBackend),
+        SandboxKind::Microvm => Box::new(crate::behaviour::microvm::MicrovmBackend::new(
+            microvm_config,
+        )),
     }
 }
 

@@ -21,6 +21,8 @@ pub struct CapabilityReport {
     pub static_analysis: bool,
     pub active_sandbox: bool,
     pub custom_code_sandbox: bool,
+    pub microvm_sandbox: bool,
+    pub microvm_hypervisor: Option<String>,
     pub llama_active_analysis: bool,
     pub transformers_active_analysis: bool,
     pub managed_python_runtime: Option<String>,
@@ -100,6 +102,20 @@ pub fn run() -> Vec<DoctorCheck> {
         detail: sources::find_executable("llama-server")
             .map(|path| path.display().to_string())
             .unwrap_or_else(|| "llama-server not found".to_owned()),
+    });
+    checks.push(DoctorCheck {
+        name: "microvm-sandbox".to_owned(),
+        status: if capabilities.microvm_sandbox {
+            "ready"
+        } else {
+            "not-ready"
+        }
+        .to_owned(),
+        detail: format!(
+            "hypervisor={} kvm={}",
+            capabilities.microvm_hypervisor.as_deref().unwrap_or("none"),
+            Path::new("/dev/kvm").exists()
+        ),
     });
 
     for (name, kind) in [
@@ -252,6 +268,13 @@ pub fn capabilities() -> CapabilityReport {
         notes.push("Transformers/PEFT active analysis requires the managed Python runtime or LAYERFAULT_PYTHON_RUNTIME".to_owned());
     }
 
+    let hypervisor = crate::behaviour::microvm::detect_hypervisor();
+    let microvm_sandbox = hypervisor
+        .as_ref()
+        .map(|h| h.kvm_available)
+        .unwrap_or(false);
+    let microvm_hypervisor = hypervisor.map(|h| h.name);
+
     CapabilityReport {
         os: std::env::consts::OS.to_owned(),
         architecture: std::env::consts::ARCH.to_owned(),
@@ -262,6 +285,8 @@ pub fn capabilities() -> CapabilityReport {
         static_analysis: true,
         active_sandbox,
         custom_code_sandbox,
+        microvm_sandbox,
+        microvm_hypervisor,
         llama_active_analysis: active_sandbox
             && tools.get("llama-server").copied().unwrap_or(false),
         transformers_active_analysis: active_sandbox && python_ready,

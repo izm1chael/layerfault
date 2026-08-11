@@ -994,6 +994,15 @@ struct BehaviourArgs {
     repeat_count: Option<usize>,
     #[arg(long)]
     watch_string: Vec<String>,
+    /// Sandbox isolation backend (bwrap or microvm).
+    #[arg(long, default_value = "bwrap")]
+    sandbox: layerfault::behaviour::sandbox::SandboxKind,
+    /// Path to local microVM guest image file (for --sandbox microvm).
+    #[arg(long)]
+    microvm_image: Option<PathBuf>,
+    /// Expected SHA-256 hash of microVM guest image file.
+    #[arg(long)]
+    microvm_image_hash: Option<String>,
     /// Permit execution of a model/package that static admission BLOCKed. This
     /// is accepted only by external runtimes that enforce the strong sandbox.
     #[arg(long, default_value_t = false)]
@@ -1030,6 +1039,15 @@ struct CompareBehaviourArgs {
     max_tokens: Option<usize>,
     #[arg(long)]
     timeout_seconds: Option<u64>,
+    /// Sandbox isolation backend (bwrap or microvm).
+    #[arg(long, default_value = "bwrap")]
+    sandbox: layerfault::behaviour::sandbox::SandboxKind,
+    /// Path to local microVM guest image file (for --sandbox microvm).
+    #[arg(long)]
+    microvm_image: Option<PathBuf>,
+    /// Expected SHA-256 hash of microVM guest image file.
+    #[arg(long)]
+    microvm_image_hash: Option<String>,
     #[arg(long, default_value_t = false)]
     allow_static_blocked: bool,
     #[arg(long, default_value_t = false)]
@@ -1060,6 +1078,15 @@ struct ReviewArgs {
     tokenizer: Option<PathBuf>,
     #[arg(long)]
     probe_suite: Option<PathBuf>,
+    /// Sandbox isolation backend (bwrap or microvm).
+    #[arg(long, default_value = "bwrap")]
+    sandbox: layerfault::behaviour::sandbox::SandboxKind,
+    /// Path to local microVM guest image file (for --sandbox microvm).
+    #[arg(long)]
+    microvm_image: Option<PathBuf>,
+    /// Expected SHA-256 hash of microVM guest image file.
+    #[arg(long)]
+    microvm_image_hash: Option<String>,
     /// Permit blocked content to be exercised only inside the external strong sandbox.
     #[arg(long, default_value_t = false)]
     allow_static_blocked: bool,

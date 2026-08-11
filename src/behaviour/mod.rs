@@ -1,6 +1,7 @@
 //! Bounded local behavioural security harness.
 
 pub mod evaluate;
+pub mod microvm;
 pub mod probes;
 pub mod python;
 pub mod runtime;
@@ -104,10 +105,15 @@ impl BehaviourLimits {
     }
 }
 
-#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ActiveExecutionOptions {
+    /// Sandbox isolation backend to use for active execution (bwrap or microvm).
+    pub sandbox_kind: sandbox::SandboxKind,
+    /// Optional microVM configuration (image path, hash override, memory, vcpus).
+    #[serde(default)]
+    pub microvm_config: microvm::MicrovmConfig,
     /// Permit dynamic execution even when static admission has already BLOCKed.
-    /// External execution still requires the strong bwrap sandbox.
+    /// External execution still requires the strong sandbox.
     pub allow_static_blocked: bool,
     /// Permit Hugging Face custom Python loaders (`trust_remote_code=True`) in
     /// the sandboxed Transformers backend.
@@ -396,10 +402,8 @@ fn run_external_llama_active_deadline(
     if active.execute_custom_code {
         bail!("custom Hugging Face loader execution is only supported by the Transformers backend");
     }
-    sandbox::require_external_execution_stack()?;
-    if active.allow_static_blocked {
-        sandbox::require_high_risk_observation_stack()?;
-    }
+    let backend = sandbox::get_backend(active.sandbox_kind, active.microvm_config.clone());
+    backend.require_execution_stack(active.clone())?;
     static_admit(model, active.allow_static_blocked)?;
     if deadline.expired() {
         bail!("behaviour command hard total timeout expired during static admission");
@@ -529,7 +533,7 @@ pub fn compare_external_llama_active(
         suite_path,
         seed,
         limits.clone(),
-        active,
+        active.clone(),
         &deadline,
         "base",
     )?;
@@ -703,6 +707,7 @@ pub fn run_embedded(
             seccomp_filter: false,
             syscall_trace: false,
             syscall_trace_mechanism: None,
+            ..sandbox::SandboxCapabilities::default()
         },
     };
     finalize_report(

@@ -55,10 +55,8 @@ fn run_transformers_deadline(
 ) -> Result<super::BehaviourReport> {
     let heartbeat = super::ProgressHeartbeat::start(phase_label);
     heartbeat.update(format!("phase={phase_label} static-admission"));
-    super::sandbox::require_external_execution_stack()?;
-    if active.allow_static_blocked || active.execute_custom_code {
-        super::sandbox::require_high_risk_observation_stack()?;
-    }
+    let backend = super::sandbox::get_backend(active.sandbox_kind, active.microvm_config.clone());
+    backend.require_execution_stack(active.clone())?;
     super::static_admit(model, active.allow_static_blocked)?;
     if let Some(base) = base {
         super::static_admit(base, active.allow_static_blocked)?;
@@ -497,7 +495,7 @@ pub fn compare_transformers(
         suite_path,
         seed,
         limits.clone(),
-        active,
+        active.clone(),
         &deadline,
         "base",
     )?;

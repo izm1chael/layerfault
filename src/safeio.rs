@@ -182,6 +182,21 @@ pub fn read_all_from_file(file: &File, max_bytes: u64) -> Result<Vec<u8>> {
     Ok(bytes)
 }
 
+pub fn sha256_path(path: &Path) -> Result<String> {
+    use sha2::{Digest, Sha256};
+    let mut file = open_readonly_nofollow(path)?;
+    let mut hasher = Sha256::new();
+    let mut buffer = [0u8; 64 * 1024];
+    loop {
+        let n = file.read(&mut buffer)?;
+        if n == 0 {
+            break;
+        }
+        hasher.update(&buffer[..n]);
+    }
+    Ok(format!("sha256:{}", hex::encode(hasher.finalize())))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

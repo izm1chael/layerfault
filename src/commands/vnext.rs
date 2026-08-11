@@ -283,6 +283,11 @@ pub(crate) fn run_behaviour(args: BehaviourArgs) -> Result<()> {
     }
     let limits = resolve_behaviour_limits(&args)?;
     let active = layerfault::behaviour::ActiveExecutionOptions {
+        sandbox_kind: args.sandbox,
+        microvm_config: layerfault::behaviour::microvm::MicrovmConfig::from_env_and_args(
+            args.microvm_image.clone(),
+            args.microvm_image_hash.clone(),
+        ),
         allow_static_blocked: args.allow_static_blocked,
         execute_custom_code: args.execute_custom_code,
     };
@@ -365,6 +370,11 @@ pub(crate) fn run_compare_behaviour(args: CompareBehaviourArgs) -> Result<()> {
         usize::MAX,
     );
     let active = layerfault::behaviour::ActiveExecutionOptions {
+        sandbox_kind: args.sandbox,
+        microvm_config: layerfault::behaviour::microvm::MicrovmConfig::from_env_and_args(
+            args.microvm_image.clone(),
+            args.microvm_image_hash.clone(),
+        ),
         allow_static_blocked: args.allow_static_blocked,
         execute_custom_code: args.execute_custom_code,
     };
@@ -664,6 +674,11 @@ pub(crate) fn run_review(args: ReviewArgs) -> Result<()> {
     };
 
     let active_execution = layerfault::behaviour::ActiveExecutionOptions {
+        sandbox_kind: args.sandbox,
+        microvm_config: layerfault::behaviour::microvm::MicrovmConfig::from_env_and_args(
+            args.microvm_image.clone(),
+            args.microvm_image_hash.clone(),
+        ),
         allow_static_blocked: args.allow_static_blocked,
         execute_custom_code: args.execute_custom_code,
     };
@@ -684,7 +699,7 @@ pub(crate) fn run_review(args: ReviewArgs) -> Result<()> {
                         args.probe_suite.as_deref(),
                         0,
                         limits,
-                        active_execution,
+                        active_execution.clone(),
                     )
                         }
                     },
@@ -695,7 +710,7 @@ pub(crate) fn run_review(args: ReviewArgs) -> Result<()> {
                         args.probe_suite.as_deref(),
                         0,
                         limits,
-                        active_execution,
+                        active_execution.clone(),
                     ),
                     "embedded" => {
                         if args.allow_static_blocked || args.execute_custom_code {
