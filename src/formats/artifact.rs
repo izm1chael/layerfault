@@ -1,6 +1,6 @@
 use super::{
-    gguf, keras, onnx, pickle, safetensors, tensorflow, tflite, ArtifactFormat,
-    ArtifactIdentification,
+    coreml, executorch, gguf, keras, mlx, onnx, openvino, pickle, pytorch, safetensors, tensorflow,
+    tensorrt, tflite, ArtifactFormat, ArtifactIdentification,
 };
 use crate::finding_evidence::{structural_invariant, EvidenceSubject, FindingBuilder};
 use crate::safeio::open_readonly_nofollow;
@@ -148,12 +148,22 @@ fn inspect_opened(
             }
         }
     }
+
     let media = match format {
         ArtifactFormat::Gguf => "application/x-gguf",
         ArtifactFormat::Safetensors => "application/x-safetensors",
         ArtifactFormat::SafetensorsIndex => "application/x-safetensors-index+json",
         ArtifactFormat::Onnx => "application/x-onnx",
         ArtifactFormat::Pickle => "application/x-python-pickle",
+        ArtifactFormat::PyTorchZip | ArtifactFormat::TorchScript | ArtifactFormat::TorchPackage => {
+            "application/x-pytorch-zip"
+        }
+        ArtifactFormat::ExecuTorch => "application/x-executorch",
+        ArtifactFormat::OpenVinoIr => "application/x-openvino-ir",
+        ArtifactFormat::TensorRtEngine => "application/x-tensorrt-engine",
+        ArtifactFormat::CoreMlModel => "application/x-coreml-model",
+        ArtifactFormat::CoreMlPackage => "application/x-coreml-package",
+        ArtifactFormat::MlxPackage => "application/x-mlx-package",
         ArtifactFormat::TensorFlowSavedModel => "application/x-tensorflow-savedmodel",
         ArtifactFormat::TensorFlowCheckpoint => "application/x-tensorflow-checkpoint",
         ArtifactFormat::TensorFlowLite => "application/x-tflite",
@@ -268,6 +278,30 @@ fn inspect_opened(
         ArtifactFormat::Pickle => {
             results.extend(pickle::scan(path, &file, size, &identity, media)?);
         }
+        ArtifactFormat::PyTorchZip
+        | ArtifactFormat::TorchScript
+        | ArtifactFormat::TorchPackage => {
+            results.extend(pytorch::scan(path, &file, size, &identity, media)?);
+        }
+        ArtifactFormat::ExecuTorch => {
+            results.extend(executorch::scan(path, &file, size, &identity, media)?);
+        }
+        ArtifactFormat::OpenVinoIr => {
+            results.extend(openvino::scan(path, &file, size, &identity, media)?);
+        }
+        ArtifactFormat::TensorRtEngine => {
+            results.extend(tensorrt::scan(path, &file, size, &identity, media)?);
+        }
+        ArtifactFormat::CoreMlModel => {
+            results.extend(coreml::scan_model(path, &file, size, &identity, media)?);
+        }
+        ArtifactFormat::CoreMlPackage => {
+            results.extend(coreml::scan_package(path, &identity, media)?);
+        }
+        ArtifactFormat::MlxPackage => {
+            results.extend(mlx::scan_package(path, &identity, media)?);
+        }
+
         ArtifactFormat::TensorFlowSavedModel => results.push(tensorflow::scan_saved_model(&file, size, &identity, media)?),
         ArtifactFormat::TensorFlowCheckpoint => results.push(tensorflow::scan_checkpoint(path, &file, size, &identity, media)?),
         ArtifactFormat::TensorFlowLite => results.push(tflite::scan(&file, size, &identity, media)?),

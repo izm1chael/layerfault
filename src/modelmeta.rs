@@ -171,6 +171,15 @@ pub fn snapshot_artifact(path: &Path) -> Result<ModelSnapshot> {
         }
         ArtifactFormat::Onnx
         | ArtifactFormat::Pickle
+        | ArtifactFormat::PyTorchZip
+        | ArtifactFormat::TorchScript
+        | ArtifactFormat::TorchPackage
+        | ArtifactFormat::ExecuTorch
+        | ArtifactFormat::OpenVinoIr
+        | ArtifactFormat::TensorRtEngine
+        | ArtifactFormat::CoreMlModel
+        | ArtifactFormat::CoreMlPackage
+        | ArtifactFormat::MlxPackage
         | ArtifactFormat::TensorFlowSavedModel
         | ArtifactFormat::TensorFlowCheckpoint
         | ArtifactFormat::TensorFlowLite

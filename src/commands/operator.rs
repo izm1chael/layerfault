@@ -278,7 +278,7 @@ pub(crate) fn run_version(args: VersionArgs) -> Result<()> {
                 "scanner_revision":crate::explain::scanner_revision(),
                 "ruleset_sha256":crate::explain::ruleset_sha256(),
                 "report_schema":"1.0", "policy_schema":1, "baseline_schema":1,
-                "supported_formats":["gguf","safetensors","safetensors-index","model-package"],
+                "supported_formats":["gguf","safetensors","safetensors-index","pytorch-zip","torchscript","torch-package","executorch","openvino-ir","tensorrt-engine","coreml-model","coreml-package","mlx-package","model-package"],
                 "sources":["ollama","lmstudio","llama-cpp","hf-cache","file","directory"],
                 "capabilities":["package-fingerprint","package-security","runtime-advisories","execution-binding","signed-evidence","behavioural-analysis","differential-behaviour","sandbox-telemetry","host-capabilities"]
             }))?

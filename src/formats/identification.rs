@@ -77,8 +77,20 @@ pub fn map_extension_claim(path: &Path) -> Option<ArtifactFormat> {
         "pkl" | "pickle" | "joblib" | "pt" | "pth" | "ckpt"
     ) {
         Some(ArtifactFormat::Pickle)
+    } else if ext == "pkg" {
+        Some(ArtifactFormat::TorchPackage)
+    } else if ext == "pte" {
+        Some(ArtifactFormat::ExecuTorch)
     } else if ext == "onnx" {
         Some(ArtifactFormat::Onnx)
+    } else if ext == "xml" {
+        Some(ArtifactFormat::OpenVinoIr)
+    } else if matches!(ext.as_str(), "engine" | "plan" | "trt") {
+        Some(ArtifactFormat::TensorRtEngine)
+    } else if ext == "mlmodel" {
+        Some(ArtifactFormat::CoreMlModel)
+    } else if ext == "mlpackage" {
+        Some(ArtifactFormat::CoreMlPackage)
     } else if name == "saved_model.pb" {
         Some(ArtifactFormat::TensorFlowSavedModel)
     } else if ext == "index" && !name.ends_with(".safetensors.index.json") {
@@ -110,6 +122,17 @@ pub fn probe_magic(prefix: &[u8]) -> Vec<ArtifactFormat> {
     if is_pickle_prefix(prefix) {
         candidates.push(ArtifactFormat::Pickle);
     }
+    if prefix.len() >= 8
+        && (&prefix[4..6] == b"ET" || prefix.starts_with(b"ET12") || prefix.starts_with(b"ET11"))
+    {
+        candidates.push(ArtifactFormat::ExecuTorch);
+    }
+    if prefix.starts_with(b"TRT") || prefix.starts_with(b"ptrt") {
+        candidates.push(ArtifactFormat::TensorRtEngine);
+    }
+    if prefix.starts_with(b"<?xml") || prefix.starts_with(b"<net") {
+        candidates.push(ArtifactFormat::OpenVinoIr);
+    }
     if prefix.len() >= 8 && &prefix[4..8] == b"TFL3" {
         candidates.push(ArtifactFormat::TensorFlowLite);
     }
@@ -127,6 +150,7 @@ pub fn probe_container(prefix: &[u8]) -> Vec<ArtifactFormat> {
         || prefix.starts_with(b"PK\x05\x06")
         || prefix.starts_with(b"PK\x07\x08")
     {
+        candidates.push(ArtifactFormat::PyTorchZip);
         candidates.push(ArtifactFormat::KerasArchive);
     }
     candidates
@@ -156,7 +180,9 @@ fn resolve_selected(
 ) -> ArtifactFormat {
     if let Some(&magic) = magic_candidates.first() {
         if let Some(claimed) = extension_claim {
-            if claimed != magic {
+            if claimed != magic
+                && !(claimed == ArtifactFormat::Pickle && magic == ArtifactFormat::Pickle)
+            {
                 let kind = if magic == ArtifactFormat::Pickle {
                     ContradictionKind::SerializationSmuggling
                 } else {
@@ -192,11 +218,20 @@ fn resolve_selected(
                         claimed.as_str()
                     ),
                 });
-            } else if claimed == ArtifactFormat::KerasArchive {
-                return ArtifactFormat::KerasArchive;
+                return ArtifactFormat::Unknown;
+            } else if matches!(
+                claimed,
+                ArtifactFormat::KerasArchive
+                    | ArtifactFormat::PyTorchZip
+                    | ArtifactFormat::TorchScript
+                    | ArtifactFormat::TorchPackage
+            ) {
+                return claimed;
+            } else if claimed == ArtifactFormat::Pickle {
+                return ArtifactFormat::PyTorchZip;
             }
         }
-        return ArtifactFormat::Unknown;
+        return ArtifactFormat::PyTorchZip;
     }
 
     extension_claim.unwrap_or(ArtifactFormat::Unknown)

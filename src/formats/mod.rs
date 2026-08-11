@@ -1,12 +1,18 @@
 pub mod artifact;
+pub mod coreml;
+pub mod executorch;
 pub mod extent;
 pub mod gguf;
 pub mod identification;
 pub mod keras;
+pub mod mlx;
 pub mod onnx;
+pub mod openvino;
 pub mod pickle;
+pub mod pytorch;
 pub mod safetensors;
 pub mod tensorflow;
+pub mod tensorrt;
 pub mod tflite;
 
 pub use extent::ParsedExtent;
@@ -22,6 +28,15 @@ pub enum ArtifactFormat {
     SafetensorsIndex,
     Onnx,
     Pickle,
+    PyTorchZip,
+    TorchScript,
+    TorchPackage,
+    ExecuTorch,
+    OpenVinoIr,
+    TensorRtEngine,
+    CoreMlModel,
+    CoreMlPackage,
+    MlxPackage,
     TensorFlowSavedModel,
     TensorFlowCheckpoint,
     TensorFlowLite,
@@ -41,6 +56,15 @@ impl ArtifactFormat {
             Self::SafetensorsIndex => "safetensors-index",
             Self::Onnx => "onnx",
             Self::Pickle => "pickle",
+            Self::PyTorchZip => "pytorch-zip",
+            Self::TorchScript => "torchscript",
+            Self::TorchPackage => "torch-package",
+            Self::ExecuTorch => "executorch",
+            Self::OpenVinoIr => "openvino-ir",
+            Self::TensorRtEngine => "tensorrt-engine",
+            Self::CoreMlModel => "coreml-model",
+            Self::CoreMlPackage => "coreml-package",
+            Self::MlxPackage => "mlx-package",
             Self::TensorFlowSavedModel => "tensorflow-savedmodel",
             Self::TensorFlowCheckpoint => "tensorflow-checkpoint",
             Self::TensorFlowLite => "tflite",
