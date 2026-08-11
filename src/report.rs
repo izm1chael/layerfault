@@ -1,5 +1,8 @@
 use crate::coverage::Coverage;
-use crate::finding_evidence::{EvidenceLocation, EvidenceState, FindingCorrelation};
+use crate::finding_evidence::{
+    EvidenceLocation, EvidenceState, EvidenceSubject, FindingCorrelation, FindingEvidence,
+};
+use crate::json_stream::{stream_seq, write_stdout_json};
 use crate::scanner::{CheckType, Confidence, FindingClass, LayerScanResult, ScanStatus};
 use anyhow::Result;
 use colored::Colorize;
@@ -46,17 +49,12 @@ pub fn emit_table(reports: &[ModelReport]) {
 }
 
 pub fn emit_json(reports: &[ModelReport]) -> Result<()> {
-    let output: Vec<JsonModelReport<'_>> = reports
-        .iter()
-        .map(|report| JsonModelReport {
-            model: &report.model_name,
-            scan_results: &report.results,
-            overall_status: overall_status(&report.results),
-        })
-        .collect();
-    let rendered = serde_json::to_string_pretty(&output)?;
-    println!("{rendered}");
-    Ok(())
+    let output = stream_seq(reports, |report| JsonModelReport {
+        model: &report.model_name,
+        scan_results: &report.results,
+        overall_status: overall_status(&report.results),
+    });
+    write_stdout_json(&output, true)
 }
 
 /// Emit SARIF 2.1.0 containing WARN/FAIL findings only.
@@ -68,94 +66,189 @@ pub fn emit_json(reports: &[ModelReport]) -> Result<()> {
 /// tensor, opcode and metadata evidence stays in properties: fabricating a line
 /// number to satisfy SARIF tooling would be dishonest about what was measured.
 pub fn emit_sarif(reports: &[ModelReport]) -> Result<()> {
-    let mut results = Vec::new();
-    for report in reports {
-        for finding in &report.results {
-            if finding.status == ScanStatus::Pass {
-                continue;
-            }
-            let rule_id = sarif_rule_id(finding);
-            let message = finding
-                .detail
-                .clone()
-                .unwrap_or_else(|| format!("{} finding", check_type_label(&finding.check_type)));
-            let mut entry = serde_json::json!({
-                "ruleId": rule_id,
-                "level": match finding.status {
-                    ScanStatus::Fail => "error",
-                    ScanStatus::Warn => "warning",
-                    ScanStatus::Pass => "note",
+    let results = crate::json_stream::stream_iter(reports.iter().flat_map(|report| {
+        report
+            .results
+            .iter()
+            .filter(|finding| finding.status != ScanStatus::Pass)
+            .map(move |finding| sarif_result(&report.model_name, finding))
+    }));
+    let log = SarifLog {
+        schema: "https://json.schemastore.org/sarif-2.1.0.json",
+        version: "2.1.0",
+        runs: [SarifRun {
+            tool: SarifTool {
+                driver: SarifDriver {
+                    name: "Layerfault",
+                    semantic_version: env!("CARGO_PKG_VERSION"),
                 },
-                "message": { "text": message },
-                "properties": {
-                    "model": &report.model_name,
-                    "layerDigest": &finding.layer_digest,
-                    "mediaType": &finding.media_type,
-                    "checkType": check_type_label(&finding.check_type),
-                    "findingClass": finding_class_label(&finding.finding_class),
-                    "confidence": confidence_label(&finding.confidence),
-                    "matches": &finding.matches,
-                    "durationMs": finding.duration_ms,
-                    "risk": crate::explain::risk_lookup(&rule_id)
-                }
-            });
-            let properties = entry["properties"]
-                .as_object_mut()
-                .expect("sarif properties object");
-            if let Some(id) = finding.finding_id.as_ref() {
-                properties.insert("findingId".to_owned(), serde_json::json!(id));
-            }
-            if let Some(state) = finding.evidence_state.as_ref() {
-                properties.insert("evidenceState".to_owned(), serde_json::json!(state));
-            }
-            if let Some(reason) = finding.evidence_reason.as_ref() {
-                properties.insert("evidenceReason".to_owned(), serde_json::json!(reason));
-            }
-            if !finding.evidence.is_empty() {
-                properties.insert("evidence".to_owned(), serde_json::json!(&finding.evidence));
-            }
-            if let Some(explanation) = crate::explain::lookup(&rule_id) {
-                properties.insert(
-                    "ruleVersion".to_owned(),
-                    serde_json::json!(explanation.rule_version),
-                );
-                properties.insert(
-                    "detectorFamily".to_owned(),
-                    serde_json::json!(explanation.detector_family),
-                );
-                properties.insert("explanation".to_owned(), serde_json::json!(explanation));
-            }
-            properties.insert(
-                "scannerRevision".to_owned(),
-                serde_json::json!(crate::explain::scanner_revision()),
-            );
-            properties.insert(
-                "rulesetSha256".to_owned(),
-                serde_json::json!(crate::explain::ruleset_sha256()),
-            );
-            let locations = sarif_locations(finding);
-            if !locations.is_empty() {
-                entry["locations"] = serde_json::Value::Array(locations);
-            }
-            results.push(entry);
-        }
-    }
-
-    let document = serde_json::json!({
-        "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
-        "version": "2.1.0",
-        "runs": [{
-            "tool": {
-                "driver": {
-                    "name": "Layerfault",
-                    "semanticVersion": env!("CARGO_PKG_VERSION")
-                }
             },
-            "results": results
-        }]
-    });
-    println!("{}", serde_json::to_string_pretty(&document)?);
-    Ok(())
+            results,
+        }],
+    };
+    write_stdout_json(&log, true)
+}
+
+/// SARIF documents in the reference form: typed structs streamed straight to
+/// the writer rather than a `serde_json::Value` tree built up front. Generic
+/// over the results-array type so the streaming iterator chain built in
+/// `emit_sarif` never needs to be spelled out explicitly.
+#[derive(serde::Serialize)]
+struct SarifLog<S: serde::Serialize> {
+    #[serde(rename = "$schema")]
+    schema: &'static str,
+    version: &'static str,
+    runs: [SarifRun<S>; 1],
+}
+
+#[derive(serde::Serialize)]
+struct SarifRun<S: serde::Serialize> {
+    tool: SarifTool,
+    results: S,
+}
+
+#[derive(serde::Serialize)]
+struct SarifTool {
+    driver: SarifDriver,
+}
+
+#[derive(serde::Serialize)]
+struct SarifDriver {
+    name: &'static str,
+    #[serde(rename = "semanticVersion")]
+    semantic_version: &'static str,
+}
+
+#[derive(serde::Serialize)]
+struct SarifResult<'a> {
+    #[serde(rename = "ruleId")]
+    rule_id: String,
+    level: &'static str,
+    message: SarifMessage,
+    properties: SarifProperties<'a>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    locations: Vec<SarifLocation<'a>>,
+}
+
+#[derive(serde::Serialize)]
+struct SarifMessage {
+    text: String,
+}
+
+#[derive(serde::Serialize)]
+struct SarifProperties<'a> {
+    model: &'a str,
+    #[serde(rename = "layerDigest")]
+    layer_digest: &'a str,
+    #[serde(rename = "mediaType")]
+    media_type: &'a str,
+    #[serde(rename = "checkType")]
+    check_type: &'static str,
+    #[serde(rename = "findingClass")]
+    finding_class: &'static str,
+    confidence: &'static str,
+    matches: &'a [String],
+    #[serde(rename = "durationMs")]
+    duration_ms: u64,
+    risk: crate::explain::RiskExplanation,
+    #[serde(rename = "findingId", skip_serializing_if = "Option::is_none")]
+    finding_id: Option<&'a str>,
+    #[serde(rename = "evidenceState", skip_serializing_if = "Option::is_none")]
+    evidence_state: Option<&'a EvidenceState>,
+    #[serde(rename = "evidenceReason", skip_serializing_if = "Option::is_none")]
+    evidence_reason: Option<&'a str>,
+    #[serde(skip_serializing_if = "is_empty_evidence")]
+    evidence: &'a [FindingEvidence],
+    #[serde(rename = "ruleVersion", skip_serializing_if = "Option::is_none")]
+    rule_version: Option<u32>,
+    #[serde(rename = "detectorFamily", skip_serializing_if = "Option::is_none")]
+    detector_family: Option<&'static str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    explanation: Option<crate::explain::RuleExplanation>,
+    #[serde(rename = "scannerRevision")]
+    scanner_revision: &'static str,
+    #[serde(rename = "rulesetSha256")]
+    ruleset_sha256: &'static str,
+}
+
+#[derive(serde::Serialize)]
+struct SarifLocation<'a> {
+    #[serde(rename = "physicalLocation")]
+    physical_location: SarifPhysicalLocation<'a>,
+}
+
+#[derive(serde::Serialize)]
+struct SarifPhysicalLocation<'a> {
+    #[serde(rename = "artifactLocation")]
+    artifact_location: SarifArtifactLocation<'a>,
+    region: SarifRegion<'a>,
+}
+
+#[derive(serde::Serialize)]
+struct SarifArtifactLocation<'a> {
+    uri: &'a str,
+}
+
+#[derive(serde::Serialize)]
+struct SarifRegion<'a> {
+    #[serde(rename = "startLine")]
+    start_line: u64,
+    #[serde(rename = "endLine")]
+    end_line: u64,
+    #[serde(rename = "startColumn", skip_serializing_if = "Option::is_none")]
+    start_column: Option<u32>,
+    #[serde(rename = "endColumn", skip_serializing_if = "Option::is_none")]
+    end_column: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    snippet: Option<SarifSnippet<'a>>,
+}
+
+#[derive(serde::Serialize)]
+struct SarifSnippet<'a> {
+    text: &'a str,
+}
+
+fn is_empty_evidence(evidence: &&[FindingEvidence]) -> bool {
+    evidence.is_empty()
+}
+
+fn sarif_result<'a>(model_name: &'a str, finding: &'a LayerScanResult) -> SarifResult<'a> {
+    let rule_id = sarif_rule_id(finding);
+    let message = finding
+        .detail
+        .clone()
+        .unwrap_or_else(|| format!("{} finding", check_type_label(&finding.check_type)));
+    let explanation = crate::explain::lookup(&rule_id);
+    SarifResult {
+        level: match finding.status {
+            ScanStatus::Fail => "error",
+            ScanStatus::Warn => "warning",
+            ScanStatus::Pass => "note",
+        },
+        message: SarifMessage { text: message },
+        properties: SarifProperties {
+            model: model_name,
+            layer_digest: &finding.layer_digest,
+            media_type: &finding.media_type,
+            check_type: check_type_label(&finding.check_type),
+            finding_class: finding_class_label(&finding.finding_class),
+            confidence: confidence_label(&finding.confidence),
+            matches: &finding.matches,
+            duration_ms: finding.duration_ms,
+            risk: crate::explain::risk_lookup(&rule_id),
+            finding_id: finding.finding_id.as_deref(),
+            evidence_state: finding.evidence_state.as_ref(),
+            evidence_reason: finding.evidence_reason.as_deref(),
+            evidence: &finding.evidence,
+            rule_version: explanation.as_ref().map(|e| e.rule_version),
+            detector_family: explanation.as_ref().map(|e| e.detector_family),
+            explanation,
+            scanner_revision: crate::explain::scanner_revision(),
+            ruleset_sha256: crate::explain::ruleset_sha256(),
+        },
+        locations: sarif_locations(finding),
+        rule_id,
+    }
 }
 
 fn sarif_rule_id(result: &LayerScanResult) -> String {
@@ -167,7 +260,7 @@ fn sarif_rule_id(result: &LayerScanResult) -> String {
 /// Only text evidence anchored to a package-relative member qualifies. Byte
 /// offsets, tensor names, metadata keys and opcode indices are real locations
 /// but not *source* locations, and SARIF has no honest way to express them.
-fn sarif_locations(finding: &LayerScanResult) -> Vec<serde_json::Value> {
+fn sarif_locations(finding: &LayerScanResult) -> Vec<SarifLocation<'_>> {
     let mut locations = Vec::new();
     for record in &finding.evidence {
         let Some(EvidenceLocation::Text {
@@ -182,25 +275,18 @@ fn sarif_locations(finding: &LayerScanResult) -> Vec<serde_json::Value> {
         let Some(uri) = record.subject.package_relative_path.as_deref() else {
             continue;
         };
-        let mut region = serde_json::json!({
-            "startLine": line_start,
-            "endLine": line_end,
+        locations.push(SarifLocation {
+            physical_location: SarifPhysicalLocation {
+                artifact_location: SarifArtifactLocation { uri },
+                region: SarifRegion {
+                    start_line: *line_start,
+                    end_line: *line_end,
+                    start_column: *column_start,
+                    end_column: *column_end,
+                    snippet: record.excerpt.as_deref().map(|text| SarifSnippet { text }),
+                },
+            },
         });
-        if let Some(column) = column_start {
-            region["startColumn"] = serde_json::json!(column);
-        }
-        if let Some(column) = column_end {
-            region["endColumn"] = serde_json::json!(column);
-        }
-        if let Some(snippet) = record.excerpt.as_deref() {
-            region["snippet"] = serde_json::json!({ "text": snippet });
-        }
-        locations.push(serde_json::json!({
-            "physicalLocation": {
-                "artifactLocation": { "uri": uri },
-                "region": region,
-            }
-        }));
         if locations.len() >= crate::finding_evidence::MAX_EVIDENCE_PER_FINDING {
             break;
         }
@@ -294,38 +380,72 @@ fn status_label(status: &ScanStatus) -> String {
 /// Emit the stable versioned JSON contract. Existing fields remain present while
 /// stable rule IDs, provenance and policy decisions are added explicitly.
 pub fn emit_evaluated_json(reports: &[crate::app::EvaluatedReport]) -> Result<()> {
-    let output = reports
-        .iter()
-        .map(|evaluated| {
-            let findings = evaluated
-                .report
-                .results
-                .iter()
-                .map(enriched_finding)
-                .collect::<Vec<_>>();
-            serde_json::json!({
-                "schema_version": "1.0",
-                "tool_version": env!("CARGO_PKG_VERSION"),
-                "model": &evaluated.report.model_name,
-                "overall_status": overall_status(&evaluated.report.results),
-                "trust_state": evaluated.trust_state,
-                "trusted_signatures": evaluated.trusted_signatures,
-                "signer_fingerprints": &evaluated.signer_fingerprints,
-                "policy": &evaluated.policy,
-                "scan_results": findings
-            })
-        })
-        .collect::<Vec<_>>();
-    println!("{}", serde_json::to_string_pretty(&output)?);
-    Ok(())
+    let output = stream_seq(reports, |evaluated| EvaluatedJsonReport {
+        schema_version: "1.0",
+        tool_version: env!("CARGO_PKG_VERSION"),
+        model: &evaluated.report.model_name,
+        overall_status: overall_status(&evaluated.report.results),
+        trust_state: evaluated.trust_state,
+        trusted_signatures: evaluated.trusted_signatures,
+        signer_fingerprints: &evaluated.signer_fingerprints,
+        policy: &evaluated.policy,
+        scan_results: stream_seq(&evaluated.report.results, enriched_finding_ref),
+    });
+    write_stdout_json(&output, true)
 }
 
-/// Project a finding into the enriched JSON contract.
+#[derive(serde::Serialize)]
+struct EvaluatedJsonReport<'a, S: serde::Serialize> {
+    schema_version: &'static str,
+    tool_version: &'static str,
+    model: &'a str,
+    overall_status: ScanStatus,
+    trust_state: crate::provenance::TrustState,
+    trusted_signatures: usize,
+    signer_fingerprints: &'a [String],
+    policy: &'a crate::policy::PolicyDecision,
+    scan_results: S,
+}
+
+/// The enriched per-finding JSON contract.
 ///
 /// Every key that existed before the evidence upgrade is still emitted with the
 /// same name and meaning. Attribution keys are added alongside them, and are
 /// omitted rather than emitted empty when a detector has nothing to say.
-pub fn enriched_finding(finding: &LayerScanResult) -> serde_json::Value {
+#[derive(serde::Serialize)]
+pub struct EnrichedFinding<'a> {
+    pub rule_id: String,
+    pub rule_version: u32,
+    pub detector_family: &'static str,
+    pub scanner_revision: &'static str,
+    pub ruleset_sha256: &'static str,
+    pub layer_digest: &'a str,
+    pub media_type: &'a str,
+    pub check_type: &'a CheckType,
+    pub status: &'a ScanStatus,
+    pub finding_class: &'a FindingClass,
+    pub confidence: &'a Confidence,
+    pub detail: &'a Option<String>,
+    pub matches: &'a [String],
+    pub duration_ms: u64,
+    pub risk: crate::explain::RiskExplanation,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub finding_id: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub subject: Option<&'a EvidenceSubject>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub evidence_state: Option<&'a EvidenceState>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub evidence_reason: Option<&'a str>,
+    #[serde(skip_serializing_if = "is_empty_evidence")]
+    pub evidence: &'a [FindingEvidence],
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub explanation: Option<crate::explain::RuleExplanation>,
+}
+
+/// Project a finding into the enriched JSON contract without allocating a
+/// `serde_json::Value`.
+pub fn enriched_finding_ref(finding: &LayerScanResult) -> EnrichedFinding<'_> {
     let rule_id = crate::policy::rule_id(finding);
     let explanation = crate::explain::lookup(&rule_id);
     let rule_version = explanation.as_ref().map(|e| e.rule_version).unwrap_or(1);
@@ -333,47 +453,36 @@ pub fn enriched_finding(finding: &LayerScanResult) -> serde_json::Value {
         .as_ref()
         .map(|e| e.detector_family)
         .unwrap_or("scanner");
+    EnrichedFinding {
+        rule_id: rule_id.clone(),
+        rule_version,
+        detector_family,
+        scanner_revision: crate::explain::scanner_revision(),
+        ruleset_sha256: crate::explain::ruleset_sha256(),
+        layer_digest: &finding.layer_digest,
+        media_type: &finding.media_type,
+        check_type: &finding.check_type,
+        status: &finding.status,
+        finding_class: &finding.finding_class,
+        confidence: &finding.confidence,
+        detail: &finding.detail,
+        matches: &finding.matches,
+        duration_ms: finding.duration_ms,
+        risk: crate::explain::risk_lookup(&rule_id),
+        finding_id: finding.finding_id.as_deref(),
+        subject: finding.subject.as_ref(),
+        evidence_state: finding.evidence_state.as_ref(),
+        evidence_reason: finding.evidence_reason.as_deref(),
+        evidence: &finding.evidence,
+        explanation: crate::explain::lookup(&rule_id),
+    }
+}
 
-    let mut value = serde_json::json!({
-        "rule_id": rule_id,
-        "rule_version": rule_version,
-        "detector_family": detector_family,
-        "scanner_revision": crate::explain::scanner_revision(),
-        "ruleset_sha256": crate::explain::ruleset_sha256(),
-        "layer_digest": &finding.layer_digest,
-        "media_type": &finding.media_type,
-        "check_type": &finding.check_type,
-        "status": &finding.status,
-        "finding_class": &finding.finding_class,
-        "confidence": &finding.confidence,
-        "detail": &finding.detail,
-        "matches": &finding.matches,
-        "duration_ms": finding.duration_ms,
-        "risk": crate::explain::risk_lookup(&rule_id)
-    });
-
-    let object = value
-        .as_object_mut()
-        .expect("enriched finding is an object");
-    if let Some(id) = finding.finding_id.as_ref() {
-        object.insert("finding_id".to_owned(), serde_json::json!(id));
-    }
-    if let Some(subject) = finding.subject.as_ref() {
-        object.insert("subject".to_owned(), serde_json::json!(subject));
-    }
-    if let Some(state) = finding.evidence_state.as_ref() {
-        object.insert("evidence_state".to_owned(), serde_json::json!(state));
-    }
-    if let Some(reason) = finding.evidence_reason.as_ref() {
-        object.insert("evidence_reason".to_owned(), serde_json::json!(reason));
-    }
-    if !finding.evidence.is_empty() {
-        object.insert("evidence".to_owned(), serde_json::json!(&finding.evidence));
-    }
-    if let Some(explanation) = crate::explain::lookup(&rule_id) {
-        object.insert("explanation".to_owned(), serde_json::json!(explanation));
-    }
-    value
+/// Legacy `serde_json::Value` projection, kept for callers (evidence bundle
+/// manifests, ad hoc command JSON) that still need an owned `Value` rather
+/// than a borrowed streaming struct.
+pub fn enriched_finding(finding: &LayerScanResult) -> serde_json::Value {
+    serde_json::to_value(enriched_finding_ref(finding)).expect("enriched finding is Serialize")
 }
 
 pub fn enriched_findings(findings: &[LayerScanResult]) -> Vec<serde_json::Value> {
@@ -719,6 +828,100 @@ mod tests {
         assert_eq!(sarif_rule_id(&finding), "T3-004");
         finding.matches.clear();
         assert_eq!(sarif_rule_id(&finding), "LF-LAYERPOLICY");
+    }
+
+    #[test]
+    fn enriched_finding_omits_absent_optional_keys() {
+        let finding = result(ScanStatus::Warn);
+        let value = serde_json::to_value(enriched_finding_ref(&finding)).expect("serialize");
+        let object = value.as_object().expect("object");
+        for key in [
+            "finding_id",
+            "subject",
+            "evidence_state",
+            "evidence_reason",
+            "evidence",
+        ] {
+            assert!(!object.contains_key(key), "unexpected key '{key}' present");
+        }
+        for key in [
+            "rule_id",
+            "rule_version",
+            "detector_family",
+            "scanner_revision",
+            "ruleset_sha256",
+            "layer_digest",
+            "media_type",
+            "check_type",
+            "status",
+            "finding_class",
+            "confidence",
+            "detail",
+            "matches",
+            "duration_ms",
+            "risk",
+        ] {
+            assert!(object.contains_key(key), "missing key '{key}'");
+        }
+    }
+
+    #[test]
+    fn enriched_finding_includes_present_optional_keys() {
+        let mut finding = result(ScanStatus::Warn);
+        finding.finding_id = Some("finding-1".to_owned());
+        finding.evidence_state = Some(EvidenceState::Partial);
+        finding.evidence_reason = Some("bounded excerpt".to_owned());
+        let value = serde_json::to_value(enriched_finding_ref(&finding)).expect("serialize");
+        assert_eq!(value["finding_id"], "finding-1");
+        assert_eq!(value["evidence_state"], "PARTIAL");
+        assert_eq!(value["evidence_reason"], "bounded excerpt");
+    }
+
+    #[test]
+    fn enriched_finding_matches_legacy_value_shape() {
+        let mut finding = result(ScanStatus::Fail);
+        finding.finding_id = Some("finding-2".to_owned());
+        finding.detail = Some("detail text".to_owned());
+        let typed = serde_json::to_value(enriched_finding_ref(&finding)).expect("serialize");
+        let legacy = enriched_finding(&finding);
+        assert_eq!(typed, legacy);
+    }
+
+    #[test]
+    fn emit_sarif_skips_pass_findings_and_uses_rule_ids() {
+        let reports = [ModelReport {
+            model_name: "example".to_owned(),
+            results: vec![result(ScanStatus::Pass), result(ScanStatus::Fail)],
+        }];
+        let results_stream = crate::json_stream::stream_iter(
+            reports[0]
+                .results
+                .iter()
+                .filter(|f| f.status != ScanStatus::Pass)
+                .map(|f| sarif_result(&reports[0].model_name, f)),
+        );
+        let json = serde_json::to_value(&results_stream).expect("serialize");
+        let array = json.as_array().expect("array");
+        assert_eq!(array.len(), 1);
+        assert_eq!(array[0]["level"], "error");
+        assert_eq!(array[0]["ruleId"], "LF-LAYERPOLICY");
+    }
+
+    #[test]
+    fn sarif_locations_only_for_text_evidence_with_package_relative_subject() {
+        let subject =
+            EvidenceSubject::member("modeling_custom.py").with_sha256(Some("sha256:ab".into()));
+        let mut finding = result(ScanStatus::Warn);
+        finding.evidence = vec![crate::finding_evidence::source_excerpt(
+            subject, 10, 10, "eval(", "eval(x)",
+        )];
+        let locations = sarif_locations(&finding);
+        assert_eq!(locations.len(), 1);
+        assert_eq!(
+            locations[0].physical_location.artifact_location.uri,
+            "modeling_custom.py"
+        );
+        assert_eq!(locations[0].physical_location.region.start_line, 10);
     }
 
     #[test]
