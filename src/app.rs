@@ -36,6 +36,7 @@ pub struct ScanOptions<'a> {
     pub policy: &'a EffectivePolicy,
     pub jobs: usize,
     pub quiet: bool,
+    pub budget: crate::budget::ScanBudget,
 }
 
 pub fn resolve_base_dir(override_dir: Option<&Path>) -> Result<PathBuf> {
@@ -134,6 +135,7 @@ fn scan_model(
             options.thresholds,
             progress,
             cache,
+            &options.budget,
         ));
     }
 
@@ -203,6 +205,7 @@ fn scan_layer_cached(
     thresholds: &ThresholdConfig,
     progress: &MultiProgress,
     cache: &LayerScanCache,
+    budget: &crate::budget::ScanBudget,
 ) -> Vec<LayerScanResult> {
     // One OnceLock per descriptor key coalesces concurrent misses. Shared base
     // layers referenced by many models are therefore hashed/scanned once, not
@@ -222,10 +225,10 @@ fn scan_layer_cached(
                 .entry(key.clone())
                 .or_insert_with(|| Arc::new(OnceLock::new())),
         ),
-        Err(_) => return scan_layer_safe(base_dir, layer, thresholds, progress),
+        Err(_) => return scan_layer_safe(base_dir, layer, thresholds, progress, budget),
     };
     let results = cell
-        .get_or_init(|| scan_layer_safe(base_dir, layer, thresholds, progress))
+        .get_or_init(|| scan_layer_safe(base_dir, layer, thresholds, progress, budget))
         .clone();
 
     let verified = results.iter().any(|result| {
@@ -251,8 +254,9 @@ fn scan_layer_safe(
     layer: &Layer,
     thresholds: &ThresholdConfig,
     progress: &MultiProgress,
+    budget: &crate::budget::ScanBudget,
 ) -> Vec<LayerScanResult> {
-    match scan_layer(base_dir, layer, thresholds, progress) {
+    match scan_layer(base_dir, layer, thresholds, progress, budget) {
         Ok(results) => results,
         Err(error) => vec![scan_error(
             &layer.digest,
@@ -267,7 +271,18 @@ fn scan_layer(
     layer: &Layer,
     thresholds: &ThresholdConfig,
     progress: &MultiProgress,
+    budget: &crate::budget::ScanBudget,
 ) -> Result<Vec<LayerScanResult>> {
+    budget
+        .consume(crate::budget::BudgetDimension::Objects, 1, "ollama layer")
+        .map_err(|error| anyhow::anyhow!("global scan budget exhausted: {error}"))?;
+    budget
+        .consume(
+            crate::budget::BudgetDimension::SourceBytes,
+            layer.size,
+            "ollama layer source",
+        )
+        .map_err(|error| anyhow::anyhow!("global scan budget exhausted: {error}"))?;
     let media_type = layer.base_media_type();
     let full_media = layer.media_type.as_str();
     let binary_media = matches!(

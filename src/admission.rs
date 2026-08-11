@@ -33,7 +33,32 @@ pub fn inspect_and_evaluate(
     quantization: Option<&str>,
     sigstore: Option<SigstoreRequest<'_>>,
 ) -> Result<ArtifactAdmission> {
-    let mut report = artifact::inspect(path, ArtifactScanMode::Full)?;
+    let budget =
+        crate::budget::ScanBudget::new(crate::budget::ScanBudgetProfile::Default.limits())?;
+    inspect_and_evaluate_with_budget(
+        path,
+        identity,
+        source,
+        policy,
+        architecture,
+        quantization,
+        sigstore,
+        &budget,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn inspect_and_evaluate_with_budget(
+    path: &Path,
+    identity: &str,
+    source: SourceKind,
+    policy: &EffectivePolicy,
+    architecture: Option<&str>,
+    quantization: Option<&str>,
+    sigstore: Option<SigstoreRequest<'_>>,
+    budget: &crate::budget::ScanBudget,
+) -> Result<ArtifactAdmission> {
+    let mut report = artifact::inspect_with_budget(path, ArtifactScanMode::Full, budget)?;
     let mut trust_state = TrustState::Unsigned;
     let mut trusted_signatures = 0_usize;
     let mut signer_fingerprints = Vec::new();

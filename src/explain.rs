@@ -2273,6 +2273,18 @@ pub static CATALOGUE: &[RuleMetadata] = &[
         requirement_reason: "",
     },
     RuleMetadata {
+        rule_id: "LF-BUDGET-EVIDENCE",
+        rule_version: 1,
+        detector_family: "resource-budget",
+        title: "Static scan evidence budget exhausted",
+        meaning: "The shared scan resource envelope could not retain all evidence produced by the bounded static analysis.",
+        why_it_matters: "Unretained evidence leaves part of the security assessment incomplete and cannot be reported as a clean pass.",
+        remediation: "Use a larger approved budget profile or review the artifact in a separately bounded workflow.",
+        limitations: "This reports incomplete observation caused by a resource limit; it does not establish malicious intent.",
+        evidence_requirement: EvidenceRequirement::StructuredOnly,
+        requirement_reason: "The exhaustion record is structured budget evidence rather than a source excerpt.",
+    },
+    RuleMetadata {
         rule_id: "LF-SCAN-ERROR",
         rule_version: 1,
         detector_family: "scanner",

@@ -96,6 +96,15 @@ impl PackageReport {
 }
 
 pub fn inspect(root: &Path) -> Result<PackageReport> {
+    let budget =
+        crate::budget::ScanBudget::new(crate::budget::ScanBudgetProfile::Default.limits())?;
+    inspect_with_budget(root, &budget)
+}
+
+pub fn inspect_with_budget(
+    root: &Path,
+    budget: &crate::budget::ScanBudget,
+) -> Result<PackageReport> {
     let metadata = std::fs::symlink_metadata(root)
         .with_context(|| format!("Unable to inspect package root '{}'", root.display()))?;
     if metadata.file_type().is_symlink() {
@@ -161,6 +170,16 @@ pub fn inspect(root: &Path) -> Result<PackageReport> {
         let rel = safe_relative(&root, &path)?;
         let file = open_readonly_nofollow(&path)?;
         let size = file.metadata()?.len();
+        budget
+            .consume(crate::budget::BudgetDimension::Objects, 1, "package member")
+            .map_err(|error| anyhow!("global scan budget exhausted: {error}"))?;
+        budget
+            .consume(
+                crate::budget::BudgetDimension::SourceBytes,
+                size,
+                "package member source",
+            )
+            .map_err(|error| anyhow!("global scan budget exhausted: {error}"))?;
         total_bytes = checked_package_total(total_bytes, size)?;
 
         let session = crate::scanner::ScanSession::new(&path, &file)?;
@@ -225,6 +244,7 @@ pub fn inspect(root: &Path) -> Result<PackageReport> {
             &evidence,
             &auto_map_modules,
             &session_findings,
+            budget,
         )?);
         member_evidence.push(evidence);
         let changed = if crate::hashcache::eligible(size) {
@@ -263,10 +283,54 @@ pub fn inspect(root: &Path) -> Result<PackageReport> {
             .then_with(|| a.layer_digest.cmp(&b.layer_digest))
     });
 
+    // Retained evidence is part of the same envelope as parser work. If the
+    // cap is reached, preserve an explicit incomplete-coverage finding rather
+    // than returning a clean package report with silently truncated evidence.
+    let evidence_bytes = serde_json::to_vec(&findings)?.len() as u64;
+    let evidence_failure = budget
+        .consume(
+            crate::budget::BudgetDimension::RetainedEvidenceBytes,
+            evidence_bytes,
+            "package evidence retention",
+        )
+        .err();
+    if let Some(failure) = evidence_failure {
+        let usage = budget
+            .snapshot_with_operation(Some(failure), "package evidence retention")
+            .into_iter()
+            .find(|item| item.dimension == crate::budget::BudgetDimension::RetainedEvidenceBytes)
+            .expect("budget dimension exists");
+        let mut result = finding(
+            &format!("package:{}", root.display()),
+            CheckType::PackageSecurity,
+            ScanStatus::Fail,
+            FindingClass::Operational,
+            Confidence::High,
+            "LF-BUDGET-EVIDENCE",
+            format!("Global retained-evidence budget exhausted: {failure}"),
+        )
+        .evidence_unavailable("retained evidence budget exhausted; package coverage is incomplete")
+        .finish();
+        result.evidence_reason = Some(serde_json::to_string(&usage)?);
+        findings.push(result);
+    }
+
     // Correlate only after findings are complete and ordered, so the derived
     // relationships are deterministic for a given package.
     let correlations = crate::correlate::correlate(&findings);
     let mut coverage = crate::coverage::Coverage::complete(files.len() as u64, total_bytes);
+    coverage.budget =
+        budget.snapshot_with_operation(evidence_failure, "package evidence retention");
+    if let Some(failure) = evidence_failure {
+        if let Some(usage) = coverage
+            .budget
+            .iter()
+            .find(|item| item.failure == Some(failure))
+            .cloned()
+        {
+            coverage.budget_exhausted(usage, "retained evidence budget exhausted");
+        }
+    }
     if findings
         .iter()
         .any(|item| item.evidence_state == Some(crate::finding_evidence::EvidenceState::Partial))
@@ -420,6 +484,16 @@ fn checked_package_total(current: u64, next: u64) -> Result<u64> {
 }
 
 pub fn inspect_member(display_path: &Path, content_path: &Path) -> Result<Vec<LayerScanResult>> {
+    let budget =
+        crate::budget::ScanBudget::new(crate::budget::ScanBudgetProfile::Default.limits())?;
+    inspect_member_with_budget(display_path, content_path, &budget)
+}
+
+pub fn inspect_member_with_budget(
+    display_path: &Path,
+    content_path: &Path,
+    budget: &crate::budget::ScanBudget,
+) -> Result<Vec<LayerScanResult>> {
     let file = open_readonly_nofollow(content_path)?;
     let size = file.metadata()?.len();
     let rel = display_path.display().to_string();
@@ -461,6 +535,7 @@ pub fn inspect_member(display_path: &Path, content_path: &Path) -> Result<Vec<La
         &evidence,
         &empty_auto_map,
         &session_findings,
+        budget,
     )?;
     let changed = if crate::hashcache::eligible(size) {
         !crate::hashcache::identity_unchanged(content_path, &file, &session.identity_before)?
@@ -516,6 +591,7 @@ fn scan_package_file(
     evidence: &PackageMemberEvidence,
     auto_map_modules: &BTreeSet<String>,
     session_findings: &[LayerScanResult],
+    budget: &crate::budget::ScanBudget,
 ) -> Result<Vec<LayerScanResult>> {
     let mut out = Vec::new();
     let subject = member_subject(rel, digest, Some(size));
@@ -523,7 +599,7 @@ fn scan_package_file(
     let archive_detection = crate::archive::detect_archive_format(path, &file_prefix);
     if archive_detection.format != crate::archive::ArchiveFormat::Unknown {
         let archive_limits = crate::archive::ArchiveLimits::default();
-        match crate::archive::inspect_opened(path, file, rel, &archive_limits, 0) {
+        match crate::archive::inspect_opened(path, file, rel, &archive_limits, 0, budget) {
             Ok(archive_report) => {
                 out.extend(archive_report.findings);
                 return Ok(out);
@@ -555,12 +631,13 @@ fn scan_package_file(
 
     let format = ArtifactFormat::detect(path, &file_prefix[..file_prefix.len().min(8)]);
     if format != ArtifactFormat::Unknown {
-        match artifact::inspect_opened_file_with_sha256(
+        match artifact::inspect_opened_file_with_sha256_budget(
             path,
             file,
             format,
             artifact::ArtifactScanMode::Full,
             digest,
+            budget,
         ) {
             Ok(report) => out.extend(report.results),
             Err(error) => out.push(
@@ -720,6 +797,16 @@ fn scan_package_file(
                 crate::safeio::read_all_from_file(&reader, limits.max_source_bytes as u64)
             {
                 if let Ok(source_str) = std::str::from_utf8(&source_bytes) {
+                    budget
+                        .consume(
+                            crate::budget::BudgetDimension::ParserWorkUnits,
+                            source_bytes.len() as u64,
+                            "python parser",
+                        )
+                        .map_err(|error| anyhow!("global scan budget exhausted: {error}"))?;
+                    budget
+                        .consume(crate::budget::BudgetDimension::AstNodes, 1, "python AST")
+                        .map_err(|error| anyhow!("global scan budget exhausted: {error}"))?;
                     let started = std::time::Instant::now();
                     if let Ok(semantic_findings) =
                         crate::python_static::analyze_and_convert_findings(

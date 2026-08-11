@@ -43,6 +43,8 @@ pub struct ArtifactReport {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub metrics: Option<crate::scanner::ScanMetrics>,
     pub results: Vec<LayerScanResult>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub budget: Vec<crate::budget::BudgetUsage>,
 }
 
 impl ArtifactReport {
@@ -54,8 +56,18 @@ impl ArtifactReport {
 }
 
 pub fn inspect(path: &Path, mode: ArtifactScanMode) -> Result<ArtifactReport> {
+    let budget =
+        crate::budget::ScanBudget::new(crate::budget::ScanBudgetProfile::Default.limits())?;
+    inspect_with_budget(path, mode, &budget)
+}
+
+pub fn inspect_with_budget(
+    path: &Path,
+    mode: ArtifactScanMode,
+    budget: &crate::budget::ScanBudget,
+) -> Result<ArtifactReport> {
     let file = open_readonly_nofollow(path)?;
-    inspect_opened(path, file, None, mode, None)
+    inspect_opened(path, file, None, mode, None, budget)
 }
 
 pub fn inspect_with_format(
@@ -63,8 +75,19 @@ pub fn inspect_with_format(
     format: ArtifactFormat,
     mode: ArtifactScanMode,
 ) -> Result<ArtifactReport> {
+    let budget =
+        crate::budget::ScanBudget::new(crate::budget::ScanBudgetProfile::Default.limits())?;
+    inspect_with_format_budget(path, format, mode, &budget)
+}
+
+pub fn inspect_with_format_budget(
+    path: &Path,
+    format: ArtifactFormat,
+    mode: ArtifactScanMode,
+    budget: &crate::budget::ScanBudget,
+) -> Result<ArtifactReport> {
     let file = open_readonly_nofollow(path)?;
-    inspect_opened(path, file, Some(format), mode, None)
+    inspect_opened(path, file, Some(format), mode, None, budget)
 }
 
 pub fn inspect_opened_file(
@@ -73,7 +96,9 @@ pub fn inspect_opened_file(
     format: ArtifactFormat,
     mode: ArtifactScanMode,
 ) -> Result<ArtifactReport> {
-    inspect_opened(path, file.try_clone()?, Some(format), mode, None)
+    let budget =
+        crate::budget::ScanBudget::new(crate::budget::ScanBudgetProfile::Default.limits())?;
+    inspect_opened(path, file.try_clone()?, Some(format), mode, None, &budget)
 }
 
 pub fn inspect_opened_file_with_sha256(
@@ -83,12 +108,33 @@ pub fn inspect_opened_file_with_sha256(
     mode: ArtifactScanMode,
     sha256: &str,
 ) -> Result<ArtifactReport> {
+    let budget =
+        crate::budget::ScanBudget::new(crate::budget::ScanBudgetProfile::Default.limits())?;
     inspect_opened(
         path,
         file.try_clone()?,
         Some(format),
         mode,
         Some(sha256.to_owned()),
+        &budget,
+    )
+}
+
+pub fn inspect_opened_file_with_sha256_budget(
+    path: &Path,
+    file: &File,
+    format: ArtifactFormat,
+    mode: ArtifactScanMode,
+    sha256: &str,
+    budget: &crate::budget::ScanBudget,
+) -> Result<ArtifactReport> {
+    inspect_opened(
+        path,
+        file.try_clone()?,
+        Some(format),
+        mode,
+        Some(sha256.to_owned()),
+        budget,
     )
 }
 
@@ -98,8 +144,19 @@ fn inspect_opened(
     supplied_format: Option<ArtifactFormat>,
     mode: ArtifactScanMode,
     precomputed_sha256: Option<String>,
+    budget: &crate::budget::ScanBudget,
 ) -> Result<ArtifactReport> {
     let size = file.metadata()?.len();
+    budget
+        .consume(crate::budget::BudgetDimension::Objects, 1, "artifact")
+        .map_err(|error| anyhow!("global scan budget exhausted: {error}"))?;
+    budget
+        .consume(
+            crate::budget::BudgetDimension::SourceBytes,
+            size,
+            "artifact source",
+        )
+        .map_err(|error| anyhow!("global scan budget exhausted: {error}"))?;
     let mut prefix_buf = [0_u8; 512];
     let mut cloned = file.try_clone()?;
     cloned.seek(SeekFrom::Start(0))?;
@@ -325,6 +382,7 @@ fn inspect_opened(
                     &identity,
                     &crate::archive::ArchiveLimits::default(),
                     0,
+                    budget,
                 ) {
                     Ok(arch_report) => results.extend(arch_report.findings),
                     Err(error) => results.push(LayerScanResult {
@@ -434,6 +492,7 @@ fn inspect_opened(
             })
         },
         metrics: Some(session.metrics.into_inner()),
+        budget: budget.snapshot(None),
         results,
     };
     if !crate::hashcache::identity_unchanged(path, &file, &before)? {
@@ -460,6 +519,18 @@ pub fn inspect_dir(
     recursive: bool,
     mode: ArtifactScanMode,
     jobs: usize,
+) -> Result<Vec<ArtifactReport>> {
+    let budget =
+        crate::budget::ScanBudget::new(crate::budget::ScanBudgetProfile::Default.limits())?;
+    inspect_dir_with_budget(root, recursive, mode, jobs, &budget)
+}
+
+pub fn inspect_dir_with_budget(
+    root: &Path,
+    recursive: bool,
+    mode: ArtifactScanMode,
+    jobs: usize,
+    budget: &crate::budget::ScanBudget,
 ) -> Result<Vec<ArtifactReport>> {
     if !root.is_dir() {
         return Err(anyhow!("'{}' is not a directory", root.display()));
@@ -489,7 +560,7 @@ pub fn inspect_dir(
     pool.install(|| {
         paths
             .into_par_iter()
-            .map(|path| inspect(&path, mode))
+            .map(|path| inspect_with_budget(&path, mode, budget))
             .collect()
     })
 }

@@ -163,6 +163,14 @@ struct ScanCommon {
     /// Maximum number of models scanned concurrently.
     #[arg(long, value_parser = parse_jobs)]
     jobs: Option<usize>,
+
+    /// Global static-scan resource profile.
+    #[arg(long, default_value = "default")]
+    budget_profile: String,
+
+    /// Versioned JSON resource-budget configuration. Overrides --budget-profile.
+    #[arg(long)]
+    budget_file: Option<PathBuf>,
 }
 
 impl Default for ScanCommon {
@@ -177,6 +185,8 @@ impl Default for ScanCommon {
             policy: "workstation".to_owned(),
             policy_file: None,
             jobs: None,
+            budget_profile: "default".to_owned(),
+            budget_file: None,
         }
     }
 }
@@ -205,6 +215,10 @@ pub(crate) struct InspectArgs {
     json: bool,
     #[arg(long, default_value_t = false)]
     normalized: bool,
+    #[arg(long, default_value = "default")]
+    budget_profile: String,
+    #[arg(long)]
+    budget_file: Option<PathBuf>,
 }
 
 #[derive(clap::Args, Debug)]
@@ -244,6 +258,10 @@ struct ScanDirArgs {
     jobs: Option<usize>,
     #[arg(long, default_value_t = false)]
     json: bool,
+    #[arg(long, default_value = "default")]
+    budget_profile: String,
+    #[arg(long)]
+    budget_file: Option<PathBuf>,
 }
 
 #[derive(clap::Args, Debug)]
@@ -1310,6 +1328,7 @@ struct Prepared {
     verifying_key: Option<VerifyingKey>,
     trust_store: TrustStore,
     policy: policy::EffectivePolicy,
+    budget: layerfault::budget::ScanBudget,
 }
 
 fn prepare(common: &ScanCommon) -> Result<Prepared> {
@@ -1328,12 +1347,35 @@ fn prepare(common: &ScanCommon) -> Result<Prepared> {
         None => PolicyDocument::builtin(PolicyProfile::parse(&common.policy)?),
     };
     policy_doc.validate()?;
+    let budget_config = match common.budget_file.as_deref() {
+        Some(path) => layerfault::budget::ScanBudgetConfig::load(path)?,
+        None => layerfault::budget::ScanBudgetConfig {
+            profile: layerfault::budget::ScanBudgetProfile::parse(&common.budget_profile)?,
+            limits: None,
+        },
+    };
+    let budget = layerfault::budget::ScanBudget::new(budget_config.limits()?)?;
     Ok(Prepared {
         thresholds,
         verifying_key,
         trust_store,
         policy: policy_doc.effective(),
+        budget,
     })
+}
+
+pub(crate) fn standalone_budget(
+    profile: &str,
+    file: Option<&Path>,
+) -> Result<layerfault::budget::ScanBudget> {
+    let config = match file {
+        Some(path) => layerfault::budget::ScanBudgetConfig::load(path)?,
+        None => layerfault::budget::ScanBudgetConfig {
+            profile: layerfault::budget::ScanBudgetProfile::parse(profile)?,
+            limits: None,
+        },
+    };
+    layerfault::budget::ScanBudget::new(config.limits()?)
 }
 
 fn scan_options<'a>(common: &ScanCommon, prepared: &'a Prepared, quiet: bool) -> ScanOptions<'a> {
@@ -1344,6 +1386,7 @@ fn scan_options<'a>(common: &ScanCommon, prepared: &'a Prepared, quiet: bool) ->
         policy: &prepared.policy,
         jobs: common.jobs.unwrap_or_else(app::default_jobs),
         quiet,
+        budget: prepared.budget.clone(),
     }
 }
 

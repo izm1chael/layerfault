@@ -55,9 +55,19 @@ pub struct ArchiveReport {
 }
 
 pub fn inspect(path: &Path, limits: &ArchiveLimits) -> Result<ArchiveReport> {
+    let budget =
+        crate::budget::ScanBudget::new(crate::budget::ScanBudgetProfile::Default.limits())?;
+    inspect_with_budget(path, limits, &budget)
+}
+
+pub fn inspect_with_budget(
+    path: &Path,
+    limits: &ArchiveLimits,
+    budget: &crate::budget::ScanBudget,
+) -> Result<ArchiveReport> {
     let file = open_readonly_nofollow(path)?;
     let identity = format!("file:{}", path.display());
-    inspect_opened(path, &file, &identity, limits, 0)
+    inspect_opened(path, &file, &identity, limits, 0, budget)
 }
 
 pub fn inspect_opened(
@@ -66,7 +76,15 @@ pub fn inspect_opened(
     identity: &str,
     limits: &ArchiveLimits,
     depth: usize,
+    budget: &crate::budget::ScanBudget,
 ) -> Result<ArchiveReport> {
+    budget
+        .consume(
+            crate::budget::BudgetDimension::ArchiveMembers,
+            1,
+            "archive container",
+        )
+        .map_err(|error| anyhow!("global scan budget exhausted: {error}"))?;
     let mut cloned = file.try_clone().with_context(|| {
         format!(
             "Unable to clone file handle for '{}'",
@@ -104,7 +122,7 @@ pub fn inspect_opened(
         );
     }
 
-    let mut budget = ArchiveBudgetTracker::new(limits.clone(), depth);
+    let mut archive_budget = ArchiveBudgetTracker::new(limits.clone(), depth);
 
     let is_wheel = detection.format == ArchiveFormat::Wheel;
     let mut report = match detection.format {
@@ -112,9 +130,10 @@ pub fn inspect_opened(
             display_path,
             file,
             identity,
-            &mut budget,
+            &mut archive_budget,
             is_wheel,
             detection.format,
+            budget,
         )?,
         ArchiveFormat::Tar | ArchiveFormat::TarGz => {
             let is_gz = detection.format == ArchiveFormat::TarGz;
@@ -122,9 +141,10 @@ pub fn inspect_opened(
                 display_path,
                 file,
                 identity,
-                &mut budget,
+                &mut archive_budget,
                 is_gz,
                 detection.format,
+                budget,
             )?
         }
         ArchiveFormat::Unknown => {

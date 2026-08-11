@@ -30,6 +30,9 @@ pub struct Coverage {
     /// Human-readable explanations for every incompleteness above.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub reasons: Vec<String>,
+    /// Additive accounting detail for an invocation budget exhaustion.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub budget: Vec<crate::budget::BudgetUsage>,
 }
 
 impl Coverage {
@@ -73,6 +76,18 @@ impl Coverage {
         self.note(reason);
     }
 
+    pub fn budget_exhausted(&mut self, usage: crate::budget::BudgetUsage, reason: &str) {
+        self.complete = false;
+        self.note(reason);
+        if !self
+            .budget
+            .iter()
+            .any(|item| item.dimension == usage.dimension && item.scope == usage.scope)
+        {
+            self.budget.push(usage);
+        }
+    }
+
     fn note(&mut self, reason: &str) {
         let reason = reason.to_owned();
         if !self.reasons.contains(&reason) {
@@ -89,6 +104,15 @@ impl Coverage {
         self.bytes_scanned = self.bytes_scanned.saturating_add(other.bytes_scanned);
         self.parser_failures = self.parser_failures.saturating_add(other.parser_failures);
         self.evidence_limits_reached |= other.evidence_limits_reached;
+        for usage in &other.budget {
+            if !self
+                .budget
+                .iter()
+                .any(|item| item.dimension == usage.dimension && item.scope == usage.scope)
+            {
+                self.budget.push(usage.clone());
+            }
+        }
         for example in &other.omitted_examples {
             if self.omitted_examples.len() < 8 && !self.omitted_examples.contains(example) {
                 self.omitted_examples.push(example.clone());

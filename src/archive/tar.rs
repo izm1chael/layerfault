@@ -20,6 +20,7 @@ pub fn inspect_tar(
     budget: &mut ArchiveBudgetTracker,
     is_gz: bool,
     format: ArchiveFormat,
+    global_budget: &crate::budget::ScanBudget,
 ) -> Result<ArchiveReport> {
     budget.check_depth().map_err(|e| anyhow!(e))?;
     budget.check_nested_archives().map_err(|e| anyhow!(e))?;
@@ -288,7 +289,7 @@ pub fn inspect_tar(
         }
 
         // Decompress member into tempfile with byte cap enforcement
-        let decomp_res = decompress_tar_member(&mut entry, budget);
+        let decomp_res = decompress_tar_member(&mut entry, budget, global_budget);
         let (temp_file, member_sha256, actual_uncompressed) = match decomp_res {
             Ok(val) => val,
             Err(err_msg) => {
@@ -339,6 +340,7 @@ pub fn inspect_tar(
             actual_uncompressed,
             &member_sha256,
             budget,
+            global_budget,
         )?;
         findings.extend(member_findings);
     }
@@ -373,6 +375,7 @@ pub fn inspect_tar(
 fn decompress_tar_member<R: Read>(
     reader: &mut R,
     budget: &mut ArchiveBudgetTracker,
+    global_budget: &crate::budget::ScanBudget,
 ) -> Result<(NamedTempFile, String, u64), String> {
     let mut temp = NamedTempFile::new().map_err(|e| e.to_string())?;
     let mut hasher = Sha256::new();
@@ -397,6 +400,20 @@ fn decompress_tar_member<R: Read>(
         }
 
         budget.add_uncompressed_bytes(count as u64)?;
+        global_budget
+            .consume(
+                crate::budget::BudgetDimension::DecompressedBytes,
+                count as u64,
+                "tar decompression",
+            )
+            .map_err(|error| error.to_string())?;
+        global_budget
+            .consume(
+                crate::budget::BudgetDimension::TemporaryDiskBytes,
+                count as u64,
+                "tar staging",
+            )
+            .map_err(|error| error.to_string())?;
 
         hasher.update(&buffer[..count]);
         temp.write_all(&buffer[..count])
@@ -417,6 +434,7 @@ fn dispatch_tar_member_scan(
     size: u64,
     digest: &str,
     budget: &mut ArchiveBudgetTracker,
+    global_budget: &crate::budget::ScanBudget,
 ) -> Result<Vec<LayerScanResult>> {
     let mut out = Vec::new();
     let file = open_readonly_nofollow(content_path)?;
@@ -461,6 +479,7 @@ fn dispatch_tar_member_scan(
                         budget,
                         is_nested_wheel,
                         detection.format,
+                        global_budget,
                     )?;
                     out.extend(child_report.findings);
                 }
@@ -472,6 +491,7 @@ fn dispatch_tar_member_scan(
                         budget,
                         detection.format == ArchiveFormat::TarGz,
                         detection.format,
+                        global_budget,
                     )?;
                     out.extend(child_report.findings);
                 }
@@ -508,12 +528,13 @@ fn dispatch_tar_member_scan(
                 .extension_claim
                 .unwrap_or(crate::formats::ArtifactFormat::Unknown)
         };
-        match crate::formats::artifact::inspect_opened_file_with_sha256(
+        match crate::formats::artifact::inspect_opened_file_with_sha256_budget(
             content_path,
             &file,
             scan_format,
             crate::formats::artifact::ArtifactScanMode::Full,
             digest,
+            global_budget,
         ) {
             Ok(report) => {
                 for mut res in report.results {
@@ -577,6 +598,16 @@ fn dispatch_tar_member_scan(
                 crate::safeio::read_all_from_file(&reader, limits.max_source_bytes as u64)
             {
                 if let Ok(source_str) = std::str::from_utf8(&source_bytes) {
+                    global_budget
+                        .consume(
+                            crate::budget::BudgetDimension::ParserWorkUnits,
+                            source_bytes.len() as u64,
+                            "python parser",
+                        )
+                        .map_err(|error| anyhow!("global scan budget exhausted: {error}"))?;
+                    global_budget
+                        .consume(crate::budget::BudgetDimension::AstNodes, 1, "python AST")
+                        .map_err(|error| anyhow!("global scan budget exhausted: {error}"))?;
                     let started = std::time::Instant::now();
                     let empty_map = std::collections::BTreeSet::new();
                     if let Ok(semantic_findings) =

@@ -1,6 +1,7 @@
 use crate::*;
 
 pub(crate) fn run_inspect(args: InspectArgs) -> Result<()> {
+    let budget = standalone_budget(&args.budget_profile, args.budget_file.as_deref())?;
     if args.normalized {
         let norm = layerfault::formats::extract_normalized(&args.path)?;
         println!("{}", serde_json::to_string_pretty(&norm)?);
@@ -8,7 +9,7 @@ pub(crate) fn run_inspect(args: InspectArgs) -> Result<()> {
     }
 
     if args.path.is_dir() {
-        let result = package::inspect(&args.path)?;
+        let result = package::inspect_with_budget(&args.path, &budget)?;
         if args.json {
             println!(
                 "{}",
@@ -25,7 +26,7 @@ pub(crate) fn run_inspect(args: InspectArgs) -> Result<()> {
     } else {
         ArtifactScanMode::Full
     };
-    let result = artifact::inspect(&args.path, mode)?;
+    let result = artifact::inspect_with_budget(&args.path, mode, &budget)?;
     if args.json {
         println!(
             "{}",
@@ -49,7 +50,7 @@ pub(crate) fn run_verify_file(args: VerifyFileArgs) -> Result<()> {
         args.certificate_identity.as_deref(),
         args.certificate_issuer.as_deref(),
     )?;
-    let result = admission::inspect_and_evaluate(
+    let result = admission::inspect_and_evaluate_with_budget(
         &args.path,
         &identity,
         source,
@@ -57,6 +58,7 @@ pub(crate) fn run_verify_file(args: VerifyFileArgs) -> Result<()> {
         args.architecture.as_deref(),
         args.quantization.as_deref(),
         sigstore,
+        &prepared.budget,
     )?;
     let decision = format!("{:?}", result.policy.action).to_ascii_uppercase();
     commands::security::maybe_write_evidence(
@@ -75,16 +77,18 @@ pub(crate) fn run_verify_file(args: VerifyFileArgs) -> Result<()> {
 }
 
 pub(crate) fn run_scan_dir(args: ScanDirArgs) -> Result<()> {
+    let budget = standalone_budget(&args.budget_profile, args.budget_file.as_deref())?;
     let mode = if args.structure_only {
         ArtifactScanMode::StructureOnly
     } else {
         ArtifactScanMode::Full
     };
-    let reports = artifact::inspect_dir(
+    let reports = artifact::inspect_dir_with_budget(
         &args.path,
         args.recursive,
         mode,
         args.jobs.unwrap_or_else(app::default_jobs),
+        &budget,
     )?;
     if args.json {
         let output = reports.iter().map(artifact_json_report).collect::<Vec<_>>();
@@ -99,7 +103,8 @@ pub(crate) fn run_scan_dir(args: ScanDirArgs) -> Result<()> {
 }
 
 pub(crate) fn run_fingerprint(args: FingerprintArgs) -> Result<()> {
-    let report = package::inspect(&args.path)?;
+    let budget = standalone_budget("default", None)?;
+    let report = package::inspect_with_budget(&args.path, &budget)?;
     if args.json {
         println!(
             "{}",
@@ -125,7 +130,7 @@ pub(crate) fn run_fingerprint(args: FingerprintArgs) -> Result<()> {
 
 pub(crate) fn run_verify_package(args: VerifyPackageArgs) -> Result<()> {
     let prepared = prepare(&args.common)?;
-    let report = package::inspect(&args.path)?;
+    let report = package::inspect_with_budget(&args.path, &prepared.budget)?;
     let context = policy::PolicyContext {
         source: Some("directory".to_owned()),
         format: Some("model-package".to_owned()),
@@ -188,7 +193,7 @@ pub(crate) fn run_verify_package(args: VerifyPackageArgs) -> Result<()> {
 pub(crate) fn run_pipeline(args: PipelineArgs) -> Result<()> {
     let prepared = prepare(&args.common)?;
     if args.path.is_dir() {
-        let report = package::inspect(&args.path)?;
+        let report = package::inspect_with_budget(&args.path, &prepared.budget)?;
         let context = policy::PolicyContext {
             source: Some("directory".to_owned()),
             format: Some("model-package".to_owned()),
@@ -244,7 +249,8 @@ pub(crate) fn run_pipeline(args: PipelineArgs) -> Result<()> {
         std::process::exit(exit);
     }
 
-    let report = artifact::inspect(&args.path, ArtifactScanMode::Full)?;
+    let report =
+        artifact::inspect_with_budget(&args.path, ArtifactScanMode::Full, &prepared.budget)?;
     let identity = report
         .sha256
         .clone()

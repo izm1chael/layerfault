@@ -20,6 +20,7 @@ pub fn inspect_zip(
     budget: &mut ArchiveBudgetTracker,
     is_wheel: bool,
     format: ArchiveFormat,
+    global_budget: &crate::budget::ScanBudget,
 ) -> Result<ArchiveReport> {
     budget.check_depth().map_err(|e| anyhow!(e))?;
     budget.check_nested_archives().map_err(|e| anyhow!(e))?;
@@ -343,6 +344,7 @@ pub fn inspect_zip(
             size_compressed,
             size_uncompressed,
             budget,
+            global_budget,
         );
 
         let (temp_file, member_sha256, actual_uncompressed) = match decomp_res {
@@ -418,6 +420,7 @@ pub fn inspect_zip(
             actual_uncompressed,
             &member_sha256,
             budget,
+            global_budget,
         )?;
         findings.extend(member_findings);
     }
@@ -460,6 +463,7 @@ fn decompress_member_to_tempfile<R: Read>(
     compressed_size: u64,
     _declared_uncompressed: u64,
     budget: &mut ArchiveBudgetTracker,
+    global_budget: &crate::budget::ScanBudget,
 ) -> Result<(NamedTempFile, String, u64), String> {
     let mut temp = NamedTempFile::new().map_err(|e| e.to_string())?;
     let mut hasher = Sha256::new();
@@ -484,6 +488,20 @@ fn decompress_member_to_tempfile<R: Read>(
         }
 
         budget.add_uncompressed_bytes(count as u64)?;
+        global_budget
+            .consume(
+                crate::budget::BudgetDimension::DecompressedBytes,
+                count as u64,
+                "zip decompression",
+            )
+            .map_err(|error| error.to_string())?;
+        global_budget
+            .consume(
+                crate::budget::BudgetDimension::TemporaryDiskBytes,
+                count as u64,
+                "zip staging",
+            )
+            .map_err(|error| error.to_string())?;
 
         // Compression ratio check
         if compressed_size > 0 && total_read > 256 * 1024 {
@@ -515,6 +533,7 @@ fn dispatch_member_scan(
     size: u64,
     digest: &str,
     budget: &mut ArchiveBudgetTracker,
+    global_budget: &crate::budget::ScanBudget,
 ) -> Result<Vec<LayerScanResult>> {
     let mut out = Vec::new();
     let file = open_readonly_nofollow(content_path)?;
@@ -559,6 +578,7 @@ fn dispatch_member_scan(
                         budget,
                         is_nested_wheel,
                         detection.format,
+                        global_budget,
                     )?;
                     out.extend(child_report.findings);
                 }
@@ -570,6 +590,7 @@ fn dispatch_member_scan(
                         budget,
                         detection.format == ArchiveFormat::TarGz,
                         detection.format,
+                        global_budget,
                     )?;
                     out.extend(child_report.findings);
                 }
@@ -606,12 +627,13 @@ fn dispatch_member_scan(
                 .extension_claim
                 .unwrap_or(crate::formats::ArtifactFormat::Unknown)
         };
-        match crate::formats::artifact::inspect_opened_file_with_sha256(
+        match crate::formats::artifact::inspect_opened_file_with_sha256_budget(
             content_path,
             &file,
             scan_format,
             crate::formats::artifact::ArtifactScanMode::Full,
             digest,
+            global_budget,
         ) {
             Ok(report) => {
                 for mut res in report.results {
@@ -675,6 +697,16 @@ fn dispatch_member_scan(
                 crate::safeio::read_all_from_file(&reader, limits.max_source_bytes as u64)
             {
                 if let Ok(source_str) = std::str::from_utf8(&source_bytes) {
+                    global_budget
+                        .consume(
+                            crate::budget::BudgetDimension::ParserWorkUnits,
+                            source_bytes.len() as u64,
+                            "python parser",
+                        )
+                        .map_err(|error| anyhow!("global scan budget exhausted: {error}"))?;
+                    global_budget
+                        .consume(crate::budget::BudgetDimension::AstNodes, 1, "python AST")
+                        .map_err(|error| anyhow!("global scan budget exhausted: {error}"))?;
                     let started = std::time::Instant::now();
                     let empty_map = std::collections::BTreeSet::new();
                     if let Ok(semantic_findings) =

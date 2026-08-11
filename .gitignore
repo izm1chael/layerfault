@@ -18,3 +18,7 @@
 /scripts/lab-dev/*
 !/scripts/lab-dev/layerfault-master-harness.sh
 !/scripts/lab-dev/setup-layerfault-lab-deep.sh
+
+# Python bytecode caches
+__pycache__/
+*.py[cod]

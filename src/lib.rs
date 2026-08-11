@@ -10,6 +10,7 @@ pub mod audit;
 pub mod baseline;
 pub mod behaviour;
 pub mod binding;
+pub mod budget;
 pub mod certify;
 pub mod correlate;
 pub mod coverage;
