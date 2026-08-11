@@ -67,11 +67,19 @@ fn run_transformers_deadline(
         bail!("Transformers behavioural backend requires a local model package directory, not a standalone weight file");
     }
 
-    let model_identity = if model.is_dir() {
-        crate::package::fingerprint(model)?
+    let model_report = crate::package::inspect(model)?;
+    let model_identity = model_report.fingerprint.clone();
+    let staged_model = crate::binding::stage_verified_package(model, &model_report)?;
+    let staged_base = if let Some(base_path) = base {
+        let base_report = crate::package::inspect(base_path)?;
+        Some(crate::binding::stage_verified_package(
+            base_path,
+            &base_report,
+        )?)
     } else {
-        crate::modelmeta::build_snapshot(model)?.identity.canonical
+        None
     };
+
     let suite = super::probes::expand_mutations(
         super::probes::load_suite(suite_path)?,
         limits.max_mutations,
@@ -116,8 +124,8 @@ fn run_transformers_deadline(
 
     let sandboxed = super::sandbox::command_for(
         &executable,
-        model,
-        base,
+        staged_model.path(),
+        staged_base.as_ref().map(|b| b.path()),
         &runtime_support,
         &workspace,
         wrapper.as_ref(),
@@ -176,9 +184,13 @@ fn run_transformers_deadline(
     }
     heartbeat.update(format!("phase={phase_label} model-loading"));
     let started = Instant::now();
-    // Revalidate the exact executable bytes immediately before launch.
+    // Revalidate the exact executable bytes and staged packages immediately before launch.
     if hash_path(&executable)? != admitted_runtime_sha256 {
         bail!("Python runtime executable changed immediately before guarded launch");
+    }
+    staged_model.revalidate()?;
+    if let Some(b) = staged_base.as_ref() {
+        b.revalidate()?;
     }
     let mut child = command.spawn().with_context(|| {
         format!(
