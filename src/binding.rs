@@ -78,6 +78,33 @@ impl StagedArtifact {
     pub fn path(&self) -> &Path {
         &self.path
     }
+
+    pub fn revalidate(&self) -> Result<()> {
+        let expected =
+            self.record.sha256.as_deref().ok_or_else(|| {
+                anyhow!("Staged artifact has no recorded digest for revalidation")
+            })?;
+        let mut file = open_readonly_nofollow(&self.path)?;
+        let mut hasher = Sha256::new();
+        let mut buffer = [0u8; 1024 * 1024];
+        loop {
+            let count = file.read(&mut buffer)?;
+            if count == 0 {
+                break;
+            }
+            hasher.update(&buffer[..count]);
+        }
+        let observed = format!("sha256:{}", hex::encode(hasher.finalize()));
+        if !observed.eq_ignore_ascii_case(expected) {
+            bail!(
+                "Staged artifact digest changed before launch: expected {}, observed {}",
+                expected,
+                observed
+            );
+        }
+        Ok(())
+    }
+
     pub fn cleanup(mut self) -> Result<()> {
         let root = std::mem::take(&mut self.root);
         if root.as_os_str().is_empty() {
@@ -158,7 +185,7 @@ pub fn stage_verified_executable(path: &Path, expected_sha256: &str) -> Result<S
     stage_verified_under(path, expected_sha256, &parent, true)
 }
 
-fn stage_verified_under(
+pub fn stage_verified_under(
     path: &Path,
     expected_sha256: &str,
     parent: &Path,

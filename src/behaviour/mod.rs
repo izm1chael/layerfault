@@ -410,6 +410,7 @@ fn run_external_llama_active_deadline(
     }
     let model = resolve_gguf(model)?;
     let model_identity = crate::modelmeta::build_snapshot(&model)?.identity.canonical;
+    let staged_model = crate::binding::stage_verified(&model, &model_identity)?;
     let suite = probes::expand_mutations(probes::load_suite(suite_path)?, limits.max_mutations);
     let executable = match runtime_path {
         Some(path) => path.to_path_buf(),
@@ -423,7 +424,12 @@ fn run_external_llama_active_deadline(
     let canary_a = synthetic_canary(&model_identity, seed, "A");
     let canary_b = synthetic_canary(&model_identity, seed, "B");
     heartbeat.update(format!("phase={phase_label} model-loading"));
-    let mut session = runtime.open(&model, &[&canary_a, &canary_b], deadline.remaining())?;
+    staged_model.revalidate()?;
+    let mut session = runtime.open(
+        staged_model.path(),
+        &[&canary_a, &canary_b],
+        deadline.remaining(),
+    )?;
     heartbeat.update(format!("phase={phase_label} model-loaded"));
     let planned = suite
         .probes

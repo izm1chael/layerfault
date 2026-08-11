@@ -728,7 +728,12 @@ fn seccomp_filter_file() -> Result<File> {
 
 #[cfg(unix)]
 fn pin_active_path(path: &Path) -> Result<File> {
-    let file = File::open(path)
+    use std::os::unix::fs::OpenOptionsExt;
+    let mut options = std::fs::OpenOptions::new();
+    options.read(true);
+    options.custom_flags(libc::O_NOFOLLOW);
+    let file = options
+        .open(path)
         .with_context(|| format!("unable to pin active path '{}'", path.display()))?;
     // Clearing CLOEXEC is required because prlimit/strace may exec before
     // bwrap consumes the descriptor; `SandboxedCommand` keeps it alive.

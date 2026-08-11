@@ -127,6 +127,7 @@ impl RuntimeAdapter {
                 .arg("--no-cache-prompt")
                 .arg("--no-webui");
             let started = Instant::now();
+            runtime_binding.revalidate()?;
             let mut child = command.spawn().with_context(|| {
                 format!(
                     "unable to start persistent runtime '{}'",

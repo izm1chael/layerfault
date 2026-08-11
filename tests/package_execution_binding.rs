@@ -1,5 +1,6 @@
 use anyhow::Result;
 use layerfault::binding::{self, BindingKind};
+use sha2::{Digest, Sha256};
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
 
@@ -273,6 +274,89 @@ fn compound_base_plus_adapter_manifest() -> Result<()> {
 
     staged_adapter.cleanup()?;
     staged_base.cleanup()?;
+    let _ = fs::remove_dir_all(base);
+    Ok(())
+}
+
+#[test]
+fn mutate_gguf_source_after_staging_leaves_staged_copy_bound() -> Result<()> {
+    let base = std::env::temp_dir().join(format!(
+        "layerfault-gguf-binding-test-1-{}-{}",
+        std::process::id(),
+        layerfault::paths::now_unix()
+    ));
+    fs::create_dir_all(&base)?;
+    let model_path = base.join("model.gguf");
+    let original_bytes = b"GGUF_TEST_WEIGHT_BYTES_12345";
+    fs::write(&model_path, original_bytes)?;
+
+    let digest = format!("sha256:{}", hex::encode(Sha256::digest(original_bytes)));
+    let parent = base.join("staging_root");
+    let staged = binding::stage_verified_under(&model_path, &digest, &parent, false)?;
+
+    // Mutate original source file on host
+    fs::write(&model_path, b"CORRUPTED_MUTATED_WEIGHT_BYTES")?;
+
+    // Staged artifact remains intact and revalidation succeeds
+    staged.revalidate()?;
+    assert_eq!(fs::read(staged.path())?, original_bytes);
+
+    staged.cleanup()?;
+    let _ = fs::remove_dir_all(base);
+    Ok(())
+}
+
+#[test]
+fn mutate_staged_gguf_artifact_before_launch_fails_revalidation() -> Result<()> {
+    let base = std::env::temp_dir().join(format!(
+        "layerfault-gguf-binding-test-2-{}-{}",
+        std::process::id(),
+        layerfault::paths::now_unix()
+    ));
+    fs::create_dir_all(&base)?;
+    let model_path = base.join("model.gguf");
+    let original_bytes = b"GGUF_TEST_WEIGHT_BYTES_67890";
+    fs::write(&model_path, original_bytes)?;
+
+    let digest = format!("sha256:{}", hex::encode(Sha256::digest(original_bytes)));
+    let parent = base.join("staging_root");
+    let staged = binding::stage_verified_under(&model_path, &digest, &parent, false)?;
+
+    // Mutate staged copy directly (simulating pre-launch tampering inside staging dir)
+    let staged_file = staged.path();
+    fs::set_permissions(staged_file, fs::Permissions::from_mode(0o600))?;
+    fs::write(staged_file, b"HACKED_STAGED_BYTES")?;
+
+    // Pre-launch revalidation catches tampering
+    let result = staged.revalidate();
+    assert!(result.is_err());
+    let err = result.err().unwrap().to_string();
+    assert!(err.contains("Staged artifact digest changed before launch"));
+
+    staged.cleanup()?;
+    let _ = fs::remove_dir_all(base);
+    Ok(())
+}
+
+#[test]
+fn mutate_gguf_source_during_staging_fails() -> Result<()> {
+    let base = std::env::temp_dir().join(format!(
+        "layerfault-gguf-binding-test-3-{}-{}",
+        std::process::id(),
+        layerfault::paths::now_unix()
+    ));
+    fs::create_dir_all(&base)?;
+    let model_path = base.join("model.gguf");
+    fs::write(&model_path, b"ORIGINAL_GGUF_BYTES")?;
+
+    let wrong_digest = "sha256:0000000000000000000000000000000000000000000000000000000000000000";
+    let parent = base.join("staging_root");
+    let result = binding::stage_verified_under(&model_path, wrong_digest, &parent, false);
+
+    assert!(result.is_err());
+    let err = result.err().unwrap().to_string();
+    assert!(err.contains("Artifact changed between admission and execution binding"));
+
     let _ = fs::remove_dir_all(base);
     Ok(())
 }
