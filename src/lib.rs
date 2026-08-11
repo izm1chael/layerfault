@@ -36,6 +36,7 @@ pub mod lora;
 pub mod manifest;
 pub mod modeldiff;
 pub mod modelmeta;
+pub mod object_cache;
 pub mod observations;
 pub mod package;
 pub mod paths;

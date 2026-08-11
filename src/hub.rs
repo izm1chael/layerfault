@@ -404,6 +404,24 @@ impl HubClient {
 
         let destination = safe_destination(staging, &file.path)?;
         ensure_safe_staging_parent(staging, &file.path)?;
+
+        if crate::object_cache::enabled() {
+            if let (Some(expected_oid), Some(expected_size)) =
+                (expectation.sha256.as_deref(), expectation.size)
+            {
+                if let Ok(Some(cached)) = crate::object_cache::lookup_and_stage(
+                    expected_oid,
+                    expected_size,
+                    repo,
+                    revision,
+                    &file.path,
+                    &destination,
+                ) {
+                    return Ok(cached);
+                }
+            }
+        }
+
         let partial = destination.with_extension(format!(
             "{}.layerfault-part",
             destination
@@ -508,16 +526,30 @@ impl HubClient {
             }
         }
 
-        if destination.exists() {
-            let _ = std::fs::remove_file(&partial);
-            bail!(
-                "staging destination '{}' already exists",
-                destination.display()
-            );
+        if crate::object_cache::enabled() {
+            if let (Some(expected_oid), Some(expected_size)) =
+                (expectation.sha256.as_deref(), expectation.size)
+            {
+                if observed_sha256 == expected_oid {
+                    let _ = crate::object_cache::insert_verified_object(
+                        &partial,
+                        expected_oid,
+                        expected_size,
+                        repo,
+                        revision,
+                        &file.path,
+                        &destination,
+                    );
+                }
+            }
         }
-        if let Err(err) = std::fs::rename(&partial, &destination) {
-            let _ = std::fs::remove_file(&partial);
-            return Err(err).context("unable to promote partial file to final staging destination");
+
+        if !destination.exists() {
+            if let Err(err) = std::fs::rename(&partial, &destination) {
+                let _ = std::fs::remove_file(&partial);
+                return Err(err)
+                    .context("unable to promote partial file to final staging destination");
+            }
         }
 
         let integrity_result = if expectation.sha256.is_some() || expectation.size.is_some() {

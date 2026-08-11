@@ -445,6 +445,9 @@ pub(crate) fn run_gc(args: GcArgs) -> Result<()> {
     if matches!(args.target, GcTarget::ContentCache | GcTarget::All) {
         run_content_cache_gc(&args)?;
     }
+    if matches!(args.target, GcTarget::ObjectCache | GcTarget::All) {
+        run_object_cache_gc(&args)?;
+    }
     Ok(())
 }
 
@@ -495,6 +498,42 @@ fn run_content_cache_gc(args: &GcArgs) -> Result<()> {
     if args.execute {
         let removed = content_cache::gc::execute(&plan)?;
         println!("Removed {removed} content-cache records");
+    }
+    Ok(())
+}
+
+fn run_object_cache_gc(args: &GcArgs) -> Result<()> {
+    let plan = layerfault::object_cache::gc::plan()?;
+    if args.json {
+        println!(
+            "{}",
+            serde_json::json!({
+                "total_entries": plan.total_entries,
+                "total_bytes": plan.total_bytes,
+                "free_disk_bytes": plan.free_disk_bytes,
+                "evict_candidates": plan.candidates.len(),
+                "bytes_reclaimable": plan.bytes_to_reclaim,
+                "stale_part_files": plan.stale_part_files.len(),
+            })
+        );
+    } else {
+        println!("Object cache entries: {}", plan.total_entries);
+        println!("Object cache bytes: {}", plan.total_bytes);
+        println!(
+            "Eviction candidates: {} ({} bytes reclaimable)",
+            plan.candidates.len(),
+            plan.bytes_to_reclaim
+        );
+        if !plan.stale_part_files.is_empty() {
+            println!(
+                "Stale .layerfault-part files: {}",
+                plan.stale_part_files.len()
+            );
+        }
+    }
+    if args.execute {
+        let removed = layerfault::object_cache::gc::execute(&plan)?;
+        println!("Removed {removed} bytes of object-cache records");
     }
     Ok(())
 }

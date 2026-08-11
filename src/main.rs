@@ -944,7 +944,9 @@ enum GcTarget {
     Blobs,
     /// The content-sha256-keyed structural/Python evidence cache.
     ContentCache,
-    /// Both of the above.
+    /// The verified Hugging Face content object cache.
+    ObjectCache,
+    /// All of the above.
     All,
 }
 
