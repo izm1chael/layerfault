@@ -222,6 +222,12 @@ pub(crate) struct InspectArgs {
     json: bool,
     #[arg(long, default_value_t = false)]
     normalized: bool,
+    #[arg(long, default_value_t = false)]
+    pub(crate) incremental: bool,
+    #[arg(long, default_value_t = false)]
+    pub(crate) validate_incremental: bool,
+    #[arg(long)]
+    pub(crate) previous_state: Option<PathBuf>,
     #[arg(long, default_value = "default")]
     budget_profile: String,
     #[arg(long)]

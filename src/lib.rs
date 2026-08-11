@@ -29,6 +29,7 @@ pub mod formats;
 pub mod gc;
 pub mod hashcache;
 pub mod hub;
+pub mod incremental;
 pub mod inventory;
 pub mod judge;
 pub mod lineage;

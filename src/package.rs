@@ -34,7 +34,7 @@ pub struct PackageMerkleLeaf {
     pub leaf_hash: String,
 }
 
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct PackageEntry {
     pub relative_path: String,
     pub kind: String,
@@ -44,7 +44,7 @@ pub struct PackageEntry {
     pub digest_cache: Option<String>,
 }
 
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct PackageReport {
     pub root: String,
     pub fingerprint: String,
@@ -62,6 +62,8 @@ pub struct PackageReport {
     pub coverage: crate::coverage::Coverage,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub metrics: Option<crate::scanner::ScanMetrics>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub incremental_diagnostics: Option<crate::incremental::IncrementalDiagnostics>,
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
@@ -386,6 +388,7 @@ pub fn inspect_with_budget(
         correlations,
         coverage,
         metrics: Some(aggregate_metrics),
+        incremental_diagnostics: None,
     })
 }
 

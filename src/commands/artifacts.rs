@@ -13,7 +13,47 @@ pub(crate) fn run_inspect(args: InspectArgs) -> Result<()> {
     }
 
     if args.path.is_dir() {
-        let result = package::inspect_with_budget(&args.path, &budget)?;
+        let previous_state = if let Some(state_path) = &args.previous_state {
+            let bytes = std::fs::read(state_path).with_context(|| {
+                format!(
+                    "Unable to read previous state file '{}'",
+                    state_path.display()
+                )
+            })?;
+            let state: layerfault::incremental::IncrementalScanState =
+                serde_json::from_slice(&bytes).with_context(|| {
+                    format!(
+                        "Unable to parse previous state file '{}'",
+                        state_path.display()
+                    )
+                })?;
+            Some(state)
+        } else {
+            None
+        };
+
+        let options = layerfault::incremental::IncrementalOptions {
+            force_full: !args.incremental
+                && !args.validate_incremental
+                && std::env::var("LAYERFAULT_INCREMENTAL").is_err()
+                && std::env::var("LAYERFAULT_VALIDATE_INCREMENTAL").is_err()
+                && previous_state.is_none(),
+            validate_incremental: args.validate_incremental
+                || std::env::var("LAYERFAULT_VALIDATE_INCREMENTAL")
+                    .ok()
+                    .map(|v| {
+                        matches!(
+                            v.trim().to_ascii_lowercase().as_str(),
+                            "1" | "true" | "yes" | "on"
+                        )
+                    })
+                    .unwrap_or(false),
+            previous_state,
+            save_state: true,
+        };
+
+        let result =
+            layerfault::incremental::inspect_incremental_with_budget(&args.path, &budget, options)?;
         if args.json {
             println!(
                 "{}",
@@ -560,6 +600,19 @@ fn print_package_report(report: &package::PackageReport) {
         report.files.len(),
         report.total_bytes
     );
+    if let Some(diag) = &report.incremental_diagnostics {
+        println!("Analysis Mode: {}", diag.analysis_mode);
+        if let Some(prev) = &diag.previous_package_identity {
+            println!("Previous Package Identity: {prev}");
+        }
+        println!("Members Reused: {}", diag.members_reused);
+        println!("Members Rescanned: {}", diag.members_rescanned);
+        println!(
+            "Relationships Recomputed: {}",
+            diag.relationships_recomputed
+        );
+        println!("Intrinsic Cache Hits: {}", diag.intrinsic_cache_hits);
+    }
     print_actionable_findings(&report.findings);
 }
 
