@@ -179,6 +179,7 @@ pub fn read_all_from_file(file: &File, max_bytes: u64) -> Result<Vec<u8>> {
     if bytes.len() as u64 > max_bytes {
         return Err(anyhow!("File exceeded the configured read safety limit"));
     }
+    crate::perf_metrics::record_physical_bytes(bytes.len() as u64);
     Ok(bytes)
 }
 
@@ -192,6 +193,7 @@ pub fn sha256_path(path: &Path) -> Result<String> {
         if n == 0 {
             break;
         }
+        crate::perf_metrics::record_physical_bytes(n as u64);
         hasher.update(&buffer[..n]);
     }
     Ok(format!("sha256:{}", hex::encode(hasher.finalize())))

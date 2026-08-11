@@ -499,6 +499,7 @@ fn decompress_member_to_tempfile<R: Read>(
         hasher.update(&buffer[..count]);
         temp.write_all(&buffer[..count])
             .map_err(|e| e.to_string())?;
+        crate::perf_metrics::record_temp_disk_bytes(count as u64);
     }
 
     temp.flush().map_err(|e| e.to_string())?;

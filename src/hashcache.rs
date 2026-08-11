@@ -194,6 +194,7 @@ where
             let guard = cache_validation_sha256(file, before.len, None)?;
             let after = capture_identity(path, file)?;
             if after == before && guard == record.guard_sha256 {
+                crate::perf_metrics::record_cache_hit();
                 return Ok((
                     HashOutcome {
                         sha256: record.sha256,
@@ -205,6 +206,7 @@ where
             }
         }
     }
+    crate::perf_metrics::record_cache_miss();
 
     let sha256 = sha256_uncached_prefixed_with_observer(file, &mut observe)?;
     let after = capture_identity(path, file)?;
@@ -323,13 +325,16 @@ where
         || record.identity != current
         || record.discriminator != discriminator
     {
+        crate::perf_metrics::record_cache_miss();
         return Ok(None);
     }
     let guard = cache_validation_sha256(file, current.len, None)?;
     let after = capture_identity(path, file)?;
     if after != current || guard != record.guard_sha256 {
+        crate::perf_metrics::record_cache_miss();
         return Ok(None);
     }
+    crate::perf_metrics::record_cache_hit();
     Ok(Some(record.value))
 }
 

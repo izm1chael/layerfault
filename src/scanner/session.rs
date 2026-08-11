@@ -36,22 +36,27 @@ pub struct ScanMetrics {
 impl ScanMetrics {
     pub fn record_sequential_read(&mut self, bytes: u64) {
         self.bytes_read_sequential = self.bytes_read_sequential.saturating_add(bytes);
+        crate::perf_metrics::record_physical_bytes(bytes);
     }
 
     pub fn record_full_pass(&mut self) {
         self.full_passes = self.full_passes.saturating_add(1);
+        crate::perf_metrics::record_full_file_pass();
     }
 
     pub fn record_cache_hit(&mut self) {
         self.cache_hits = self.cache_hits.saturating_add(1);
+        crate::perf_metrics::record_cache_hit();
     }
 
     pub fn record_cache_miss(&mut self) {
         self.cache_misses = self.cache_misses.saturating_add(1);
+        crate::perf_metrics::record_cache_miss();
     }
 
     pub fn record_random_read(&mut self, bytes: u64) {
         self.random_read_bytes = self.random_read_bytes.saturating_add(bytes);
+        crate::perf_metrics::record_physical_bytes(bytes);
     }
 }
 
@@ -345,6 +350,7 @@ impl<'a> ScanSession<'a> {
     pub fn new(path: &'a Path, file: &'a File) -> Result<Self> {
         let identity_before = capture_identity(path, file)?;
         let size = identity_before.len();
+        crate::perf_metrics::record_logical_bytes(size);
         Ok(Self {
             path,
             file,
