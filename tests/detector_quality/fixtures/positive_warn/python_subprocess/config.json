@@ -1,0 +1,1 @@
+{"architectures": ["SubprocessModel"], "auto_map": {"AutoModel": "modeling.SubprocessModel"}}

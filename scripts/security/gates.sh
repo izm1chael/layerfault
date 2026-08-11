@@ -265,4 +265,7 @@ PY
 # Differential parser compatibility validation gate
 bash scripts/security/differential-parsers.sh "$ROOT" >/dev/null
 
+# Permanent semantic detector quality and false-positive/false-negative regression gate
+python3 scripts/corpus/detector-quality-gate.py --binary "$BIN" >/dev/null
+
 echo "PASS: Layerfault development admission/sources/formats/trust/policy/baseline/quarantine/inventory gate"

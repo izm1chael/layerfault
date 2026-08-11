@@ -1,0 +1,1 @@
+{"architectures": ["WhitespaceModel"], "auto_map": {"AutoModel": "modeling_ws.WhitespaceModel"}}

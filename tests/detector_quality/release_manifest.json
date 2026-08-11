@@ -1,0 +1,159 @@
+{
+  "version": 1,
+  "suite": "scheduled_release",
+  "description": "Detector Quality and False-Positive/False-Negative Regression Corpus (Scheduled Release Suite)",
+  "fixtures": [
+    {
+      "id": "positive-block-pickle-eval",
+      "category": "positive_block",
+      "description": "Pickle artifact containing dangerous eval/system opcodes",
+      "command": {
+        "kind": "inspect",
+        "path": "tests/detector_quality/fixtures/positive_block/malicious_pickle_eval/model.pkl"
+      },
+      "expected": {
+        "overall": "BLOCK",
+        "exit_code": 3,
+        "must_include_rules": [
+          "LF-PICKLE-DANGEROUS-GLOBAL"
+        ],
+        "must_not_include_rules": []
+      }
+    },
+    {
+      "id": "positive-block-safetensors-bounds",
+      "category": "positive_block",
+      "description": "Safetensors file with out-of-bounds header tensor offsets",
+      "command": {
+        "kind": "inspect",
+        "path": "tests/detector_quality/fixtures/positive_block/safetensors_out_of_bounds/bad.safetensors"
+      },
+      "expected": {
+        "overall": "BLOCK",
+        "exit_code": 3,
+        "must_include_rules": [
+          "LF-SAFE-STRUCT"
+        ],
+        "must_not_include_rules": []
+      }
+    },
+    {
+      "id": "positive-warn-python-subprocess",
+      "category": "positive_warn",
+      "description": "Python package invoking subprocess.Popen in auto_map module",
+      "command": {
+        "kind": "verify-package",
+        "path": "tests/detector_quality/fixtures/positive_warn/python_subprocess",
+        "policy": "workstation"
+      },
+      "expected": {
+        "overall": "WARN",
+        "exit_code": 1,
+        "must_include_rules": [
+          "LF-PY-CALL-PROCESS",
+          "LF-CODE-SUBPROCESS"
+        ],
+        "must_not_include_rules": [
+          "LF-PY-CALL-NETWORK"
+        ]
+      }
+    },
+    {
+      "id": "negative-benign-subprocess-docstring",
+      "category": "negative_benign",
+      "description": "Python module with subprocess mentioned only in comments/docstrings",
+      "command": {
+        "kind": "verify-package",
+        "path": "tests/detector_quality/fixtures/negative_benign/subprocess_in_docstring",
+        "policy": "workstation"
+      },
+      "expected": {
+        "overall": "WARN",
+        "exit_code": 1,
+        "must_include_rules": [
+          "LF-PACKAGE-CODE"
+        ],
+        "must_not_include_rules": [
+          "LF-PY-CALL-PROCESS",
+          "LF-CODE-SUBPROCESS"
+        ]
+      }
+    },
+    {
+      "id": "correlation-positive-automap-subprocess",
+      "category": "correlation_positive",
+      "description": "Package linking auto_map config to subprocess call in modeling module",
+      "command": {
+        "kind": "verify-package",
+        "path": "tests/detector_quality/fixtures/correlation_positive/automap_subprocess",
+        "policy": "workstation"
+      },
+      "expected": {
+        "overall": "WARN",
+        "exit_code": 1,
+        "must_include_rules": [
+          "LF-CORR-HF-LOADER-PROCESS",
+          "LF-PY-CALL-PROCESS"
+        ],
+        "must_not_include_rules": []
+      }
+    },
+    {
+      "id": "evasion-variant-alias-import",
+      "category": "evasion_variant",
+      "description": "Alias import of subprocess (import subprocess as sp)",
+      "command": {
+        "kind": "verify-package",
+        "path": "tests/detector_quality/fixtures/evasion_variant/alias_import",
+        "policy": "workstation"
+      },
+      "expected": {
+        "overall": "WARN",
+        "exit_code": 1,
+        "must_include_rules": [
+          "LF-PY-CALL-PROCESS"
+        ],
+        "must_not_include_rules": []
+      }
+    },
+    {
+      "id": "redaction-secret-in-code",
+      "category": "redaction",
+      "description": "Secret API key in code file containing findings",
+      "command": {
+        "kind": "verify-package",
+        "path": "tests/detector_quality/fixtures/redaction/secret_in_code",
+        "policy": "workstation"
+      },
+      "expected": {
+        "overall": "WARN",
+        "exit_code": 1,
+        "must_include_rules": [
+          "LF-PY-CALL-PROCESS"
+        ],
+        "must_not_include_rules": [],
+        "evidence_predicates": {
+          "no_secret_leak": "sk_live_12345678901234567890123456789012"
+        }
+      }
+    },
+    {
+      "id": "coverage-incomplete-unparseable-python",
+      "category": "coverage_incomplete",
+      "description": "Unparseable Python file triggers semantic incompleteness finding without silent PASS",
+      "command": {
+        "kind": "verify-package",
+        "path": "tests/detector_quality/fixtures/coverage_incomplete/unparseable_python",
+        "policy": "workstation"
+      },
+      "expected": {
+        "overall": "WARN",
+        "exit_code": 1,
+        "must_include_rules": [
+          "LF-PY-SEMANTIC-INCOMPLETE"
+        ],
+        "must_not_include_rules": []
+      }
+    }
+  ]
+}

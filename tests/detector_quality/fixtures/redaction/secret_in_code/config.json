@@ -1,0 +1,1 @@
+{"architectures": ["SecretModel"], "auto_map": {"AutoModel": "modeling_secret.SecretModel"}}

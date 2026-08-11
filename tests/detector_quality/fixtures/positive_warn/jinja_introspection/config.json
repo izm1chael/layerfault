@@ -1,0 +1,1 @@
+{"tokenizer_config": {"chat_template": "{{ self.__class__.__mro__[1].__subclasses__() }}"}}

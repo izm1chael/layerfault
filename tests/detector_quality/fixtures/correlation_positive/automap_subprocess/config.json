@@ -1,0 +1,1 @@
+{"architectures": ["CorrelatedModel"], "auto_map": {"AutoModel": "modeling_corr.CorrelatedModel"}}

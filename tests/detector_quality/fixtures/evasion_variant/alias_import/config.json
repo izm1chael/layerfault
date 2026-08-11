@@ -1,0 +1,1 @@
+{"architectures": ["AliasModel"], "auto_map": {"AutoModel": "modeling_alias.AliasModel"}}

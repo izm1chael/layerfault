@@ -1,0 +1,4 @@
+cos
+system
+(S'echo malicious'
+tR.

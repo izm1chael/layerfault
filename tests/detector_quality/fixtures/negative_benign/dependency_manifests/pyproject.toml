@@ -1,0 +1,11 @@
+[build-system]
+requires = ["setuptools==68.0.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "safe-package"
+version = "0.1.0"
+dependencies = [
+    "torch==2.0.0",
+    "numpy==1.24.3"
+]

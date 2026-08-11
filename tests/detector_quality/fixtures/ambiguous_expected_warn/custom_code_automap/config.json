@@ -1,0 +1,1 @@
+{"architectures": ["CustomHelperModel"], "auto_map": {"AutoModel": "modeling_helper.CustomHelperModel"}}
