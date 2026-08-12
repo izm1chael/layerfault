@@ -42,6 +42,9 @@ if suppressions != 34:
     raise SystemExit(f'expected exactly 34 reviewed nosemgrep annotations, found {suppressions}; review docs/STATIC_ANALYSIS.md before changing the exception surface')
 PY
 
+log "Repository architecture substance gate"
+bash scripts/security/architecture-gates.sh "$ROOT"
+
 log "Rust formatting / compile / tests / Clippy"
 cargo fmt --all -- --check
 cargo check --locked --all-targets
