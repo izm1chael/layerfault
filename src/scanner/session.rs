@@ -6,11 +6,11 @@
 //! sharing and strict TOCTOU identity validation.
 
 use crate::finding_evidence::{file_member, EvidenceSubject, FindingBuilder};
-use crate::hashcache::{
+use crate::scanner::binary::BinaryStreamScanner;
+use crate::scanner::cache::identity::{
     capture_identity, digest_eligible, evidence_eligible, load_evidence, store_evidence,
     FileIdentity,
 };
-use crate::scanner::binary::BinaryStreamScanner;
 use crate::scanner::{scratch, CheckType, Confidence, FindingClass, LayerScanResult, ScanStatus};
 use anyhow::{anyhow, Result};
 use sha2::{Digest, Sha256};
@@ -384,7 +384,9 @@ impl<'a> ScanSession<'a> {
         let mut needs_digest = true;
 
         if digest_eligible(self.size) {
-            if let Ok(outcome) = crate::hashcache::sha256_prefixed(self.path, self.file) {
+            if let Ok(outcome) =
+                crate::scanner::cache::identity::sha256_prefixed(self.path, self.file)
+            {
                 if outcome.cache_hit {
                     cached_digest = Some(outcome.sha256);
                     needs_digest = false;

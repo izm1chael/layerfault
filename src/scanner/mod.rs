@@ -1,4 +1,5 @@
 pub mod binary;
+pub mod cache;
 pub mod config;
 pub mod heuristics;
 pub mod integrity;
