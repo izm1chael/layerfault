@@ -87,6 +87,69 @@
       }
     },
     {
+      "id": "positive-warn-shell-curl-pipe-sh",
+      "category": "positive_warn",
+      "description": "Shell install script piping a curl download into sh (supply-chain composite pattern)",
+      "command": {
+        "kind": "verify-package",
+        "path": "tests/detector_quality/fixtures/positive_warn/shell_curl_pipe_sh",
+        "policy": "workstation"
+      },
+      "expected": {
+        "overall": "WARN",
+        "exit_code": 1,
+        "must_include_rules": [
+          "LF-SHELL-SEMANTIC-CURL-PIPE-SH"
+        ],
+        "must_not_include_rules": [],
+        "evidence_predicates": {
+          "subject_path": "install.sh"
+        }
+      }
+    },
+    {
+      "id": "positive-warn-powershell-download-execute",
+      "category": "positive_warn",
+      "description": "PowerShell install script piping a remote download into Invoke-Expression (irm|iex supply-chain composite pattern)",
+      "command": {
+        "kind": "verify-package",
+        "path": "tests/detector_quality/fixtures/positive_warn/powershell_download_execute",
+        "policy": "workstation"
+      },
+      "expected": {
+        "overall": "WARN",
+        "exit_code": 1,
+        "must_include_rules": [
+          "LF-PS-SEMANTIC-DOWNLOAD-EXECUTE"
+        ],
+        "must_not_include_rules": [],
+        "evidence_predicates": {
+          "subject_path": "install.ps1"
+        }
+      }
+    },
+    {
+      "id": "positive-warn-javascript-child-process",
+      "category": "positive_warn",
+      "description": "JavaScript install script destructuring child_process.exec via require() and invoking it",
+      "command": {
+        "kind": "verify-package",
+        "path": "tests/detector_quality/fixtures/positive_warn/javascript_child_process",
+        "policy": "workstation"
+      },
+      "expected": {
+        "overall": "WARN",
+        "exit_code": 1,
+        "must_include_rules": [
+          "LF-JS-SEMANTIC-PROCESS"
+        ],
+        "must_not_include_rules": [],
+        "evidence_predicates": {
+          "subject_path": "install.js"
+        }
+      }
+    },
+    {
       "id": "negative-benign-subprocess-docstring",
       "category": "negative_benign",
       "description": "Python module with subprocess mentioned only in comments/docstrings",
@@ -418,6 +481,152 @@
           "LF-PY-SEMANTIC-INCOMPLETE"
         ],
         "must_not_include_rules": []
+      }
+    },
+    {
+      "id": "coverage-incomplete-unparseable-shell",
+      "category": "coverage_incomplete",
+      "description": "Unterminated quote in a shell script triggers semantic incompleteness finding without silent PASS",
+      "command": {
+        "kind": "verify-package",
+        "path": "tests/detector_quality/fixtures/coverage_incomplete/unparseable_shell",
+        "policy": "workstation"
+      },
+      "expected": {
+        "overall": "WARN",
+        "exit_code": 1,
+        "must_include_rules": [
+          "LF-SHELL-SEMANTIC-INCOMPLETE"
+        ],
+        "must_not_include_rules": []
+      }
+    },
+    {
+      "id": "coverage-incomplete-unparseable-powershell",
+      "category": "coverage_incomplete",
+      "description": "Unterminated here-string in a PowerShell script triggers semantic incompleteness finding without silent PASS",
+      "command": {
+        "kind": "verify-package",
+        "path": "tests/detector_quality/fixtures/coverage_incomplete/unparseable_powershell",
+        "policy": "workstation"
+      },
+      "expected": {
+        "overall": "WARN",
+        "exit_code": 1,
+        "must_include_rules": [
+          "LF-PS-SEMANTIC-INCOMPLETE"
+        ],
+        "must_not_include_rules": []
+      }
+    },
+    {
+      "id": "coverage-incomplete-unparseable-javascript",
+      "category": "coverage_incomplete",
+      "description": "Unbalanced braces in a JavaScript file trigger semantic incompleteness finding without silent PASS",
+      "command": {
+        "kind": "verify-package",
+        "path": "tests/detector_quality/fixtures/coverage_incomplete/unparseable_javascript",
+        "policy": "workstation"
+      },
+      "expected": {
+        "overall": "WARN",
+        "exit_code": 1,
+        "must_include_rules": [
+          "LF-JS-SEMANTIC-INCOMPLETE"
+        ],
+        "must_not_include_rules": []
+      }
+    },
+    {
+      "id": "correlation-positive-shell-package-install",
+      "category": "correlation_positive",
+      "description": "Package linking auto_map config to a pip-install shell script",
+      "command": {
+        "kind": "verify-package",
+        "path": "tests/detector_quality/fixtures/correlation_positive/shell_package_install",
+        "policy": "workstation"
+      },
+      "expected": {
+        "overall": "WARN",
+        "exit_code": 1,
+        "must_include_rules": [
+          "LF-CODE-AUTO-MAP",
+          "LF-SHELL-SEMANTIC-PACKAGE-INSTALL"
+        ],
+        "must_not_include_rules": [],
+        "evidence_predicates": {
+          "correlation_id": "LF-CORR-RUNTIME-INSTALL",
+          "subject_path": "setup_install.sh"
+        }
+      }
+    },
+    {
+      "id": "correlation-positive-powershell-package-install",
+      "category": "correlation_positive",
+      "description": "Package linking auto_map config to an Install-Module PowerShell script",
+      "command": {
+        "kind": "verify-package",
+        "path": "tests/detector_quality/fixtures/correlation_positive/powershell_package_install",
+        "policy": "workstation"
+      },
+      "expected": {
+        "overall": "WARN",
+        "exit_code": 1,
+        "must_include_rules": [
+          "LF-CODE-AUTO-MAP",
+          "LF-PS-SEMANTIC-PACKAGE-INSTALL"
+        ],
+        "must_not_include_rules": [],
+        "evidence_predicates": {
+          "correlation_id": "LF-CORR-RUNTIME-INSTALL",
+          "subject_path": "setup_install.ps1"
+        }
+      }
+    },
+    {
+      "id": "correlation-positive-javascript-package-install",
+      "category": "correlation_positive",
+      "description": "Package linking auto_map config to an npm-install-shelling-out JavaScript script",
+      "command": {
+        "kind": "verify-package",
+        "path": "tests/detector_quality/fixtures/correlation_positive/javascript_package_install",
+        "policy": "workstation"
+      },
+      "expected": {
+        "overall": "WARN",
+        "exit_code": 1,
+        "must_include_rules": [
+          "LF-CODE-AUTO-MAP",
+          "LF-JS-SEMANTIC-PACKAGE-INSTALL"
+        ],
+        "must_not_include_rules": [],
+        "evidence_predicates": {
+          "correlation_id": "LF-CORR-RUNTIME-INSTALL",
+          "subject_path": "setup_install.js"
+        }
+      }
+    },
+    {
+      "id": "correlation-positive-javascript-npm-install-hook",
+      "category": "correlation_positive",
+      "description": "package.json postinstall hook referencing a JavaScript file that shells out via child_process.exec",
+      "command": {
+        "kind": "verify-package",
+        "path": "tests/detector_quality/fixtures/correlation_positive/javascript_npm_install_hook",
+        "policy": "workstation"
+      },
+      "expected": {
+        "overall": "WARN",
+        "exit_code": 1,
+        "must_include_rules": [
+          "LF-DEP-NPM-INSTALL-HOOK",
+          "LF-JS-SEMANTIC-PACKAGE-INSTALL"
+        ],
+        "must_not_include_rules": [],
+        "evidence_predicates": {
+          "correlation_id": "LF-CORR-NPM-INSTALL-HOOK-CAPABILITY",
+          "subject_path": "install.js"
+        }
       }
     }
   ]

@@ -1,0 +1,2 @@
+$x = @"
+unterminated here-string

@@ -60,6 +60,61 @@ const CAPABILITY_RULES: &[(&str, &str, &str)] = &[
         "LF-CORR-RUNTIME-INSTALL",
         "package-manager invocation",
     ),
+    (
+        "LF-SHELL-SEMANTIC-PROCESS",
+        "LF-CORR-CUSTOM-LOADER-PROCESS",
+        "process-execution",
+    ),
+    (
+        "LF-SHELL-SEMANTIC-CURL-PIPE-SH",
+        "LF-CORR-CUSTOM-LOADER-NETWORK",
+        "outbound network",
+    ),
+    (
+        "LF-SHELL-SEMANTIC-PACKAGE-INSTALL",
+        "LF-CORR-RUNTIME-INSTALL",
+        "package-manager invocation",
+    ),
+    (
+        "LF-PS-SEMANTIC-DOWNLOAD-EXECUTE",
+        "LF-CORR-CUSTOM-LOADER-NETWORK",
+        "outbound network",
+    ),
+    (
+        "LF-PS-SEMANTIC-PROCESS",
+        "LF-CORR-CUSTOM-LOADER-PROCESS",
+        "process-execution",
+    ),
+    (
+        "LF-PS-SEMANTIC-PACKAGE-INSTALL",
+        "LF-CORR-RUNTIME-INSTALL",
+        "package-manager invocation",
+    ),
+    (
+        "LF-JS-SEMANTIC-PROCESS",
+        "LF-CORR-CUSTOM-LOADER-PROCESS",
+        "process-execution",
+    ),
+    (
+        "LF-JS-SEMANTIC-NETWORK",
+        "LF-CORR-CUSTOM-LOADER-NETWORK",
+        "outbound network",
+    ),
+    (
+        "LF-JS-SEMANTIC-DYNAMIC-CODE",
+        "LF-CORR-CUSTOM-LOADER-EVAL",
+        "dynamic code evaluation",
+    ),
+    (
+        "LF-JS-SEMANTIC-NATIVE-LOAD",
+        "LF-CORR-CUSTOM-LOADER-NATIVE",
+        "native library loading",
+    ),
+    (
+        "LF-JS-SEMANTIC-PACKAGE-INSTALL",
+        "LF-CORR-RUNTIME-INSTALL",
+        "package-manager invocation",
+    ),
 ];
 
 /// Rules describing a setup.py install/build hook's own capability, correlated
@@ -71,6 +126,24 @@ const INSTALL_HOOK_CAPABILITY_RULES: &[&str] = &[
     "LF-CODE-EVAL",
     "LF-CODE-EXEC",
     "LF-DEP-RUNTIME-INSTALL",
+];
+
+/// Capability rules an npm install-hook's *referenced* script (a different
+/// file than `package.json` itself) may carry. Unlike
+/// `INSTALL_HOOK_CAPABILITY_RULES` (same-subject match against
+/// `LF-DEP-INSTALL-HOOK`), `LF-DEP-NPM-INSTALL-HOOK` names a *reference* to
+/// another file, so this table is matched by resolved script path, not by
+/// subject equality with the hook finding itself — see
+/// `npm_install_hook_chains`.
+const NPM_INSTALL_HOOK_CAPABILITY_RULES: &[&str] = &[
+    "LF-JS-SEMANTIC-PROCESS",
+    "LF-JS-SEMANTIC-DYNAMIC-CODE",
+    "LF-JS-SEMANTIC-NETWORK",
+    "LF-JS-SEMANTIC-NATIVE-LOAD",
+    "LF-JS-SEMANTIC-PACKAGE-INSTALL",
+    "LF-SHELL-SEMANTIC-PROCESS",
+    "LF-SHELL-SEMANTIC-CURL-PIPE-SH",
+    "LF-SHELL-SEMANTIC-PACKAGE-INSTALL",
 ];
 
 const LIMITATION: &str = "Static analysis establishes the reference and the capability, \
@@ -88,7 +161,71 @@ pub fn correlate(findings: &[LayerScanResult]) -> Vec<FindingCorrelation> {
     out.extend(template_chains(findings));
     out.extend(native_extension_chains(findings));
     out.extend(install_hook_capability_chains(findings));
+    out.extend(npm_install_hook_chains(findings));
     sort_correlations(&mut out);
+    out
+}
+
+/// An npm install-hook (`LF-DEP-NPM-INSTALL-HOOK`, from `package.json`'s
+/// `scripts.preinstall`/`install`/`postinstall`) correlated with a
+/// capability finding in the *referenced* script file — a cross-file match
+/// by resolved path (structurally closer to `custom_loader_chains`'
+/// reference-resolution than `install_hook_capability_chains`'s
+/// same-subject match, since the hook and the capability live in different
+/// package members).
+fn npm_install_hook_chains(findings: &[LayerScanResult]) -> Vec<FindingCorrelation> {
+    let mut out = Vec::new();
+    for hook in findings
+        .iter()
+        .filter(|finding| matches_rule(finding, &["LF-DEP-NPM-INSTALL-HOOK"]))
+    {
+        let Some(hook_member) = subject_name(hook) else {
+            continue;
+        };
+        let Some(referenced_script) = hook
+            .evidence
+            .iter()
+            .find_map(|record| record.structured.as_ref())
+            .and_then(|structured| structured.get("referenced_script"))
+            .and_then(serde_json::Value::as_str)
+        else {
+            continue;
+        };
+        for capability in findings.iter().filter(|finding| {
+            matches_rule(finding, NPM_INSTALL_HOOK_CAPABILITY_RULES)
+                && subject_name(finding)
+                    .is_some_and(|member| module_match_str(referenced_script, member).is_some())
+        }) {
+            let rule_id = crate::policy::rule_id(capability);
+            let capability_member = subject_name(capability).unwrap_or(referenced_script);
+            out.push(FindingCorrelation {
+                id: "LF-CORR-NPM-INSTALL-HOOK-CAPABILITY".to_owned(),
+                finding_ids: finding_ids(&[hook, capability]),
+                rule_ids: rule_ids(&[hook, capability]),
+                summary: format!(
+                    "'{hook_member}' declares an npm install-hook script referencing '{referenced_script}', \
+                     and '{capability_member}' contains a {rule_id} capability. Install-time hooks run before \
+                     a reviewer would normally inspect runtime application code."
+                ),
+                confidence: Confidence::High,
+                evidence: vec![path_relationship(
+                    EvidenceSubject::member(capability_member),
+                    "npm install-hook reference resolves to the file containing the capability",
+                    serde_json::json!({
+                        "hook_member": hook_member,
+                        "referenced_script": referenced_script,
+                        "resolved_module_path": capability_member,
+                        "capability_rule": rule_id,
+                    }),
+                )],
+                limitations: Some(
+                    "Layerfault has not established that npm actually invokes this exact hook for a \
+                     given install command, or that the capability executes unconditionally within it."
+                        .to_owned(),
+                ),
+            });
+        }
+    }
     out
 }
 
@@ -361,6 +498,14 @@ fn referenced_modules(finding: &LayerScanResult) -> Vec<ModuleReference> {
             // prefixed with `repo--`. The module is everything before the
             // final class segment.
             let cleaned = symbol.rsplit("--").next().unwrap_or(&symbol).to_owned();
+            if let Some(module_path) = script_file_reference(&cleaned) {
+                out.push(ModuleReference {
+                    key: key.clone(),
+                    symbol: symbol.clone(),
+                    module_path,
+                });
+                continue;
+            }
             let Some((module, _class)) = cleaned.rsplit_once('.') else {
                 continue;
             };
@@ -375,6 +520,28 @@ fn referenced_modules(finding: &LayerScanResult) -> Vec<ModuleReference> {
         }
     }
     out
+}
+
+/// When a loader-metadata symbol already names a concrete non-Python script
+/// file (ends in a recognized shell/PowerShell/JavaScript-TypeScript
+/// extension), treat it as a literal path reference rather than a
+/// `module.ClassName` dotted path -- there is no "class" segment to strip.
+/// This lets shell/PowerShell/JS loader references (e.g. a config value
+/// naming `install.sh` or `setup_install.js` directly) resolve through the
+/// same `custom_loader_chains` mechanism Python's `module.ClassName`
+/// auto_map values use, without disturbing that existing Python-shaped
+/// resolution for values that don't already carry a script extension.
+fn script_file_reference(value: &str) -> Option<String> {
+    let lower = value.to_ascii_lowercase();
+    for ext in [
+        ".sh", ".bash", ".zsh", ".ps1", ".psm1", ".psd1", ".js", ".mjs", ".cjs", ".ts", ".tsx",
+        ".jsx",
+    ] {
+        if lower.ends_with(ext) {
+            return Some(value.to_owned());
+        }
+    }
+    None
 }
 
 fn symbol_strings(value: &serde_json::Value) -> Vec<String> {
@@ -400,6 +567,28 @@ fn module_match(reference: &ModuleReference, member: &str) -> Option<Confidence>
     let module_base = module_lower.rsplit('/').next().unwrap_or(&module_lower);
     let member_base = member_lower.rsplit('/').next().unwrap_or(&member_lower);
     if module_base == member_base {
+        return Some(Confidence::Medium);
+    }
+    None
+}
+
+/// Compare a bare referenced path string (e.g. an npm install-hook's
+/// extracted script filename) against a package member path. Same
+/// exact/basename matching tiers as [`module_match`], just without the
+/// `ModuleReference` wrapper (there is no dotted-module-path resolution step
+/// for a literal filename reference).
+fn module_match_str(reference: &str, member: &str) -> Option<Confidence> {
+    let member_lower = member.to_ascii_lowercase();
+    let reference_lower = reference.to_ascii_lowercase();
+    if member_lower == reference_lower || member_lower.ends_with(&format!("/{reference_lower}")) {
+        return Some(Confidence::High);
+    }
+    let reference_base = reference_lower
+        .rsplit('/')
+        .next()
+        .unwrap_or(&reference_lower);
+    let member_base = member_lower.rsplit('/').next().unwrap_or(&member_lower);
+    if reference_base == member_base {
         return Some(Confidence::Medium);
     }
     None

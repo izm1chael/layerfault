@@ -125,7 +125,8 @@ fn estimate_member_cost(path: &Path, size: u64) -> crate::scheduler::TaskCost {
         .unwrap_or("")
         .to_ascii_lowercase();
     match ext.as_str() {
-        "py" | "pyw" => crate::scheduler::TaskCost::ast_parse(size),
+        "py" | "pyw" | "sh" | "bash" | "zsh" | "ps1" | "psm1" | "psd1" | "js" | "mjs" | "cjs"
+        | "ts" | "tsx" | "jsx" => crate::scheduler::TaskCost::ast_parse(size),
         "zip" | "tar" | "tgz" | "gz" | "whl" => {
             crate::scheduler::TaskCost::archive_decompression(size.saturating_mul(2))
         }
@@ -1380,45 +1381,23 @@ fn scan_package_file(
     }
 
     let is_setup_py = lower.ends_with("setup.py");
-    if ext == "py"
+    let is_shell_ext = matches!(ext.as_str(), "sh" | "bash" | "zsh");
+    let is_powershell_ext = matches!(ext.as_str(), "ps1" | "psm1" | "psd1");
+    let is_js_ext = matches!(ext.as_str(), "js" | "mjs" | "cjs" | "ts" | "tsx" | "jsx");
+    if (ext == "py" || is_shell_ext || is_powershell_ext || is_js_ext)
         && !is_setup_py
         && !is_documentation_path(rel)
         && !is_tokenizer_vocabulary_path(rel)
     {
-        let limits = crate::python_static::limits::PythonAnalysisLimits::default();
-        if size as usize <= limits.max_source_bytes {
-            let mut reader = file.try_clone()?;
-            reader.seek(SeekFrom::Start(0))?;
-            if let Ok(source_bytes) =
-                crate::safeio::read_all_from_file(&reader, limits.max_source_bytes as u64)
-            {
-                if let Ok(source_str) = std::str::from_utf8(&source_bytes) {
-                    budget
-                        .consume(
-                            crate::budget::BudgetDimension::ParserWorkUnits,
-                            source_bytes.len() as u64,
-                            "python parser",
-                        )
-                        .map_err(|error| anyhow!("global scan budget exhausted: {error}"))?;
-                    budget
-                        .consume(crate::budget::BudgetDimension::AstNodes, 1, "python AST")
-                        .map_err(|error| anyhow!("global scan budget exhausted: {error}"))?;
-                    let started = std::time::Instant::now();
-                    if let Ok(semantic_findings) =
-                        crate::python_static::analyze_and_convert_findings(
-                            rel,
-                            source_str,
-                            digest,
-                            auto_map_modules,
-                            &limits,
-                            started,
-                        )
-                    {
-                        out.extend(semantic_findings);
-                    }
-                }
-            }
-        }
+        out.extend(crate::language_frontend::scan_language_member(
+            &ext,
+            rel,
+            file,
+            size,
+            digest,
+            auto_map_modules,
+            budget,
+        )?);
     }
 
     if let Some(kind) = crate::dependencies::classify_manifest(&lower, &ext) {
@@ -1585,6 +1564,27 @@ fn scan_text_streaming(
         ("requests.get(", "LF-CODE-NETWORK"),
         ("requests.post(", "LF-CODE-NETWORK"),
         ("urllib.request", "LF-CODE-NETWORK"),
+        // Shell
+        ("eval ", "LF-SHELL-EVAL"),
+        ("exec ", "LF-SHELL-EXEC"),
+        (". /", "LF-SHELL-DOT-SOURCE"),
+        ("| bash", "LF-SHELL-CURL-PIPE"),
+        ("| sh", "LF-SHELL-CURL-PIPE"),
+        ("|bash", "LF-SHELL-CURL-PIPE"),
+        ("|sh", "LF-SHELL-CURL-PIPE"),
+        // PowerShell
+        ("invoke-expression", "LF-PS-INVOKE-EXPRESSION"),
+        ("iex ", "LF-PS-INVOKE-EXPRESSION"),
+        ("-encodedcommand", "LF-PS-ENCODED-COMMAND"),
+        ("downloadstring(", "LF-PS-DOWNLOAD"),
+        ("downloadfile(", "LF-PS-DOWNLOAD"),
+        ("invoke-webrequest", "LF-PS-DOWNLOAD"),
+        // JavaScript/TypeScript. `eval(` above (LF-CODE-EVAL) already covers
+        // JS's dynamic-evaluation case; it is intentionally not duplicated
+        // under a JS-specific rule id here.
+        ("child_process", "LF-JS-CHILD-PROCESS"),
+        ("execsync(", "LF-JS-CHILD-PROCESS"),
+        ("require('child_process')", "LF-JS-REQUIRE-CHILD-PROCESS"),
     ];
     let jinja = [
         "__class__",
@@ -1663,6 +1663,15 @@ fn scan_text_streaming(
             "LF-CODE-EXEC" => "exec",
             "LF-CODE-CTYPES" => "ctypes",
             "LF-CODE-NETWORK" => "network access",
+            "LF-SHELL-EVAL" => "shell eval",
+            "LF-SHELL-EXEC" => "shell exec",
+            "LF-SHELL-DOT-SOURCE" => "shell dot-source",
+            "LF-SHELL-CURL-PIPE" => "curl/wget piped to a shell",
+            "LF-PS-INVOKE-EXPRESSION" => "PowerShell Invoke-Expression",
+            "LF-PS-ENCODED-COMMAND" => "PowerShell -EncodedCommand",
+            "LF-PS-DOWNLOAD" => "PowerShell remote download",
+            "LF-JS-CHILD-PROCESS" => "child_process",
+            "LF-JS-REQUIRE-CHILD-PROCESS" => "require('child_process')",
             _ => "security-sensitive primitive",
         };
         let matches = hits.take(rule);
@@ -2417,7 +2426,26 @@ fn strip_compression_suffix(value: &str) -> Option<&str> {
 fn is_native_or_script(ext: &str, lower: &str) -> bool {
     matches!(
         ext,
-        "py" | "sh" | "ps1" | "bat" | "cmd" | "exe" | "dll" | "so" | "dylib" | "node" | "jar"
+        "py" | "sh"
+            | "bash"
+            | "zsh"
+            | "ps1"
+            | "psm1"
+            | "psd1"
+            | "bat"
+            | "cmd"
+            | "exe"
+            | "dll"
+            | "so"
+            | "dylib"
+            | "node"
+            | "jar"
+            | "js"
+            | "mjs"
+            | "cjs"
+            | "ts"
+            | "tsx"
+            | "jsx"
     ) || lower.ends_with("setup.py")
 }
 
@@ -2429,7 +2457,17 @@ fn is_text_candidate(ext: &str, lower: &str) -> bool {
             | "md"
             | "py"
             | "sh"
+            | "bash"
+            | "zsh"
             | "ps1"
+            | "psm1"
+            | "psd1"
+            | "js"
+            | "mjs"
+            | "cjs"
+            | "ts"
+            | "tsx"
+            | "jsx"
             | "toml"
             | "yaml"
             | "yml"

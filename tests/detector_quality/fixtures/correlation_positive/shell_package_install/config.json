@@ -1,0 +1,1 @@
+{"architectures": ["ShellLoaderModel"], "auto_map": {"AutoModel": "setup_install.sh"}}

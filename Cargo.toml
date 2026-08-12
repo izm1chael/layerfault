@@ -60,6 +60,26 @@ toml = "0.8"
 # maintenance-only.
 yaml-rust2 = "0.8"
 
+# JS/TS parser for `javascript_static`'s bounded AST-based capability
+# analysis of untrusted `.js`/`.mjs`/`.cjs`/`.ts`/`.tsx`/`.jsx` package
+# members. Chosen over `swc_ecma_parser`: MIT-licensed (matching this
+# project's own MIT license, unlike swc's Apache-2.0 split across a sprawling
+# multi-crate family) and a smaller, more coherent dependency surface for
+# "parse then walk the AST" (oxc_allocator/oxc_ast/oxc_span/oxc_ast_visit
+# only). Pure safe Rust, no `unsafe` required by this crate's public API, and
+# produces a data-only AST with no arbitrary code execution during parsing.
+# Pinned to 0.96.0, the newest release whose declared MSRV (1.88.0) still
+# matches this project's own `rust-version`; newer oxc releases require a
+# higher MSRV. `default-features = false` drops the `regular_expression`
+# default feature (a full ECMA regex-syntax validator/AST), which this
+# frontend does not need — it only classifies call targets and string-literal
+# arguments, never regex literals.
+oxc_parser = { version = "=0.96.0", default-features = false }
+oxc_allocator = "=0.96.0"
+oxc_ast = "=0.96.0"
+oxc_span = "=0.96.0"
+oxc_ast_visit = "=0.96.0"
+
 [build-dependencies]
 sha2 = "0.11"
 

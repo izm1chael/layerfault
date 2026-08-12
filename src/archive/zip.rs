@@ -696,38 +696,34 @@ fn dispatch_member_scan(
         ));
     }
 
-    // Python static analysis
-    if ext == "py" {
-        let limits = crate::python_static::limits::PythonAnalysisLimits::default();
-        if size as usize <= limits.max_source_bytes {
-            let mut reader = file.try_clone()?;
-            reader.seek(SeekFrom::Start(0))?;
-            if let Ok(source_bytes) =
-                crate::safeio::read_all_from_file(&reader, limits.max_source_bytes as u64)
-            {
-                if let Ok(source_str) = std::str::from_utf8(&source_bytes) {
-                    global_budget
-                        .consume(
-                            crate::budget::BudgetDimension::ParserWorkUnits,
-                            source_bytes.len() as u64,
-                            "python parser",
-                        )
-                        .map_err(|error| anyhow!("global scan budget exhausted: {error}"))?;
-                    global_budget
-                        .consume(crate::budget::BudgetDimension::AstNodes, 1, "python AST")
-                        .map_err(|error| anyhow!("global scan budget exhausted: {error}"))?;
-                    let started = std::time::Instant::now();
-                    let empty_map = std::collections::BTreeSet::new();
-                    if let Ok(semantic_findings) =
-                        crate::python_static::analyze_and_convert_findings(
-                            rel_path, source_str, digest, &empty_map, &limits, started,
-                        )
-                    {
-                        out.extend(semantic_findings);
-                    }
-                }
-            }
-        }
+    // Script-language semantic analysis (Python, Shell, PowerShell and
+    // JavaScript/TypeScript).
+    if ext == "py"
+        || matches!(
+            ext.as_str(),
+            "sh" | "bash"
+                | "zsh"
+                | "ps1"
+                | "psm1"
+                | "psd1"
+                | "js"
+                | "mjs"
+                | "cjs"
+                | "ts"
+                | "tsx"
+                | "jsx"
+        )
+    {
+        let empty_map = std::collections::BTreeSet::new();
+        out.extend(crate::language_frontend::scan_language_member(
+            &ext,
+            rel_path,
+            &file,
+            size,
+            digest,
+            &empty_map,
+            global_budget,
+        )?);
     }
 
     Ok(out)

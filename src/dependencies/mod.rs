@@ -11,6 +11,7 @@
 
 pub mod conda;
 pub mod limits;
+pub mod package_json;
 pub mod pyproject;
 pub mod requirements;
 pub mod risk;
@@ -40,6 +41,7 @@ pub enum ManifestKind {
     EnvironmentYaml,
     WheelMetadata,
     CondaLock,
+    PackageJson,
 }
 
 /// Recognize a package-relative filename as a dependency manifest/lockfile.
@@ -54,6 +56,7 @@ pub fn classify_manifest(lower: &str, ext: &str) -> Option<ManifestKind> {
         "uv.lock" => return Some(ManifestKind::UvLock),
         "pyproject.toml" => return Some(ManifestKind::Pyproject),
         "setup.py" => return Some(ManifestKind::SetupPy),
+        "package.json" => return Some(ManifestKind::PackageJson),
         "environment.yml" | "environment.yaml" => return Some(ManifestKind::EnvironmentYaml),
         "metadata" if lower.contains(".dist-info/") => return Some(ManifestKind::WheelMetadata),
         _ => {}
@@ -108,6 +111,31 @@ pub fn inspect_member(
             digest,
             auto_map_modules,
             started,
+        ));
+    }
+
+    if kind == ManifestKind::PackageJson {
+        let text = match std::str::from_utf8(&bytes) {
+            Ok(text) => text,
+            Err(_) => {
+                coverage.parser_failure(&format!("'{relative_path}' is not valid UTF-8 text"));
+                return Ok(vec![analysis_incomplete_finding(
+                    digest, &subject, &coverage,
+                )]);
+            }
+        };
+        if let Err(error) = serde_json::from_str::<serde_json::Value>(text) {
+            coverage.parser_failure(&format!(
+                "Unable to parse '{relative_path}' as JSON: {error}"
+            ));
+            return Ok(vec![analysis_incomplete_finding(
+                digest, &subject, &coverage,
+            )]);
+        }
+        return Ok(package_json::analyze_package_json(
+            relative_path,
+            text,
+            digest,
         ));
     }
 
@@ -179,7 +207,7 @@ pub fn inspect_member(
                 issues.extend(risk::classify(record, &subject));
             }
         }
-        ManifestKind::SetupPy => unreachable!("handled above"),
+        ManifestKind::SetupPy | ManifestKind::PackageJson => unreachable!("handled above"),
     }
 
     let mut findings: Vec<LayerScanResult> = issues
@@ -276,6 +304,10 @@ mod tests {
         assert_eq!(
             classify_manifest("pkg.dist-info/metadata", ""),
             Some(ManifestKind::WheelMetadata)
+        );
+        assert_eq!(
+            classify_manifest("package.json", "json"),
+            Some(ManifestKind::PackageJson)
         );
         assert_eq!(classify_manifest("readme.md", "md"), None);
     }
