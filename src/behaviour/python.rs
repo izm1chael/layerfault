@@ -55,6 +55,10 @@ fn run_transformers_deadline(
 ) -> Result<super::BehaviourReport> {
     let heartbeat = super::ProgressHeartbeat::start(phase_label);
     heartbeat.update(format!("phase={phase_label} static-admission"));
+    // Resolved before any sandboxed execution starts: an explicitly
+    // requested but unavailable eBPF backend must fail fast. `degraded` is
+    // recorded on every execution's telemetry below.
+    let telemetry_resolution = super::telemetry_backend::resolve(active.telemetry_backend)?;
     let backend = super::sandbox::get_backend(active.sandbox_kind, active.microvm_config.clone());
     backend.require_execution_stack(active.clone())?;
     super::static_admit(model, active.allow_static_blocked)?;
@@ -525,6 +529,10 @@ fn run_transformers_deadline(
         telemetry,
         evaluation: telemetry_eval,
     });
+
+    for execution in &mut executions {
+        execution.telemetry.backend_degraded = telemetry_resolution.degraded.clone();
+    }
 
     super::finalize_report(
         model_identity,

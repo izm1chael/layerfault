@@ -130,3 +130,10 @@ path = "fuzz_targets/pickle.rs"
 test = false
 doc = false
 bench = false
+
+[[bin]]
+name = "ebpf_protocol"
+path = "fuzz_targets/ebpf_protocol.rs"
+test = false
+doc = false
+bench = false

@@ -1,0 +1,21 @@
+[package]
+name = "layerfault-ebpf-telemetry-ebpf"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "eBPF probe programs for the optional Layerfault telemetry helper (bpfel-unknown-none, not part of the host workspace)"
+license = "MIT"
+
+[dependencies]
+aya-ebpf = "0.2"
+
+[[bin]]
+name = "layerfault-ebpf-telemetry-ebpf"
+path = "src/main.rs"
+
+[profile.release]
+lto = true
+panic = "abort"
+codegen-units = 1
+
+[workspace]

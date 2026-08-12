@@ -539,6 +539,7 @@ pub fn find_executable(name: &str) -> Option<PathBuf> {
         "ollama" => Some("LAYERFAULT_OLLAMA_RUNTIME"),
         "lms" => Some("LAYERFAULT_LMSTUDIO_RUNTIME"),
         "llama-cli" | "llama-server" | "main" => Some("LAYERFAULT_LLAMA_RUNTIME"),
+        "layerfault-ebpf-telemetry" => Some("LAYERFAULT_EBPF_HELPER"),
         _ => None,
     };
     if let Some(candidate) = override_name

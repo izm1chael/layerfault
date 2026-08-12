@@ -2,12 +2,15 @@
 
 pub mod cgroup;
 pub mod closure;
+pub mod ebpf_telemetry;
+pub mod ebpf_verify;
 pub mod evaluate;
 pub mod microvm;
 pub mod probes;
 pub mod python;
 pub mod runtime;
 pub mod sandbox;
+pub mod telemetry_backend;
 
 use anyhow::{bail, Result};
 use serde::{Deserialize, Serialize};
@@ -125,6 +128,10 @@ pub struct ActiveExecutionOptions {
     /// Enforce cgroup v2 process-tree resource limits. Fail closed if unavailable.
     #[serde(default)]
     pub require_cgroup: bool,
+    /// Sandbox telemetry backend selection (auto/strace/ebpf). See
+    /// `telemetry_backend::resolve` for hard-fail/fallback semantics.
+    #[serde(default)]
+    pub telemetry_backend: telemetry_backend::TelemetryBackendMode,
 }
 
 #[derive(Debug, Clone)]
@@ -437,6 +444,11 @@ fn run_external_llama_active_deadline(
     if active.execute_custom_code {
         bail!("custom Hugging Face loader execution is only supported by the Transformers backend");
     }
+    // Resolved before any sandboxed execution starts: an explicitly
+    // requested but unavailable eBPF backend must fail fast, not partway
+    // through a probe run. `resolution.degraded` (set only for `auto`
+    // falling back) is recorded on every execution's telemetry below.
+    let telemetry_resolution = telemetry_backend::resolve(active.telemetry_backend)?;
     let backend = sandbox::get_backend(active.sandbox_kind, active.microvm_config.clone());
     backend.require_execution_stack(active.clone())?;
     static_admit(model, active.allow_static_blocked)?;
@@ -528,6 +540,9 @@ fn run_external_llama_active_deadline(
         "phase={phase_label} complete elapsed={}s",
         deadline.elapsed_seconds()
     ));
+    for execution in &mut executions {
+        execution.telemetry.backend_degraded = telemetry_resolution.degraded.clone();
+    }
     finalize_report(
         model_identity,
         model.display().to_string(),

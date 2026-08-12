@@ -1,0 +1,22 @@
+[package]
+name = "layerfault-ebpf-telemetry"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.88"
+publish = false
+description = "Optional external eBPF telemetry helper for Layerfault sandboxed active analysis"
+license = "MIT"
+
+# Deliberately NOT forbid(unsafe_code): Aya's host-side program-loading and
+# map APIs require unsafe in places (e.g. reading ring buffer records). This
+# crate is kept separate from the main `layerfault` crate specifically so
+# that boundary never has to move — see src/behaviour/sandbox.rs's seccomp
+# filter, which denies bpf()/perf_event_open() to the sandboxed workload
+# itself, and the main crate's forbid(unsafe_code) attribute in src/lib.rs
+# and src/main.rs.
+
+[dependencies]
+aya = "0.14"
+anyhow = "1.0"
+clap = { version = "4.5", features = ["derive"] }
+layerfault-telemetry-protocol = { path = "../layerfault-telemetry-protocol" }

@@ -1,3 +1,14 @@
+[workspace]
+resolver = "2"
+# fuzz/ and vendor/candelabra are deliberately NOT members: fuzz/ is its own
+# standalone cargo-fuzz project (path-dependency back onto this package), and
+# vendor/candelabra is a vendored third-party patch, not Layerfault source.
+members = [
+    ".",
+    "helpers/layerfault-telemetry-protocol",
+    "helpers/layerfault-ebpf-telemetry",
+]
+
 [package]
 name = "layerfault"
 version = "1.0.0-rc.1"
@@ -9,6 +20,12 @@ license = "MIT"
 repository = "https://github.com/izm1chael/layerfault"
 
 [dependencies]
+# Shared wire-protocol types (schema version, event enum, frame struct) with
+# the optional eBPF telemetry helper in helpers/layerfault-ebpf-telemetry.
+# Zero unsafe, kept as a separate crate so both this forbid(unsafe_code)
+# crate and the helper (which needs unsafe for Aya) import a single
+# hand-synced schema definition instead of duplicating it.
+layerfault-telemetry-protocol = { path = "helpers/layerfault-telemetry-protocol" }
 clap       = { version = "4.5",  features = ["derive"] }
 serde      = { version = "1.0",  features = ["derive"] }
 serde_json = "1.0"

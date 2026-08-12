@@ -394,6 +394,7 @@ mod tests {
             execute_custom_code: false,
             closure_level: crate::behaviour::closure::ClosureLevel::Standard,
             require_cgroup: false,
+            telemetry_backend: crate::behaviour::telemetry_backend::TelemetryBackendMode::default(),
         };
         // Requiring execution stack without valid microvm image MUST error
         let result = backend.require_execution_stack(active);

@@ -25,6 +25,7 @@ pub struct CapabilityReport {
     pub microvm_hypervisor: Option<String>,
     pub llama_active_analysis: bool,
     pub transformers_active_analysis: bool,
+    pub ebpf_telemetry: bool,
     pub managed_python_runtime: Option<String>,
     pub reflink_staging: bool,
     pub tools: BTreeMap<String, bool>,
@@ -42,6 +43,7 @@ pub fn run() -> Vec<DoctorCheck> {
         "bwrap",
         "prlimit",
         "strace",
+        "layerfault-ebpf-telemetry",
     ] {
         match sources::find_executable(binary) {
             Some(path) => checks.push(DoctorCheck {
@@ -54,6 +56,9 @@ pub fn run() -> Vec<DoctorCheck> {
                 status: "not-found".to_owned(),
                 detail: if matches!(binary, "bwrap" | "prlimit" | "strace") {
                     "required for some active-analysis modes".to_owned()
+                } else if binary == "layerfault-ebpf-telemetry" {
+                    "optional lower-overhead telemetry backend; strace remains the default fallback"
+                        .to_owned()
                 } else {
                     "optional integration unavailable".to_owned()
                 },
@@ -117,6 +122,23 @@ pub fn run() -> Vec<DoctorCheck> {
             capabilities.microvm_hypervisor.as_deref().unwrap_or("none"),
             Path::new("/dev/kvm").exists()
         ),
+    });
+    checks.push(DoctorCheck {
+        name: "ebpf-telemetry".to_owned(),
+        status: if capabilities.ebpf_telemetry {
+            "ready"
+        } else {
+            "not-ready"
+        }
+        .to_owned(),
+        detail: match crate::behaviour::ebpf_verify::locate_and_verify_helper() {
+            Ok(verified) => format!(
+                "helper verified at {} (version {}); strace remains the default backend",
+                verified.path.display(),
+                verified.version
+            ),
+            Err(reason) => format!("strace fallback active: {reason}"),
+        },
     });
 
     for (name, kind) in [
@@ -214,6 +236,7 @@ pub fn capabilities() -> CapabilityReport {
         "llama-server",
         "nvidia-smi",
         "rocm-smi",
+        "layerfault-ebpf-telemetry",
     ] {
         tools.insert(tool.to_owned(), sources::find_executable(tool).is_some());
     }
@@ -295,6 +318,20 @@ pub fn capabilities() -> CapabilityReport {
         .unwrap_or(false);
     let microvm_hypervisor = hypervisor.map(|h| h.name);
 
+    let ebpf_telemetry = crate::behaviour::telemetry_backend::resolve(
+        crate::behaviour::telemetry_backend::TelemetryBackendMode::Ebpf,
+    )
+    .is_ok();
+    if !ebpf_telemetry {
+        if let Err(reason) = crate::behaviour::ebpf_verify::locate_and_verify_helper() {
+            notes.push(format!("eBPF telemetry preflight: {reason}"));
+        } else {
+            notes.push(
+                "eBPF telemetry preflight: helper identity verified, but live collection is not yet wired into this build".to_owned(),
+            );
+        }
+    }
+
     CapabilityReport {
         os: std::env::consts::OS.to_owned(),
         architecture: std::env::consts::ARCH.to_owned(),
@@ -310,6 +347,7 @@ pub fn capabilities() -> CapabilityReport {
         llama_active_analysis: active_sandbox
             && tools.get("llama-server").copied().unwrap_or(false),
         transformers_active_analysis: active_sandbox && python_ready,
+        ebpf_telemetry,
         managed_python_runtime: managed_python.map(|path| path.display().to_string()),
         reflink_staging: crate::binding::probe_reflink_support(),
         tools,

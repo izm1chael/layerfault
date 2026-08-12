@@ -1096,6 +1096,11 @@ struct BehaviourArgs {
     /// Require cgroup v2 process-tree resource controls. Fail closed if unavailable.
     #[arg(long, default_value_t = false)]
     require_cgroup: bool,
+    /// Sandbox telemetry backend: auto, strace, or ebpf. `auto` prefers a
+    /// verified eBPF helper and falls back to strace (recorded, never
+    /// silent) when unavailable; `ebpf` fails closed if unavailable.
+    #[arg(long, default_value = "auto")]
+    telemetry_backend: layerfault::behaviour::telemetry_backend::TelemetryBackendMode,
     #[arg(long, default_value_t = false)]
     json: bool,
 }
@@ -1143,6 +1148,9 @@ struct CompareBehaviourArgs {
     /// Require cgroup v2 process-tree resource controls. Fail closed if unavailable.
     #[arg(long, default_value_t = false)]
     require_cgroup: bool,
+    /// Sandbox telemetry backend: auto, strace, or ebpf.
+    #[arg(long, default_value = "auto")]
+    telemetry_backend: layerfault::behaviour::telemetry_backend::TelemetryBackendMode,
     #[arg(long, default_value_t = false)]
     json: bool,
 }
@@ -1187,6 +1195,9 @@ struct ReviewArgs {
     /// Require cgroup v2 process-tree resource controls. Fail closed if unavailable.
     #[arg(long, default_value_t = false)]
     require_cgroup: bool,
+    /// Sandbox telemetry backend: auto, strace, or ebpf.
+    #[arg(long, default_value = "auto")]
+    telemetry_backend: layerfault::behaviour::telemetry_backend::TelemetryBackendMode,
     #[arg(long)]
     evidence_out: Option<PathBuf>,
     #[arg(long)]

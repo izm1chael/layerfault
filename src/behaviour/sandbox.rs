@@ -11,7 +11,7 @@ use crate::behaviour::ActiveExecutionOptions;
 
 const MAX_SNAPSHOT_FILES: usize = 4096;
 const MAX_TRACE_BYTES: u64 = 32 * 1024 * 1024;
-const MAX_TELEMETRY_ROWS: usize = 128;
+pub(crate) const MAX_TELEMETRY_ROWS: usize = 128;
 const MIN_ADDRESS_SPACE_LIMIT_MB: u64 = 512;
 const MAX_ADDRESS_SPACE_LIMIT_MB: u64 = 256 * 1024;
 const ACTIVE_MODEL_ENTRY_LIMIT: usize = 100_000;
@@ -74,6 +74,64 @@ pub struct SandboxCapabilities {
     pub cgroup: crate::behaviour::cgroup::CgroupCapabilities,
 }
 
+/// Which telemetry backend produced a `SandboxTelemetry` instance. Distinct
+/// from `SandboxKind`, which describes sandbox *isolation* (bwrap/microvm),
+/// not the mechanism used to observe behaviour inside it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum TelemetryBackendKind {
+    #[default]
+    Strace,
+    Ebpf,
+}
+
+impl std::fmt::Display for TelemetryBackendKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Strace => write!(f, "strace"),
+            Self::Ebpf => write!(f, "ebpf"),
+        }
+    }
+}
+
+impl std::str::FromStr for TelemetryBackendKind {
+    type Err = anyhow::Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.to_ascii_lowercase().as_str() {
+            "strace" => Ok(Self::Strace),
+            "ebpf" => Ok(Self::Ebpf),
+            other => bail!("unsupported telemetry backend '{other}' (expected 'strace' or 'ebpf')"),
+        }
+    }
+}
+
+/// Normalizes behavioural evidence collected by whichever `TelemetryBackend`
+/// observed a sandbox run, so evaluation/correlation never depends on the
+/// backend that produced it.
+pub trait TelemetryBackend {
+    fn kind(&self) -> TelemetryBackendKind;
+
+    /// Read and normalize backend-specific evidence (e.g. strace trace files)
+    /// from `telemetry_root` into `telemetry`. Filesystem-mutation diffing is
+    /// backend-independent and stays in `Workspace::collect_telemetry`.
+    fn collect(&self, telemetry_root: &Path, telemetry: &mut SandboxTelemetry) -> Result<()>;
+}
+
+/// Default backend: parses `strace`'s per-PID trace files written into the
+/// workspace telemetry root.
+pub struct StraceTelemetryBackend;
+
+impl TelemetryBackend for StraceTelemetryBackend {
+    fn kind(&self) -> TelemetryBackendKind {
+        TelemetryBackendKind::Strace
+    }
+
+    fn collect(&self, telemetry_root: &Path, telemetry: &mut SandboxTelemetry) -> Result<()> {
+        parse_trace_files(telemetry_root, telemetry)
+    }
+}
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(default)]
 pub struct SandboxTelemetry {
@@ -83,11 +141,29 @@ pub struct SandboxTelemetry {
     pub process_exec_attempts: Vec<String>,
     pub sensitive_path_accesses: Vec<String>,
     pub canary_accesses: Vec<String>,
+    /// Process-exit events. Only ever populated by backends that observe
+    /// exits (e.g. an eBPF backend); strace-sourced telemetry always leaves
+    /// this empty, which is not evidence of a clean run.
+    pub process_exit_events: Vec<String>,
     pub trace_available: bool,
     pub trace_truncated: bool,
     pub snapshot_overflow: bool,
     pub total_filesystem_mutations: usize,
     pub suspicious_filesystem_mutations: usize,
+    /// Per-category event counts observed before any truncation, so
+    /// aggregate risk signal survives bounded-evidence-vector truncation.
+    pub events_seen: BTreeMap<String, u64>,
+    /// Events rejected by backend protocol validation (oversized, malformed,
+    /// out of scope, unknown schema version) rather than silently dropped.
+    pub events_dropped: u64,
+    /// Set when a backend hit its total per-run byte/frame ceiling.
+    pub buffer_overflow: bool,
+    /// Set with a human-readable reason when `auto` backend selection fell
+    /// back from a preferred backend to a less-capable one, or a backend
+    /// reported a partial/degraded run. `None` for a clean run.
+    pub backend_degraded: Option<String>,
+    /// Which backend actually produced this telemetry.
+    pub telemetry_backend: TelemetryBackendKind,
     pub cgroup: Option<crate::behaviour::cgroup::CgroupTelemetry>,
 }
 
@@ -189,10 +265,25 @@ impl Workspace {
     }
 
     pub fn collect_telemetry(&self, trace_enabled: bool) -> Result<SandboxTelemetry> {
+        let backend = trace_enabled.then_some(StraceTelemetryBackend);
+        let backend: Option<&dyn TelemetryBackend> = backend
+            .as_ref()
+            .map(|backend| backend as &dyn TelemetryBackend);
+        self.collect_telemetry_with(backend)
+    }
+
+    /// Same as `collect_telemetry`, but dispatches backend-specific evidence
+    /// collection through an explicit `TelemetryBackend` rather than assuming
+    /// strace. `None` means no telemetry backend ran for this session.
+    pub fn collect_telemetry_with(
+        &self,
+        backend: Option<&dyn TelemetryBackend>,
+    ) -> Result<SandboxTelemetry> {
         let current = snapshot_tree(&self.root)?;
         let mut telemetry = SandboxTelemetry {
-            trace_available: trace_enabled,
+            trace_available: backend.is_some(),
             snapshot_overflow: self.baseline.overflow || current.overflow,
+            telemetry_backend: backend.map(TelemetryBackend::kind).unwrap_or_default(),
             ..SandboxTelemetry::default()
         };
 
@@ -231,8 +322,8 @@ impl Workspace {
         mutations.truncate(MAX_TELEMETRY_ROWS);
         telemetry.filesystem_mutations = mutations;
 
-        if trace_enabled {
-            parse_trace_files(&self.telemetry_root, &mut telemetry)?;
+        if let Some(backend) = backend {
+            backend.collect(&self.telemetry_root, &mut telemetry)?;
         }
         Ok(telemetry)
     }
@@ -1171,18 +1262,33 @@ fn classify_trace_line(line: &str, telemetry: &mut SandboxTelemetry) {
         telemetry.process_exec_attempts.push(excerpt(line));
     }
 
-    let canary = [
+    if is_canary_evidence(&lower) && telemetry.canary_accesses.len() < MAX_TELEMETRY_ROWS {
+        telemetry.canary_accesses.push(excerpt(line));
+    }
+
+    if is_sensitive_evidence(&lower) && telemetry.sensitive_path_accesses.len() < MAX_TELEMETRY_ROWS
+    {
+        telemetry.sensitive_path_accesses.push(excerpt(line));
+    }
+}
+
+/// Shared canary-path detection, reused by both the strace text-line
+/// classifier and the eBPF frame normalizer so evidence classification stays
+/// backend-independent.
+pub(crate) fn is_canary_evidence(lower: &str) -> bool {
+    [
         "/workspace/home/.ssh/",
         "/workspace/workspace/.env",
         "/workspace/workspace/secrets/",
     ]
     .iter()
-    .any(|needle| lower.contains(needle));
-    if canary && telemetry.canary_accesses.len() < MAX_TELEMETRY_ROWS {
-        telemetry.canary_accesses.push(excerpt(line));
-    }
+    .any(|needle| lower.contains(needle))
+}
 
-    let sensitive = [
+/// Shared sensitive-path detection, reused by both the strace text-line
+/// classifier and the eBPF frame normalizer.
+pub(crate) fn is_sensitive_evidence(lower: &str) -> bool {
+    [
         "/etc/shadow",
         "/root/",
         "/proc/self/environ",
@@ -1190,13 +1296,10 @@ fn classify_trace_line(line: &str, telemetry: &mut SandboxTelemetry) {
         "/.ssh/",
     ]
     .iter()
-    .any(|needle| lower.contains(needle));
-    if sensitive && telemetry.sensitive_path_accesses.len() < MAX_TELEMETRY_ROWS {
-        telemetry.sensitive_path_accesses.push(excerpt(line));
-    }
+    .any(|needle| lower.contains(needle))
 }
 
-fn excerpt(value: &str) -> String {
+pub(crate) fn excerpt(value: &str) -> String {
     let mut out: String = value.chars().take(512).collect();
     if value.chars().count() > 512 {
         out.push('…');

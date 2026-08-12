@@ -1,0 +1,18 @@
+# Expected-identity manifest for the layerfault-ebpf-telemetry helper,
+# embedded at compile time into the main crate
+# (src/behaviour/ebpf_verify.rs) so hash/version verification of the helper
+# stays fully offline. Regenerate `sha256` whenever a release build of the
+# helper is cut, in lockstep with `version` in
+# helpers/layerfault-ebpf-telemetry/Cargo.toml.
+#
+# The placeholder sha256 below is deliberately unsatisfiable by any real
+# binary: until a release pipeline populates this file with the hash of an
+# actual signed helper build, `--telemetry-backend ebpf` correctly fails
+# closed (hard error) rather than trusting an unverified helper, and
+# `--telemetry-backend auto` correctly and visibly falls back to strace.
+# This is intended fail-closed behavior, not a bug.
+
+min_version = "0.1.0"
+max_version = "0.2.0"
+sha256 = "0000000000000000000000000000000000000000000000000000000000000000"
+schema_version = 1
