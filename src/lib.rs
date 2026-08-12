@@ -63,6 +63,7 @@ pub mod script_capability;
 pub mod shell_static;
 pub mod sigstore;
 pub mod sources;
+pub mod static_analysis;
 pub mod template_static;
 pub mod transformation;
 pub mod trust;
