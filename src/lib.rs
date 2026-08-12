@@ -58,6 +58,7 @@ pub mod scanner;
 pub mod scheduler;
 pub mod sigstore;
 pub mod sources;
+pub mod template_static;
 pub mod transformation;
 pub mod trust;
 pub mod weights;

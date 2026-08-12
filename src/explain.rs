@@ -2418,7 +2418,7 @@ pub static CATALOGUE: &[RuleMetadata] = &[
     },
     RuleMetadata {
         rule_id: "LF-TEMPLATE-DYNAMIC-INCLUDE",
-        rule_version: 1,
+        rule_version: 2,
         detector_family: "template",
         title: "Dynamic template include/import",
         meaning: "High-priority prompt/template metadata dynamically imports/includes template content and requires review.",
@@ -2430,7 +2430,7 @@ pub static CATALOGUE: &[RuleMetadata] = &[
     },
     RuleMetadata {
         rule_id: "LF-TEMPLATE-INTROSPECTION",
-        rule_version: 1,
+        rule_version: 2,
         detector_family: "template",
         title: "Template introspection primitives",
         meaning: "A model template contains Jinja/Python introspection primitives that can become dangerous in an overly permissive rendering environment.",
@@ -2442,7 +2442,7 @@ pub static CATALOGUE: &[RuleMetadata] = &[
     },
     RuleMetadata {
         rule_id: "LF-TEMPLATE-SSTI",
-        rule_version: 1,
+        rule_version: 2,
         detector_family: "template",
         title: "Template object-graph traversal",
         meaning: "High-priority prompt/template metadata contains Jinja-style object graph or dunder traversal associated with server-side template injection primitives.",

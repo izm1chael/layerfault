@@ -929,69 +929,27 @@ impl HeuristicsScanner {
         media_type: &str,
         duration_ms: u64,
     ) -> Result<LayerScanResult> {
-        let mut result = scan_content_for_media(content, layer_digest, media_type, duration_ms)?;
-        let subject = crate::finding_evidence::EvidenceSubject::identity(layer_digest, media_type)
-            .with_sha256(Some(layer_digest.to_owned()));
-        if let Some(found) = TEMPLATE_DANGEROUS.find(content) {
-            result.status = ScanStatus::Fail;
-            result.finding_class = FindingClass::ContentIndicator;
-            result.confidence = Confidence::High;
-            let excerpt = redacted_context_window(content, found.start(), found.end());
-            result.matches.push(format!(
-                "[LF-TEMPLATE-SSTI] dangerous Jinja/template object-graph traversal: '{excerpt}'"
-            ));
-            result.detail = Some("High-priority prompt/template metadata contains an SSTI-style Jinja object-graph traversal primitive. Layerfault does not render the template; this is static downstream-risk evidence.".to_owned());
-            result.evidence.push(
-                crate::finding_evidence::FindingEvidence::new(
-                    crate::finding_evidence::EvidenceKind::SourceExcerpt,
-                    subject.clone(),
-                    "Jinja object-graph traversal primitive matched in template content",
-                )
-                .at(crate::finding_evidence::EvidenceLocation::ByteRange {
-                    offset: found.start() as u64,
-                    length: (found.end() - found.start()) as u64,
-                })
-                .excerpt(&excerpt),
-            );
-            result.rule_id = Some("LF-TEMPLATE-SSTI".to_owned());
-            result.finding_id = None;
-            result.evidence_state = None;
-            result.evidence_reason = None;
-            crate::finding_evidence::ensure_finding_identity(&mut result, "LF-TEMPLATE-SSTI");
-        } else if let Some(found) = TEMPLATE_IMPORT.find(content) {
-            if result.status == ScanStatus::Pass {
-                result.status = ScanStatus::Warn;
-            }
-            result.finding_class = FindingClass::ContentIndicator;
-            let excerpt = redacted_context_window(content, found.start(), found.end());
-            result.matches.push(format!(
-                "[LF-TEMPLATE-DYNAMIC-INCLUDE] Jinja import/include directive requires review: '{excerpt}'"
-            ));
-            result.evidence.push(
-                crate::finding_evidence::FindingEvidence::new(
-                    crate::finding_evidence::EvidenceKind::SourceExcerpt,
-                    subject.clone(),
-                    "Jinja import/include directive matched in template content",
-                )
-                .at(crate::finding_evidence::EvidenceLocation::ByteRange {
-                    offset: found.start() as u64,
-                    length: (found.end() - found.start()) as u64,
-                })
-                .excerpt(&excerpt),
-            );
-            result.rule_id = Some("LF-TEMPLATE-DYNAMIC-INCLUDE".to_owned());
-            result.finding_id = None;
-            result.evidence_state = None;
-            result.evidence_reason = None;
-            crate::finding_evidence::ensure_finding_identity(
-                &mut result,
-                "LF-TEMPLATE-DYNAMIC-INCLUDE",
-            );
-            if result.detail.is_none() {
-                result.detail = Some("High-priority prompt/template metadata contains a Jinja import/include directive; review the downstream renderer and loader policy.".to_owned());
-            }
+        let mut base_result =
+            scan_content_for_media(content, layer_digest, media_type, duration_ms)?;
+        let limits = crate::template_static::TemplateLimits::default();
+        let analysis = crate::template_static::analyze_template(content, media_type, &limits);
+        let template_result = crate::template_static::build_layer_scan_result(
+            analysis,
+            layer_digest,
+            media_type,
+            duration_ms,
+        );
+
+        if template_result.status != ScanStatus::Pass {
+            base_result.status = template_result.status;
+            base_result.rule_id = template_result.rule_id;
+            base_result.detail = template_result.detail;
+            base_result.matches.extend(template_result.matches);
+            base_result.evidence.extend(template_result.evidence);
+            base_result.finding_id = template_result.finding_id;
         }
-        Ok(result)
+
+        Ok(base_result)
     }
 }
 

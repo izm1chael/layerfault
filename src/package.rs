@@ -1688,27 +1688,82 @@ fn scan_text_streaming(
             .finish(),
         );
     }
-    if jinja_seen && template_marker_seen {
-        let matches = hits.take("LF-TEMPLATE-INTROSPECTION");
-        let detail = format!(
-            "Template/config '{}' contains Python/Jinja introspection primitives at {}; review template execution context before use",
-            rel,
-            describe_lines(&matches)
-        );
-        out.push(
-            finding(
-                digest,
-                CheckType::PackageSecurity,
-                ScanStatus::Warn,
-                FindingClass::ContentIndicator,
-                Confidence::High,
-                "LF-TEMPLATE-INTROSPECTION",
-                detail,
-            )
-            .subject(subject.clone())
-            .evidence_all(excerpt_evidence(&subject, file, &matches))
-            .finish(),
-        );
+    if jinja_seen || template_marker_seen {
+        let mut reader = file.try_clone()?;
+        reader.seek(SeekFrom::Start(0))?;
+        let mut file_bytes = Vec::new();
+        reader
+            .take(1024_u64 * 1024_u64)
+            .read_to_end(&mut file_bytes)?;
+        {
+            // Package text scanning already treats malformed UTF-8 lossily. Keep the
+            // semantic pass aligned with that behavior, especially when the bounded
+            // prefix ends in the middle of a multibyte character.
+            let content_str = String::from_utf8_lossy(&file_bytes);
+            let limits = crate::template_static::TemplateLimits::default();
+            let analysis = crate::template_static::analyze_template(&content_str, rel, &limits);
+            if !analysis.findings.is_empty() {
+                for f in &analysis.findings {
+                    let rule_id = f.rule.rule_id();
+                    let mut matches = hits.take(rule_id);
+                    if matches.is_empty() {
+                        let ev_matches = hits.take("LF-TEMPLATE-INTROSPECTION");
+                        matches = ev_matches;
+                    }
+                    let detail = format!("Template/config '{}': {}", rel, f.detail);
+                    let ev_msg = format!("{} matched in template content", rule_id);
+                    let ev_list = if !matches.is_empty() {
+                        excerpt_evidence(&subject, file, &matches)
+                    } else {
+                        vec![crate::finding_evidence::FindingEvidence::new(
+                            crate::finding_evidence::EvidenceKind::SourceExcerpt,
+                            subject.clone(),
+                            &ev_msg,
+                        )
+                        .at(crate::finding_evidence::EvidenceLocation::ByteRange {
+                            offset: f.span.offset,
+                            length: f.span.length.max(1),
+                        })
+                        .excerpt(&f.excerpt)]
+                    };
+                    out.push(
+                        finding(
+                            digest,
+                            CheckType::PackageSecurity,
+                            ScanStatus::Warn,
+                            FindingClass::ContentIndicator,
+                            Confidence::High,
+                            rule_id,
+                            detail,
+                        )
+                        .subject(subject.clone())
+                        .evidence_all(ev_list)
+                        .finish(),
+                    );
+                }
+            } else if jinja_seen && template_marker_seen {
+                let matches = hits.take("LF-TEMPLATE-INTROSPECTION");
+                let detail = format!(
+                    "Template/config '{}' contains Python/Jinja introspection primitives at {}; review template execution context before use",
+                    rel,
+                    describe_lines(&matches)
+                );
+                out.push(
+                    finding(
+                        digest,
+                        CheckType::PackageSecurity,
+                        ScanStatus::Warn,
+                        FindingClass::ContentIndicator,
+                        Confidence::High,
+                        "LF-TEMPLATE-INTROSPECTION",
+                        detail,
+                    )
+                    .subject(subject.clone())
+                    .evidence_all(excerpt_evidence(&subject, file, &matches))
+                    .finish(),
+                );
+            }
+        }
     }
     Ok(())
 }
