@@ -11,10 +11,8 @@ use super::parser::PowerShellFunctionDef;
 use std::collections::BTreeMap;
 
 /// PowerShell built-in cmdlet aliases relevant to capability detection.
-/// These are shipped by PowerShell itself (not `Set-Alias`-derived), so
-/// they are hardcoded here rather than discovered from source, matching
-/// the plan's explicit instruction: script-defined `Set-Alias` tracking
-/// alone would miss these extremely common attack idioms.
+/// These ship with PowerShell, so they are hardcoded because source-level
+/// `Set-Alias` tracking alone would miss these common attack idioms.
 const BUILTIN_ALIASES: &[(&str, &str)] = &[
     ("iex", "Invoke-Expression"),
     ("iwr", "Invoke-WebRequest"),
