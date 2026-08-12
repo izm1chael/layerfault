@@ -162,6 +162,7 @@ pub fn correlate(findings: &[LayerScanResult]) -> Vec<FindingCorrelation> {
     out.extend(native_extension_chains(findings));
     out.extend(install_hook_capability_chains(findings));
     out.extend(npm_install_hook_chains(findings));
+    out.extend(numpy_allow_pickle_chains(findings));
     sort_correlations(&mut out);
     out
 }
@@ -649,6 +650,76 @@ fn rule_ids(findings: &[&LayerScanResult]) -> Vec<String> {
         .collect();
     out.sort();
     out.dedup();
+    out
+}
+
+/// `numpy.load(..., allow_pickle=True)` correlated with an object-dtype NPY/NPZ member.
+fn numpy_allow_pickle_chains(findings: &[LayerScanResult]) -> Vec<FindingCorrelation> {
+    let mut out = Vec::new();
+    let numpy_calls: Vec<&LayerScanResult> = findings
+        .iter()
+        .filter(|finding| matches_rule(finding, &["LF-PY-NUMPY-ALLOW-PICKLE"]))
+        .collect();
+    if numpy_calls.is_empty() {
+        return Vec::new();
+    }
+
+    let object_arrays: Vec<&LayerScanResult> = findings
+        .iter()
+        .filter(|finding| matches_rule(finding, &["LF-NPY-OBJECT-DTYPE"]))
+        .collect();
+
+    if object_arrays.is_empty() {
+        return Vec::new();
+    }
+
+    for call_finding in numpy_calls {
+        let Some(py_member) = subject_name(call_finding) else {
+            continue;
+        };
+
+        let literal_target = call_finding
+            .evidence
+            .iter()
+            .find_map(|record| record.structured.as_ref())
+            .and_then(|structured| structured.get("command_evidence"))
+            .and_then(serde_json::Value::as_str);
+
+        for obj_finding in &object_arrays {
+            let Some(obj_member) = subject_name(obj_finding) else {
+                continue;
+            };
+
+            let is_matched = if let Some(target) = literal_target {
+                module_match_str(target, obj_member).is_some()
+            } else {
+                object_arrays.len() == 1
+            };
+
+            if is_matched {
+                out.push(FindingCorrelation {
+                    id: "LF-CORR-NUMPY-ALLOW-PICKLE".to_owned(),
+                    finding_ids: finding_ids(&[call_finding, obj_finding]),
+                    rule_ids: rule_ids(&[call_finding, obj_finding]),
+                    summary: format!(
+                        "'{py_member}' calls numpy.load with allow_pickle=True targeting the object-dtype NumPy artifact '{obj_member}'. \
+                         Object dtypes rely on Pickle deserialization, enabling arbitrary code execution during model loading."
+                    ),
+                    confidence: Confidence::High,
+                    evidence: vec![path_relationship(
+                        EvidenceSubject::member(obj_member),
+                        "NumPy loader explicitly permits Pickle deserialization for object-dtype artifact",
+                        serde_json::json!({
+                            "loader_member": py_member,
+                            "target_artifact": obj_member,
+                            "allow_pickle": true
+                        }),
+                    )],
+                    limitations: Some(LIMITATION.to_owned()),
+                });
+            }
+        }
+    }
     out
 }
 

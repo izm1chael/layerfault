@@ -265,6 +265,11 @@ pub fn convert_analysis_to_findings(
                 "LF-PY-PACKAGE-INSTALL",
                 "LF-CORR-HF-LOADER-INSTALL",
             ),
+            PythonCapabilityCategory::NumPyAllowPickle => (
+                "LF-PY-NUMPY-ALLOW-PICKLE",
+                "LF-PY-NUMPY-ALLOW-PICKLE",
+                "LF-CORR-NUMPY-ALLOW-PICKLE",
+            ),
         };
 
         let status = ScanStatus::Warn;

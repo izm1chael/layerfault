@@ -184,7 +184,9 @@ pub fn snapshot_artifact(path: &Path) -> Result<ModelSnapshot> {
         | ArtifactFormat::TensorFlowCheckpoint
         | ArtifactFormat::TensorFlowLite
         | ArtifactFormat::KerasArchive
-        | ArtifactFormat::KerasHdf5 => {
+        | ArtifactFormat::KerasHdf5
+        | ArtifactFormat::Npy
+        | ArtifactFormat::Npz => {
             components.insert("artifact".to_owned(), sha.clone());
         }
         ArtifactFormat::Unknown => {

@@ -12,6 +12,7 @@ pub enum PythonCapabilityCategory {
     CredentialEnvironmentAccess,
     FilesystemMutation,
     PackageInstallationCodeAcquisition,
+    NumPyAllowPickle,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -226,6 +227,24 @@ impl<'a> CallSiteExtractor<'a> {
         } else {
             &raw_target
         };
+
+        if is_numpy_load_call(target_to_check, &raw_target) && has_allow_pickle_true(call) {
+            let line = self.line_index.line_number(usize::from(call.range.start()));
+            let (executable_name, shell_mode, literal_arg_evidence) =
+                extract_call_evidence(call, self.limits.max_string_literal_bytes);
+            self.call_sites.push(CallSite {
+                raw_target,
+                resolved_target,
+                category: PythonCapabilityCategory::NumPyAllowPickle,
+                execution_context: context,
+                line: Some(line),
+                executable_name,
+                shell_mode,
+                literal_arg_evidence,
+                reflection_resolved,
+            });
+            return;
+        }
 
         if let Some(category) = classify_target_capability(target_to_check) {
             let line = self.line_index.line_number(usize::from(call.range.start()));
@@ -484,4 +503,32 @@ fn sanitize_and_truncate(s: &str, max_bytes: usize) -> String {
     } else {
         sanitized
     }
+}
+
+fn is_numpy_load_call(target_to_check: &str, raw_target: &str) -> bool {
+    let check = target_to_check.to_ascii_lowercase();
+    let raw = raw_target.to_ascii_lowercase();
+    check == "numpy.load"
+        || check == "np.load"
+        || check == "numpy.lib.format.read_array"
+        || check == "np.lib.format.read_array"
+        || raw == "numpy.load"
+        || raw == "np.load"
+        || raw == "numpy.lib.format.read_array"
+        || raw == "np.lib.format.read_array"
+}
+
+fn has_allow_pickle_true(call: &ExprCall) -> bool {
+    for kw in &call.keywords {
+        if let Some(arg) = &kw.arg {
+            if arg.as_str() == "allow_pickle" {
+                if let Expr::Constant(c) = &kw.value {
+                    if let ast::Constant::Bool(b) = c.value {
+                        return b;
+                    }
+                }
+            }
+        }
+    }
+    false
 }

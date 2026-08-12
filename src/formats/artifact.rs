@@ -1,6 +1,6 @@
 use super::{
-    coreml, executorch, gguf, keras, mlx, onnx, openvino, pickle, pytorch, safetensors, tensorflow,
-    tensorrt, tflite, ArtifactFormat, ArtifactIdentification,
+    coreml, executorch, gguf, keras, mlx, npy, onnx, openvino, pickle, pytorch, safetensors,
+    tensorflow, tensorrt, tflite, ArtifactFormat, ArtifactIdentification,
 };
 use crate::finding_evidence::{structural_invariant, EvidenceSubject, FindingBuilder};
 use crate::safeio::open_readonly_nofollow;
@@ -234,6 +234,8 @@ fn inspect_opened(
         ArtifactFormat::TensorFlowLite => "application/x-tflite",
         ArtifactFormat::KerasArchive => "application/x-keras",
         ArtifactFormat::KerasHdf5 => "application/x-hdf5",
+        ArtifactFormat::Npy => "application/x-numpy-npy",
+        ArtifactFormat::Npz => "application/x-numpy-npz",
         ArtifactFormat::Unknown => "application/octet-stream",
     };
     let session = crate::scanner::ScanSession::new(path, &file)?;
@@ -418,6 +420,37 @@ fn inspect_opened(
                 matches: vec!["[LF-KERAS-HDF5-LIMIT] HDF5 model recognized with explicit bounded capability limit".to_owned()], duration_ms: 0,
                 ..Default::default()
             }),
+            ArtifactFormat::Npy => {
+                results.extend(npy::scan(path, &file, size, &identity, media, budget)?);
+            }
+            ArtifactFormat::Npz => {
+                match crate::archive::inspect_opened(
+                    path,
+                    &file,
+                    &identity,
+                    &crate::archive::ArchiveLimits::default(),
+                    0,
+                    budget,
+                ) {
+                    Ok(arch_report) => results.extend(arch_report.findings),
+                    Err(error) => results.push(LayerScanResult {
+                        layer_digest: identity.clone(),
+                        media_type: media.to_owned(),
+                        check_type: crate::scanner::CheckType::NpyStructure,
+                        status: ScanStatus::Fail,
+                        finding_class: FindingClass::Structural,
+                        confidence: Confidence::High,
+                        detail: Some(format!(
+                            "NPZ archive container '{}' failed inspection safely: {error}",
+                            path.display()
+                        )),
+                        matches: vec![
+                            "[LF-NPY-STRUCT] NPZ archive inspection failed".to_owned(),
+                        ],
+                        ..Default::default()
+                    }),
+                }
+            }
             ArtifactFormat::Unknown => {
                 let mut prefix_buf = [0_u8; 512];
                 let mut cloned = file.try_clone()?;

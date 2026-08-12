@@ -135,7 +135,7 @@
       "metrics": {
         "wall_time_ms": 200.0,
         "cpu_time_ms": 190.0,
-        "peak_rss_kib": 42000,
+        "peak_rss_kib": 48500,
         "logical_source_bytes": 1048576,
         "physical_bytes_read": 50,
         "full_file_passes": 1,

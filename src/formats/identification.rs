@@ -101,6 +101,10 @@ pub fn map_extension_claim(path: &Path) -> Option<ArtifactFormat> {
         Some(ArtifactFormat::KerasArchive)
     } else if matches!(ext.as_str(), "h5" | "hdf5") {
         Some(ArtifactFormat::KerasHdf5)
+    } else if ext == "npy" {
+        Some(ArtifactFormat::Npy)
+    } else if ext == "npz" {
+        Some(ArtifactFormat::Npz)
     } else {
         None
     }
@@ -112,6 +116,9 @@ pub fn probe_magic(prefix: &[u8]) -> Vec<ArtifactFormat> {
 
     if prefix.starts_with(b"GGUF") {
         candidates.push(ArtifactFormat::Gguf);
+    }
+    if prefix.starts_with(b"\x93NUMPY") {
+        candidates.push(ArtifactFormat::Npy);
     }
     if prefix.len() >= 9 {
         let header_len = u64::from_le_bytes(prefix[..8].try_into().expect("8 bytes"));
@@ -152,6 +159,7 @@ pub fn probe_container(prefix: &[u8]) -> Vec<ArtifactFormat> {
     {
         candidates.push(ArtifactFormat::PyTorchZip);
         candidates.push(ArtifactFormat::KerasArchive);
+        candidates.push(ArtifactFormat::Npz);
     }
     candidates
 }
@@ -207,7 +215,10 @@ fn resolve_selected(
         if let Some(claimed) = extension_claim {
             if matches!(
                 claimed,
-                ArtifactFormat::Safetensors | ArtifactFormat::Gguf | ArtifactFormat::Onnx
+                ArtifactFormat::Safetensors
+                    | ArtifactFormat::Gguf
+                    | ArtifactFormat::Onnx
+                    | ArtifactFormat::Npy
             ) {
                 contradictions.push(FormatContradiction {
                     kind: ContradictionKind::ContainerSmuggling,
@@ -225,6 +236,7 @@ fn resolve_selected(
                     | ArtifactFormat::PyTorchZip
                     | ArtifactFormat::TorchScript
                     | ArtifactFormat::TorchPackage
+                    | ArtifactFormat::Npz
             ) {
                 return claimed;
             } else if claimed == ArtifactFormat::Pickle {

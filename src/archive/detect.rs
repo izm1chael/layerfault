@@ -37,7 +37,7 @@ pub fn detect_archive_format(path: &Path, prefix: &[u8]) -> DetectionResult {
 
     let claimed = if filename.ends_with(".whl") {
         ArchiveFormat::Wheel
-    } else if filename.ends_with(".zip") {
+    } else if filename.ends_with(".zip") || filename.ends_with(".npz") {
         ArchiveFormat::Zip
     } else if filename.ends_with(".tar.gz") || filename.ends_with(".tgz") {
         ArchiveFormat::TarGz

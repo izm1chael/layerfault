@@ -7,6 +7,7 @@ pub mod gguf;
 pub mod identification;
 pub mod keras;
 pub mod mlx;
+pub mod npy;
 pub mod onnx;
 pub mod openvino;
 pub mod pickle;
@@ -47,6 +48,8 @@ pub enum ArtifactFormat {
     TensorFlowLite,
     KerasArchive,
     KerasHdf5,
+    Npy,
+    Npz,
     Unknown,
 }
 
@@ -75,6 +78,8 @@ impl ArtifactFormat {
             Self::TensorFlowLite => "tflite",
             Self::KerasArchive => "keras",
             Self::KerasHdf5 => "keras-hdf5",
+            Self::Npy => "npy",
+            Self::Npz => "npz",
             Self::Unknown => "unknown",
         }
     }

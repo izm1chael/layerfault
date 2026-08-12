@@ -483,7 +483,7 @@ fn opcode_mnemonic(opcode: u8) -> &'static str {
     }
 }
 
-fn analyze_reader<R: Read + Seek>(
+pub(crate) fn analyze_reader<R: Read + Seek>(
     mut reader: R,
     len: u64,
     budget: Option<&crate::budget::ScanBudget>,
