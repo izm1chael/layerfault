@@ -26,6 +26,7 @@ pub struct CapabilityReport {
     pub llama_active_analysis: bool,
     pub transformers_active_analysis: bool,
     pub managed_python_runtime: Option<String>,
+    pub reflink_staging: bool,
     pub tools: BTreeMap<String, bool>,
     pub notes: Vec<String>,
 }
@@ -291,6 +292,7 @@ pub fn capabilities() -> CapabilityReport {
             && tools.get("llama-server").copied().unwrap_or(false),
         transformers_active_analysis: active_sandbox && python_ready,
         managed_python_runtime: managed_python.map(|path| path.display().to_string()),
+        reflink_staging: crate::binding::probe_reflink_support(),
         tools,
         notes,
     }

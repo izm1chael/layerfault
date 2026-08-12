@@ -6,6 +6,55 @@ use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum StagingMechanism {
+    Reflink,
+    StreamCopy,
+}
+
+pub fn probe_reflink_support() -> bool {
+    #[cfg(target_os = "linux")]
+    {
+        let parent = match crate::paths::config_dir() {
+            Ok(p) => p.join("reflink-probe"),
+            Err(_) => std::env::temp_dir().join("layerfault-reflink-probe"),
+        };
+        if fs::create_dir_all(&parent).is_err() {
+            return false;
+        }
+        let pid = std::process::id();
+        let src_path = parent.join(format!(".probe_src_{pid}"));
+        let dst_path = parent.join(format!(".probe_dst_{pid}"));
+
+        let result = (|| -> Result<bool> {
+            fs::write(&src_path, b"reflink_probe_bytes")?;
+            let source_file = open_readonly_nofollow(&src_path)?;
+            let mut options = OpenOptions::new();
+            options.write(true).create_new(true);
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::OpenOptionsExt;
+                options.mode(0o600);
+            }
+            let dest_file = options.open(&dst_path)?;
+            let success = rustix::fs::ioctl_ficlone(&dest_file, &source_file).is_ok();
+            Ok(success)
+        })()
+        .unwrap_or(false);
+
+        let _ = fs::remove_file(&src_path);
+        let _ = fs::remove_file(&dst_path);
+        let _ = fs::remove_dir(&parent);
+
+        result
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        false
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum BindingKind {
     #[serde(alias = "none", alias = "best-effort", alias = "best_effort")]
@@ -53,6 +102,7 @@ pub struct BoundMember {
     pub expected_sha256: String,
     pub staged_sha256: String,
     pub bytes: u64,
+    pub mechanism: StagingMechanism,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -134,6 +184,8 @@ pub struct StagedPackage {
     pub staged_fingerprint: String,
     pub members: Vec<BoundMember>,
     pub record: BindingRecord,
+    pub reflinked_members: usize,
+    pub copied_members: usize,
 }
 
 impl StagedPackage {
@@ -175,6 +227,205 @@ impl Drop for StagedPackage {
     }
 }
 
+pub fn copy_or_reflink_member(
+    source_path: &Path,
+    staged_target_path: &Path,
+    expected_sha256: &str,
+    executable: bool,
+) -> Result<(StagingMechanism, u64, String)> {
+    copy_or_reflink_member_impl(
+        source_path,
+        staged_target_path,
+        expected_sha256,
+        executable,
+        false,
+    )
+}
+
+pub fn copy_or_reflink_member_force_fallback(
+    source_path: &Path,
+    staged_target_path: &Path,
+    expected_sha256: &str,
+    executable: bool,
+) -> Result<(StagingMechanism, u64, String)> {
+    copy_or_reflink_member_impl(
+        source_path,
+        staged_target_path,
+        expected_sha256,
+        executable,
+        true,
+    )
+}
+
+fn copy_or_reflink_member_impl(
+    source_path: &Path,
+    staged_target_path: &Path,
+    expected_sha256: &str,
+    executable: bool,
+    force_fallback: bool,
+) -> Result<(StagingMechanism, u64, String)> {
+    let source_file = open_readonly_nofollow(source_path)?;
+    let pre_meta = fs::symlink_metadata(source_path)
+        .with_context(|| format!("Unable to inspect source file '{}'", source_path.display()))?;
+    if pre_meta.file_type().is_symlink() {
+        bail!("Source file '{}' is a symlink", source_path.display());
+    }
+    if !pre_meta.is_file() {
+        bail!(
+            "Source file '{}' is not a regular file",
+            source_path.display()
+        );
+    }
+
+    if let Some(target_parent) = staged_target_path.parent() {
+        fs::create_dir_all(target_parent)?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(target_parent, fs::Permissions::from_mode(0o700))?;
+        }
+    }
+
+    if let Ok(target_meta) = fs::symlink_metadata(staged_target_path) {
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::MetadataExt;
+            if pre_meta.dev() == target_meta.dev() && pre_meta.ino() == target_meta.ino() {
+                bail!(
+                    "Hardlink detected between source '{}' and destination '{}'; hardlinks break isolation and are strictly prohibited for secure staging",
+                    source_path.display(),
+                    staged_target_path.display()
+                );
+            }
+        }
+    }
+
+    let mut options = OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    let dest_file = options.open(staged_target_path).with_context(|| {
+        format!(
+            "Unable to create staged file '{}'",
+            staged_target_path.display()
+        )
+    })?;
+
+    let mut mechanism = StagingMechanism::StreamCopy;
+    let mut reflink_ok = false;
+
+    if !force_fallback {
+        #[cfg(target_os = "linux")]
+        {
+            if rustix::fs::ioctl_ficlone(&dest_file, &source_file).is_ok() {
+                reflink_ok = true;
+                mechanism = StagingMechanism::Reflink;
+            }
+        }
+    }
+
+    let (observed_sha256, copied_bytes) = if reflink_ok {
+        drop(dest_file);
+        let mut dest_read = open_readonly_nofollow(staged_target_path)?;
+        let mut hasher = Sha256::new();
+        let mut buffer = vec![0_u8; 1024 * 1024];
+        let mut bytes = 0_u64;
+        loop {
+            let n = dest_read.read(&mut buffer)?;
+            if n == 0 {
+                break;
+            }
+            hasher.update(&buffer[..n]);
+            bytes = bytes.saturating_add(n as u64);
+        }
+        let obs = format!("sha256:{}", hex::encode(hasher.finalize()));
+        crate::perf_metrics::record_logical_staged_bytes(bytes);
+        crate::perf_metrics::record_reflinked_member();
+        (obs, bytes)
+    } else {
+        let mut dest_write = dest_file;
+        let mut reader = source_file.try_clone()?;
+        let mut hasher = Sha256::new();
+        let mut buffer = vec![0_u8; 1024 * 1024];
+        let mut bytes = 0_u64;
+        loop {
+            let n = reader.read(&mut buffer)?;
+            if n == 0 {
+                break;
+            }
+            dest_write.write_all(&buffer[..n])?;
+            hasher.update(&buffer[..n]);
+            bytes = bytes.saturating_add(n as u64);
+        }
+        dest_write.sync_all()?;
+        let obs = format!("sha256:{}", hex::encode(hasher.finalize()));
+        crate::perf_metrics::record_logical_staged_bytes(bytes);
+        crate::perf_metrics::record_stream_copied_bytes(bytes);
+        crate::perf_metrics::record_copied_member();
+        (obs, bytes)
+    };
+
+    let post_source_meta = fs::symlink_metadata(source_path)?;
+    if pre_meta.len() != post_source_meta.len() {
+        bail!(
+            "Source file '{}' changed size during staging (TOCTOU violation)",
+            source_path.display()
+        );
+    }
+
+    let post_dest_meta = fs::symlink_metadata(staged_target_path)?;
+    if !post_dest_meta.is_file() {
+        bail!(
+            "Staged destination file '{}' is not a regular file",
+            staged_target_path.display()
+        );
+    }
+
+    if post_dest_meta.len() != pre_meta.len() {
+        bail!(
+            "Staged destination file '{}' size mismatch: source {}, destination {}",
+            staged_target_path.display(),
+            pre_meta.len(),
+            post_dest_meta.len()
+        );
+    }
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        if post_source_meta.dev() == post_dest_meta.dev()
+            && post_source_meta.ino() == post_dest_meta.ino()
+        {
+            bail!(
+                "Hardlink detected between source '{}' and destination '{}'; hardlinks break isolation and are strictly prohibited for secure staging",
+                source_path.display(),
+                staged_target_path.display()
+            );
+        }
+    }
+
+    if !observed_sha256.eq_ignore_ascii_case(expected_sha256) {
+        bail!(
+            "Staged file '{}' hash changed during staging: expected {}, observed {}",
+            staged_target_path.display(),
+            expected_sha256,
+            observed_sha256
+        );
+    }
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mode = if executable { 0o500 } else { 0o400 };
+        fs::set_permissions(staged_target_path, fs::Permissions::from_mode(mode))?;
+    }
+
+    Ok((mechanism, copied_bytes, observed_sha256))
+}
+
 pub fn stage_verified(path: &Path, expected_sha256: &str) -> Result<StagedArtifact> {
     let parent = crate::paths::config_dir()?.join("admission-staging");
     stage_verified_under(path, expected_sha256, &parent, false)
@@ -196,7 +447,6 @@ pub fn stage_verified_under(
             "Execution binding requires a canonical sha256 artifact digest"
         ));
     }
-    let source = open_readonly_nofollow(path)?;
     crate::paths::ensure_private_dir(parent)?;
     let short = expected_sha256
         .trim_start_matches("sha256:")
@@ -209,39 +459,20 @@ pub fn stage_verified_under(
         .ok_or_else(|| anyhow!("Artifact path '{}' has no file name", path.display()))?;
     let target = root.join(file_name);
 
-    let mut options = OpenOptions::new();
-    options.write(true).create_new(true);
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::OpenOptionsExt;
-        options.mode(0o600);
-    }
-    let mut destination = options
-        .open(&target)
-        .with_context(|| format!("Unable to create staged artifact '{}'", target.display()))?;
-    let mut reader = source.try_clone()?;
-    let mut hasher = Sha256::new();
-    let mut buffer = vec![0_u8; 1024 * 1024];
-    loop {
-        let n = reader.read(&mut buffer)?;
-        if n == 0 {
-            break;
-        }
-        destination.write_all(&buffer[..n])?;
-        hasher.update(&buffer[..n]);
-    }
-    destination.sync_all()?;
-    let observed = format!("sha256:{}", hex::encode(hasher.finalize()));
-    if !observed.eq_ignore_ascii_case(expected_sha256) {
-        let _ = fs::remove_dir_all(&root);
-        return Err(anyhow!("Artifact changed between admission and execution binding: expected {expected_sha256}, observed {observed}"));
-    }
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let mode = if executable { 0o500 } else { 0o400 };
-        fs::set_permissions(&target, fs::Permissions::from_mode(mode))?;
-    }
+    let (mechanism, _bytes, observed) =
+        match copy_or_reflink_member(path, &target, expected_sha256, executable) {
+            Ok(res) => res,
+            Err(err) => {
+                let _ = fs::remove_dir_all(&root);
+                return Err(err);
+            }
+        };
+
+    let mechanism_str = match mechanism {
+        StagingMechanism::Reflink => "reflink",
+        StagingMechanism::StreamCopy => "stream-copy",
+    };
+
     Ok(StagedArtifact {
         root: root.clone(),
         path: target.clone(),
@@ -250,7 +481,9 @@ pub fn stage_verified_under(
             original: path.display().to_string(),
             runtime_path: Some(target.display().to_string()),
             sha256: Some(observed),
-            detail: "Runtime receives a private copy created from a no-follow file descriptor after admission; the copy digest is rechecked before launch".to_owned(),
+            detail: format!(
+                "Runtime receives a private {mechanism_str} copy created from a no-follow file descriptor after admission; the copy digest is rechecked before launch"
+            ),
             manifest: None,
         },
     })
@@ -302,6 +535,9 @@ pub fn stage_verified_package_under(
     }
 
     let mut members = Vec::new();
+    let mut reflinked_members = 0usize;
+    let mut copied_members = 0usize;
+
     for entry in &expected_report.files {
         if entry.kind == "symlink" {
             let _ = fs::remove_dir_all(&staging_root);
@@ -334,91 +570,29 @@ pub fn stage_verified_package_under(
         }
 
         let source_path = root.join(rel_path);
-        let pre_meta = fs::symlink_metadata(&source_path).with_context(|| {
-            format!(
-                "Unable to inspect package member '{}'",
-                source_path.display()
-            )
-        })?;
-        if pre_meta.file_type().is_symlink() {
-            let _ = fs::remove_dir_all(&staging_root);
-            bail!(
-                "Package member '{}' resolved to a symlink",
-                source_path.display()
-            );
-        }
-
-        let source_file = open_readonly_nofollow(&source_path)?;
         let staged_target_path = staged_pkg_dir.join(rel_path);
-        if let Some(target_parent) = staged_target_path.parent() {
-            fs::create_dir_all(target_parent)?;
-            #[cfg(unix)]
+
+        let (mechanism, bytes, observed_sha256) =
+            match copy_or_reflink_member(&source_path, &staged_target_path, expected_sha256, false)
             {
-                use std::os::unix::fs::PermissionsExt;
-                fs::set_permissions(target_parent, fs::Permissions::from_mode(0o700))?;
-            }
-        }
+                Ok(res) => res,
+                Err(err) => {
+                    let _ = fs::remove_dir_all(&staging_root);
+                    return Err(err);
+                }
+            };
 
-        let mut options = OpenOptions::new();
-        options.write(true).create_new(true);
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::OpenOptionsExt;
-            options.mode(0o600);
-        }
-        let mut dest_file = options.open(&staged_target_path).with_context(|| {
-            format!(
-                "Unable to create staged package member '{}'",
-                staged_target_path.display()
-            )
-        })?;
-
-        let mut reader = source_file.try_clone()?;
-        let mut hasher = Sha256::new();
-        let mut buffer = vec![0_u8; 1024 * 1024];
-        let mut copied_bytes = 0_u64;
-        loop {
-            let n = reader.read(&mut buffer)?;
-            if n == 0 {
-                break;
-            }
-            dest_file.write_all(&buffer[..n])?;
-            hasher.update(&buffer[..n]);
-            copied_bytes = copied_bytes.saturating_add(n as u64);
-        }
-        dest_file.sync_all()?;
-
-        let post_meta = fs::symlink_metadata(&source_path)?;
-        if pre_meta.len() != post_meta.len() {
-            let _ = fs::remove_dir_all(&staging_root);
-            bail!(
-                "Package member '{}' changed size during staging copy (TOCTOU violation)",
-                source_path.display()
-            );
-        }
-
-        let observed_sha256 = format!("sha256:{}", hex::encode(hasher.finalize()));
-        if !observed_sha256.eq_ignore_ascii_case(expected_sha256) {
-            let _ = fs::remove_dir_all(&staging_root);
-            bail!(
-                "Package member '{}' hash changed during staging copy: expected {}, observed {}",
-                entry.relative_path,
-                expected_sha256,
-                observed_sha256
-            );
-        }
-
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            fs::set_permissions(&staged_target_path, fs::Permissions::from_mode(0o400))?;
+        match mechanism {
+            StagingMechanism::Reflink => reflinked_members += 1,
+            StagingMechanism::StreamCopy => copied_members += 1,
         }
 
         members.push(BoundMember {
             relative_path: entry.relative_path.clone(),
             expected_sha256: expected_sha256.to_owned(),
             staged_sha256: observed_sha256,
-            bytes: copied_bytes,
+            bytes,
+            mechanism,
         });
     }
 
@@ -454,7 +628,7 @@ pub fn stage_verified_package_under(
         runtime_path: Some(staged_pkg_dir.display().to_string()),
         sha256: Some(staged_fingerprint.clone()),
         detail: format!(
-            "Private read-only package staged from no-follow descriptors; verified {} members ({total_bytes} bytes); staged fingerprint equals admitted fingerprint {}",
+            "Private read-only package staged from no-follow descriptors; verified {} members ({total_bytes} bytes, {reflinked_members} reflinked, {copied_members} copied); staged fingerprint equals admitted fingerprint {}",
             members.len(),
             expected_report.fingerprint
         ),
@@ -468,6 +642,8 @@ pub fn stage_verified_package_under(
         staged_fingerprint,
         members,
         record,
+        reflinked_members,
+        copied_members,
     })
 }
 
@@ -554,24 +730,261 @@ fn create_unique_dir(parent: &Path, short: &str) -> Result<PathBuf> {
 mod tests {
     use super::*;
     use sha2::{Digest, Sha256};
+
     #[test]
-    fn staged_copy_matches_expected_digest() -> Result<()> {
+    fn test_reflink_unsupported_fallback() -> Result<()> {
         let base = std::env::temp_dir().join(format!(
-            "layerfault-binding-test-{}-{}",
+            "layerfault-reflink-fallback-{}-{}",
+            std::process::id(),
+            crate::paths::now_unix()
+        ));
+        fs::create_dir_all(&base)?;
+        let source = base.join("source.dat");
+        let dest = base.join("dest.dat");
+        fs::write(&source, b"test reflink fallback content")?;
+        let digest = format!(
+            "sha256:{}",
+            hex::encode(Sha256::digest(b"test reflink fallback content"))
+        );
+
+        let (mechanism, bytes, sha) =
+            copy_or_reflink_member_force_fallback(&source, &dest, &digest, false)?;
+        assert_eq!(mechanism, StagingMechanism::StreamCopy);
+        assert_eq!(bytes, b"test reflink fallback content".len() as u64);
+        assert_eq!(sha, digest);
+        assert_eq!(fs::read(&dest)?, b"test reflink fallback content");
+
+        let _ = fs::remove_dir_all(base);
+        Ok(())
+    }
+
+    #[test]
+    fn test_destination_hash_matches() -> Result<()> {
+        let base = std::env::temp_dir().join(format!(
+            "layerfault-dest-hash-{}-{}",
             std::process::id(),
             crate::paths::now_unix()
         ));
         let parent = base.join("staging");
         fs::create_dir_all(&base)?;
         let source = base.join("source.gguf");
-        fs::write(&source, b"verified artifact")?;
+        fs::write(&source, b"verified artifact content")?;
         let digest = format!(
             "sha256:{}",
-            hex::encode(Sha256::digest(b"verified artifact"))
+            hex::encode(Sha256::digest(b"verified artifact content"))
         );
+
         let staged = stage_verified_under(&source, &digest, &parent, false)?;
-        assert_eq!(fs::read(staged.path())?, b"verified artifact");
+        assert_eq!(fs::read(staged.path())?, b"verified artifact content");
+        assert_eq!(staged.record.sha256.as_deref(), Some(digest.as_str()));
+
         staged.cleanup()?;
+        let _ = fs::remove_dir_all(base);
+        Ok(())
+    }
+
+    #[test]
+    fn test_source_mutation_after_clone_does_not_alter_staged_bytes() -> Result<()> {
+        let base = std::env::temp_dir().join(format!(
+            "layerfault-source-mutation-{}-{}",
+            std::process::id(),
+            crate::paths::now_unix()
+        ));
+        let parent = base.join("staging");
+        fs::create_dir_all(&base)?;
+        let source = base.join("model.safetensors");
+        fs::write(&source, b"original uncorrupted model weights")?;
+        let digest = format!(
+            "sha256:{}",
+            hex::encode(Sha256::digest(b"original uncorrupted model weights"))
+        );
+
+        let staged = stage_verified_under(&source, &digest, &parent, false)?;
+        assert_eq!(
+            fs::read(staged.path())?,
+            b"original uncorrupted model weights"
+        );
+
+        // Mutate source file after staging
+        fs::write(&source, b"CORRUPTED PAYLOAD BY ATTACKER")?;
+
+        // Staged copy must remain untampered
+        assert_eq!(
+            fs::read(staged.path())?,
+            b"original uncorrupted model weights"
+        );
+        staged.revalidate()?;
+
+        staged.cleanup()?;
+        let _ = fs::remove_dir_all(base);
+        Ok(())
+    }
+
+    #[test]
+    fn test_staged_mutation_does_not_alter_source() -> Result<()> {
+        let base = std::env::temp_dir().join(format!(
+            "layerfault-staged-mutation-{}-{}",
+            std::process::id(),
+            crate::paths::now_unix()
+        ));
+        let parent = base.join("staging");
+        fs::create_dir_all(&base)?;
+        let source = base.join("model.bin");
+        fs::write(&source, b"source model data")?;
+        let digest = format!(
+            "sha256:{}",
+            hex::encode(Sha256::digest(b"source model data"))
+        );
+
+        let staged = stage_verified_under(&source, &digest, &parent, false)?;
+
+        // Verify staged file is read-only (0o400)
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = fs::metadata(staged.path())?.permissions().mode() & 0o777;
+            assert_eq!(mode, 0o400);
+        }
+
+        // Attempt writing to staged file should fail because it's read-only
+        let write_res = OpenOptions::new().write(true).open(staged.path());
+        assert!(write_res.is_err());
+
+        // Source file remains untouched
+        assert_eq!(fs::read(&source)?, b"source model data");
+
+        staged.cleanup()?;
+        let _ = fs::remove_dir_all(base);
+        Ok(())
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn test_hardlink_detection_refusal() -> Result<()> {
+        let base = std::env::temp_dir().join(format!(
+            "layerfault-hardlink-test-{}-{}",
+            std::process::id(),
+            crate::paths::now_unix()
+        ));
+        fs::create_dir_all(&base)?;
+        let source = base.join("source.dat");
+        let dest = base.join("hardlink_dest.dat");
+        fs::write(&source, b"hardlink test data")?;
+
+        // Manually create a hardlink destination
+        fs::hard_link(&source, &dest)?;
+
+        let digest = format!(
+            "sha256:{}",
+            hex::encode(Sha256::digest(b"hardlink test data"))
+        );
+
+        // Copying/staging should refuse hardlinks because source and dest share inode
+        let result = copy_or_reflink_member(&source, &dest, &digest, false);
+        assert!(result.is_err());
+        let err_msg = format!("{:#}", result.unwrap_err());
+        assert!(err_msg.contains("Hardlink detected") || err_msg.contains("exists"));
+
+        let _ = fs::remove_dir_all(base);
+        Ok(())
+    }
+
+    #[test]
+    fn test_partial_failure_cleans_destination() -> Result<()> {
+        let base = std::env::temp_dir().join(format!(
+            "layerfault-partial-fail-{}-{}",
+            std::process::id(),
+            crate::paths::now_unix()
+        ));
+        let pkg_dir = base.join("bad_package");
+        fs::create_dir_all(&pkg_dir)?;
+        fs::write(pkg_dir.join("file1.json"), b"valid file 1")?;
+        fs::write(pkg_dir.join("file2.json"), b"file 2 content")?;
+
+        let mut report = crate::package::inspect(&pkg_dir)?;
+        // Tamper with expected hash of file2 in admission report
+        for entry in &mut report.files {
+            if entry.relative_path == "file2.json" {
+                entry.sha256 = Some(
+                    "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+                        .to_owned(),
+                );
+            }
+        }
+
+        let parent = base.join("staging_parent");
+        let result = stage_verified_package_under(&pkg_dir, &report, &parent);
+        assert!(result.is_err());
+
+        // Verify that parent staging directory was cleaned up and contains no leaked artifacts
+        if parent.exists() {
+            let entries = fs::read_dir(&parent)?.count();
+            assert_eq!(
+                entries, 0,
+                "Partial failure leaked staging files in parent directory"
+            );
+        }
+
+        let _ = fs::remove_dir_all(base);
+        Ok(())
+    }
+
+    #[test]
+    fn test_mixed_reflink_copy_package() -> Result<()> {
+        let base = std::env::temp_dir().join(format!(
+            "layerfault-mixed-pkg-{}-{}",
+            std::process::id(),
+            crate::paths::now_unix()
+        ));
+        let pkg_dir = base.join("mixed_package");
+        fs::create_dir_all(&pkg_dir)?;
+        fs::write(pkg_dir.join("config.json"), b"{\"model_type\": \"mixed\"}")?;
+        fs::write(pkg_dir.join("weights.safetensors"), b"safetensors weights")?;
+
+        let report = crate::package::inspect(&pkg_dir)?;
+        let parent = base.join("staging_parent");
+        let staged_pkg = stage_verified_package_under(&pkg_dir, &report, &parent)?;
+
+        assert_eq!(staged_pkg.members.len(), 2);
+        assert_eq!(staged_pkg.reflinked_members + staged_pkg.copied_members, 2);
+        assert_eq!(staged_pkg.source_fingerprint, report.fingerprint);
+        assert_eq!(staged_pkg.staged_fingerprint, report.fingerprint);
+
+        staged_pkg.revalidate()?;
+        staged_pkg.cleanup()?;
+        let _ = fs::remove_dir_all(base);
+        Ok(())
+    }
+
+    #[test]
+    fn test_read_only_execution_mount_preserved() -> Result<()> {
+        let base = std::env::temp_dir().join(format!(
+            "layerfault-readonly-mount-{}-{}",
+            std::process::id(),
+            crate::paths::now_unix()
+        ));
+        let pkg_dir = base.join("ro_package");
+        fs::create_dir_all(&pkg_dir)?;
+        fs::write(pkg_dir.join("config.json"), b"{}")?;
+
+        let report = crate::package::inspect(&pkg_dir)?;
+        let parent = base.join("staging_parent");
+        let staged_pkg = stage_verified_package_under(&pkg_dir, &report, &parent)?;
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let dir_mode = fs::metadata(staged_pkg.path())?.permissions().mode() & 0o777;
+            assert_eq!(dir_mode, 0o700);
+
+            let file_mode = fs::metadata(staged_pkg.path().join("config.json"))?
+                .permissions()
+                .mode()
+                & 0o777;
+            assert_eq!(file_mode, 0o400);
+        }
+
+        staged_pkg.cleanup()?;
         let _ = fs::remove_dir_all(base);
         Ok(())
     }
@@ -604,38 +1017,6 @@ mod tests {
     }
 
     #[test]
-    fn staged_package_verifies_members_and_fingerprint() -> Result<()> {
-        let base = std::env::temp_dir().join(format!(
-            "layerfault-pkg-binding-test-{}-{}",
-            std::process::id(),
-            crate::paths::now_unix()
-        ));
-        let pkg_dir = base.join("model_package");
-        fs::create_dir_all(&pkg_dir)?;
-        fs::write(pkg_dir.join("config.json"), b"{\"model_type\": \"test\"}")?;
-        fs::write(pkg_dir.join("model.safetensors"), b"fake weight bytes")?;
-
-        let report = crate::package::inspect(&pkg_dir)?;
-        let parent = base.join("staging_parent");
-        let staged_pkg = stage_verified_package_under(&pkg_dir, &report, &parent)?;
-
-        assert_eq!(staged_pkg.source_fingerprint, report.fingerprint);
-        assert_eq!(staged_pkg.staged_fingerprint, report.fingerprint);
-        assert_eq!(staged_pkg.members.len(), 2);
-        assert!(staged_pkg.path().join("config.json").is_file());
-        assert!(staged_pkg.path().join("model.safetensors").is_file());
-        assert_eq!(
-            fs::read(staged_pkg.path().join("config.json"))?,
-            b"{\"model_type\": \"test\"}"
-        );
-
-        staged_pkg.revalidate()?;
-        staged_pkg.cleanup()?;
-        let _ = fs::remove_dir_all(base);
-        Ok(())
-    }
-
-    #[test]
     fn staged_package_refuses_symlink_members() -> Result<()> {
         let base = std::env::temp_dir().join(format!(
             "layerfault-pkg-symlink-test-{}-{}",
@@ -651,7 +1032,6 @@ mod tests {
         let mut report = crate::package::inspect(&pkg_dir)?;
 
         let parent = base.join("staging_parent");
-        // Ensure that if a symlink exists, staging fails cleanly
         report.files.push(crate::package::PackageEntry {
             relative_path: "link.json".to_owned(),
             kind: "symlink".to_owned(),

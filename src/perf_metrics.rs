@@ -13,6 +13,10 @@ pub static GLOBAL_TEMP_DISK_BYTES: AtomicU64 = AtomicU64::new(0);
 pub static GLOBAL_CACHE_HITS: AtomicU64 = AtomicU64::new(0);
 pub static GLOBAL_CACHE_MISSES: AtomicU64 = AtomicU64::new(0);
 pub static GLOBAL_SCHEDULER_PEAK_RESERVATIONS: AtomicUsize = AtomicUsize::new(0);
+pub static GLOBAL_LOGICAL_STAGED_BYTES: AtomicU64 = AtomicU64::new(0);
+pub static GLOBAL_STREAM_COPIED_BYTES: AtomicU64 = AtomicU64::new(0);
+pub static GLOBAL_REFLINKED_MEMBERS: AtomicU64 = AtomicU64::new(0);
+pub static GLOBAL_COPIED_MEMBERS: AtomicU64 = AtomicU64::new(0);
 
 /// Reset all global instrumentation counters.
 pub fn reset_global_counters() {
@@ -23,6 +27,10 @@ pub fn reset_global_counters() {
     GLOBAL_CACHE_HITS.store(0, Ordering::Relaxed);
     GLOBAL_CACHE_MISSES.store(0, Ordering::Relaxed);
     GLOBAL_SCHEDULER_PEAK_RESERVATIONS.store(0, Ordering::Relaxed);
+    GLOBAL_LOGICAL_STAGED_BYTES.store(0, Ordering::Relaxed);
+    GLOBAL_STREAM_COPIED_BYTES.store(0, Ordering::Relaxed);
+    GLOBAL_REFLINKED_MEMBERS.store(0, Ordering::Relaxed);
+    GLOBAL_COPIED_MEMBERS.store(0, Ordering::Relaxed);
 }
 
 /// Record additional logical source bytes processed.
@@ -55,6 +63,26 @@ pub fn record_cache_miss() {
     GLOBAL_CACHE_MISSES.fetch_add(1, Ordering::Relaxed);
 }
 
+/// Record logical staged bytes.
+pub fn record_logical_staged_bytes(bytes: u64) {
+    GLOBAL_LOGICAL_STAGED_BYTES.fetch_add(bytes, Ordering::Relaxed);
+}
+
+/// Record stream copied bytes during staging fallback.
+pub fn record_stream_copied_bytes(bytes: u64) {
+    GLOBAL_STREAM_COPIED_BYTES.fetch_add(bytes, Ordering::Relaxed);
+}
+
+/// Record a reflinked package member.
+pub fn record_reflinked_member() {
+    GLOBAL_REFLINKED_MEMBERS.fetch_add(1, Ordering::Relaxed);
+}
+
+/// Record a stream-copied package member.
+pub fn record_copied_member() {
+    GLOBAL_COPIED_MEMBERS.fetch_add(1, Ordering::Relaxed);
+}
+
 /// Update peak scheduler reservations if `current` exceeds current stored peak.
 pub fn record_scheduler_reservation(current: usize) {
     let mut prev = GLOBAL_SCHEDULER_PEAK_RESERVATIONS.load(Ordering::Relaxed);
@@ -84,6 +112,10 @@ pub struct PerformanceMetrics {
     pub cache_hits: u32,
     pub cache_misses: u32,
     pub scheduler_peak_reservations: usize,
+    pub logical_staged_bytes: u64,
+    pub stream_copied_bytes: u64,
+    pub reflinked_members: u64,
+    pub copied_members: u64,
 }
 
 impl PerformanceMetrics {
@@ -100,6 +132,10 @@ impl PerformanceMetrics {
             cache_hits: GLOBAL_CACHE_HITS.load(Ordering::Relaxed) as u32,
             cache_misses: GLOBAL_CACHE_MISSES.load(Ordering::Relaxed) as u32,
             scheduler_peak_reservations: GLOBAL_SCHEDULER_PEAK_RESERVATIONS.load(Ordering::Relaxed),
+            logical_staged_bytes: GLOBAL_LOGICAL_STAGED_BYTES.load(Ordering::Relaxed),
+            stream_copied_bytes: GLOBAL_STREAM_COPIED_BYTES.load(Ordering::Relaxed),
+            reflinked_members: GLOBAL_REFLINKED_MEMBERS.load(Ordering::Relaxed),
+            copied_members: GLOBAL_COPIED_MEMBERS.load(Ordering::Relaxed),
         }
     }
 }
@@ -320,6 +356,7 @@ mod tests {
             cache_hits: 10,
             cache_misses: 2,
             scheduler_peak_reservations: 4,
+            ..Default::default()
         };
 
         let current = PerformanceMetrics {
@@ -333,6 +370,7 @@ mod tests {
             cache_hits: 10,
             cache_misses: 2,
             scheduler_peak_reservations: 4,
+            ..Default::default()
         };
 
         let thresholds = ThresholdConfig::default();

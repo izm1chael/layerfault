@@ -47,6 +47,7 @@ fn test_baseline_comparison_evaluation() {
         cache_hits: 5,
         cache_misses: 1,
         scheduler_peak_reservations: 4,
+        ..Default::default()
     };
 
     // Within default thresholds (<20% wall/rss, 0 pass diff, <25% temp disk)
@@ -61,6 +62,7 @@ fn test_baseline_comparison_evaluation() {
         cache_hits: 5,
         cache_misses: 1,
         scheduler_peak_reservations: 4,
+        ..Default::default()
     };
 
     let thresholds = ThresholdConfig::default();
@@ -86,6 +88,7 @@ fn test_baseline_comparison_evaluation() {
         cache_hits: 5,
         cache_misses: 1,
         scheduler_peak_reservations: 4,
+        ..Default::default()
     };
 
     let res_fail = BaselineComparison::evaluate(

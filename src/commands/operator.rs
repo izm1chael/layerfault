@@ -280,7 +280,7 @@ pub(crate) fn run_version(args: VersionArgs) -> Result<()> {
                 "report_schema":"1.0", "policy_schema":1, "baseline_schema":1,
                 "supported_formats":["gguf","safetensors","safetensors-index","pytorch-zip","torchscript","torch-package","executorch","openvino-ir","tensorrt-engine","coreml-model","coreml-package","mlx-package","model-package"],
                 "sources":["ollama","lmstudio","llama-cpp","hf-cache","file","directory"],
-                "capabilities":["package-fingerprint","package-security","runtime-advisories","execution-binding","signed-evidence","behavioural-analysis","differential-behaviour","sandbox-telemetry","host-capabilities"]
+                "capabilities":["package-fingerprint","package-security","runtime-advisories","execution-binding","signed-evidence","behavioural-analysis","differential-behaviour","sandbox-telemetry","host-capabilities","reflink-staging"]
             }))?
         );
     } else {
