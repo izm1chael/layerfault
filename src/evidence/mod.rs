@@ -1,3 +1,5 @@
+pub mod bundle;
+
 use crate::advisory::RuntimeEvaluation;
 use crate::binding::BindingRecord;
 use crate::safeio::{open_readonly_nofollow, read_all_from_file};
