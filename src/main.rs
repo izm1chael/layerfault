@@ -1090,6 +1090,9 @@ struct BehaviourArgs {
     /// the isolated Transformers backend. No network or host credentials are exposed.
     #[arg(long, default_value_t = false)]
     execute_custom_code: bool,
+    /// Software environment runtime closure level (minimal, standard, deep).
+    #[arg(long, default_value = "standard")]
+    closure_level: String,
     #[arg(long, default_value_t = false)]
     json: bool,
 }
@@ -1131,6 +1134,9 @@ struct CompareBehaviourArgs {
     allow_static_blocked: bool,
     #[arg(long, default_value_t = false)]
     execute_custom_code: bool,
+    /// Software environment runtime closure level (minimal, standard, deep).
+    #[arg(long, default_value = "standard")]
+    closure_level: String,
     #[arg(long, default_value_t = false)]
     json: bool,
 }

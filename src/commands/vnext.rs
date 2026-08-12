@@ -301,25 +301,58 @@ pub(crate) fn run_compare(args: CompareArgs) -> Result<()> {
 }
 
 pub(crate) fn run_behaviour(args: BehaviourArgs) -> Result<()> {
+    let closure_level = layerfault::behaviour::closure::ClosureLevel::parse(&args.closure_level)?;
     if let Some(replay_path) = args.replay.as_deref() {
-        if args.runtime != "llama-cpp" {
-            bail!("behaviour replay currently records external llama.cpp runtime identity; use --runtime llama-cpp");
-        }
         let replay = layerfault::behaviour::load_replay(replay_path)?;
-        let report = layerfault::behaviour::run_external_llama(
-            Path::new(&replay.model_path),
-            Some(Path::new(&replay.runtime_path)),
-            replay.probe_suite_path.as_deref().map(Path::new),
-            replay.seed,
-            replay.limits,
-        )?;
-        if report.runtime.executable_sha256 != replay.runtime_sha256 {
-            bail!(
-                "replay runtime fingerprint changed: expected {}, got {}",
-                replay.runtime_sha256,
-                report.runtime.executable_sha256
-            );
+        let active = layerfault::behaviour::ActiveExecutionOptions {
+            sandbox_kind: args.sandbox,
+            microvm_config: layerfault::behaviour::microvm::MicrovmConfig::from_env_and_args(
+                args.microvm_image.clone(),
+                args.microvm_image_hash.clone(),
+            ),
+            allow_static_blocked: args.allow_static_blocked,
+            execute_custom_code: args.execute_custom_code,
+            closure_level: replay.closure_level,
+        };
+        let mut report = match args.runtime.as_str() {
+            "llama-cpp" => layerfault::behaviour::run_external_llama_active(
+                Path::new(&replay.model_path),
+                Some(Path::new(&replay.runtime_path)),
+                replay.probe_suite_path.as_deref().map(Path::new),
+                replay.seed,
+                replay.limits.clone(),
+                active,
+            )?,
+            "transformers" | "transformers-python" => {
+                layerfault::behaviour::python::run_transformers(
+                    Path::new(&replay.model_path),
+                    None,
+                    Some(Path::new(&replay.runtime_path)),
+                    replay.probe_suite_path.as_deref().map(Path::new),
+                    replay.seed,
+                    replay.limits.clone(),
+                    active,
+                )?
+            }
+            other => bail!("unsupported behaviour replay runtime '{other}'"),
+        };
+
+        let current_closure_id = report.runtime.closure.as_ref().map(|c| &c.closure_id);
+        let expected_closure_id = &replay.runtime_closure_id;
+
+        let drifted = match (expected_closure_id.is_empty(), current_closure_id) {
+            (false, Some(curr)) => curr != expected_closure_id,
+            _ => report.runtime.executable_sha256 != replay.runtime_sha256,
+        };
+
+        if drifted {
+            report.findings.push(format!(
+                "RUNTIME_ENVIRONMENT_CHANGED: replay execution under changed software runtime closure (expected '{}', got '{}')",
+                if !expected_closure_id.is_empty() { expected_closure_id } else { &replay.runtime_sha256 },
+                current_closure_id.map(|s| s.as_str()).unwrap_or(&report.runtime.executable_sha256)
+            ));
         }
+
         return emit_behaviour(&report, args.json);
     }
     let limits = resolve_behaviour_limits(&args)?;
@@ -331,6 +364,7 @@ pub(crate) fn run_behaviour(args: BehaviourArgs) -> Result<()> {
         ),
         allow_static_blocked: args.allow_static_blocked,
         execute_custom_code: args.execute_custom_code,
+        closure_level,
     };
     let mut report = match args.runtime.as_str() {
         "llama-cpp" => {
@@ -376,9 +410,6 @@ pub(crate) fn run_behaviour(args: BehaviourArgs) -> Result<()> {
     };
     apply_watch_strings(&mut report, &args.watch_string);
     if let Some(path) = args.run_manifest_out.as_deref() {
-        if args.runtime != "llama-cpp" {
-            bail!("--run-manifest-out replay format currently requires --runtime llama-cpp");
-        }
         let manifest = layerfault::behaviour::replay_manifest(&report, args.probe_suite.as_deref());
         layerfault::paths::write_private(path, &serde_json::to_vec_pretty(&manifest)?)?;
     }
@@ -410,6 +441,7 @@ pub(crate) fn run_compare_behaviour(args: CompareBehaviourArgs) -> Result<()> {
         usize::MAX,
         usize::MAX,
     );
+    let closure_level = layerfault::behaviour::closure::ClosureLevel::parse(&args.closure_level)?;
     let active = layerfault::behaviour::ActiveExecutionOptions {
         sandbox_kind: args.sandbox,
         microvm_config: layerfault::behaviour::microvm::MicrovmConfig::from_env_and_args(
@@ -418,6 +450,7 @@ pub(crate) fn run_compare_behaviour(args: CompareBehaviourArgs) -> Result<()> {
         ),
         allow_static_blocked: args.allow_static_blocked,
         execute_custom_code: args.execute_custom_code,
+        closure_level,
     };
     let report = match args.runtime.as_str() {
         "llama-cpp" => {
@@ -722,6 +755,7 @@ pub(crate) fn run_review(args: ReviewArgs) -> Result<()> {
         ),
         allow_static_blocked: args.allow_static_blocked,
         execute_custom_code: args.execute_custom_code,
+        closure_level: layerfault::behaviour::closure::ClosureLevel::Standard,
     };
     let (behavior, behaviour_domain) = if static_block && !args.allow_static_blocked {
         (None, domain_not_run("static admission blocked the model"))

@@ -718,6 +718,11 @@ fn seccomp_filter_file() -> Result<File> {
     Ok(filter)
 }
 
+pub(crate) fn seccomp_profile_sha256() -> Option<String> {
+    let filter = seccomp_filter_file().ok()?;
+    crate::hashcache::sha256_uncached_prefixed(&filter).ok()
+}
+
 #[cfg(not(all(
     target_os = "linux",
     any(target_arch = "x86_64", target_arch = "aarch64")

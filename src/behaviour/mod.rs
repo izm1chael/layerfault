@@ -1,5 +1,6 @@
 //! Bounded local behavioural security harness.
 
+pub mod closure;
 pub mod evaluate;
 pub mod microvm;
 pub mod probes;
@@ -118,6 +119,8 @@ pub struct ActiveExecutionOptions {
     /// Permit Hugging Face custom Python loaders (`trust_remote_code=True`) in
     /// the sandboxed Transformers backend.
     pub execute_custom_code: bool,
+    /// Closure profile level for software environment runtime discovery.
+    pub closure_level: closure::ClosureLevel,
 }
 
 #[derive(Debug, Clone)]
@@ -222,6 +225,8 @@ pub struct RuntimeIdentity {
     pub executable_sha256: String,
     pub version: Option<String>,
     pub sandbox: sandbox::SandboxCapabilities,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub closure: Option<closure::RuntimeClosure>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -310,6 +315,14 @@ pub struct BehaviourReplayManifest {
     pub model_identity: String,
     pub runtime_path: String,
     pub runtime_sha256: String,
+    #[serde(default)]
+    pub runtime_closure_id: String,
+    #[serde(default)]
+    pub closure_level: closure::ClosureLevel,
+    #[serde(default)]
+    pub component_summary: Vec<closure::RuntimeComponent>,
+    #[serde(default)]
+    pub coverage_state: closure::ClosureCoverage,
     pub probe_suite_path: Option<String>,
     pub probe_suite_id: String,
     pub probe_suite_version: u32,
@@ -321,12 +334,30 @@ pub fn replay_manifest(
     report: &BehaviourReport,
     probe_suite_path: Option<&Path>,
 ) -> BehaviourReplayManifest {
+    let (closure_id, closure_lvl, components, coverage) = match &report.runtime.closure {
+        Some(c) => (
+            c.closure_id.clone(),
+            c.level,
+            c.components.clone(),
+            c.coverage.clone(),
+        ),
+        None => (
+            String::new(),
+            closure::ClosureLevel::Minimal,
+            Vec::new(),
+            closure::ClosureCoverage::default(),
+        ),
+    };
     BehaviourReplayManifest {
         version: 1,
         model_path: report.model_path.clone(),
         model_identity: report.model_identity.clone(),
         runtime_path: report.runtime.executable.clone(),
         runtime_sha256: report.runtime.executable_sha256.clone(),
+        runtime_closure_id: closure_id,
+        closure_level: closure_lvl,
+        component_summary: components,
+        coverage_state: coverage,
         probe_suite_path: probe_suite_path.map(|p| p.display().to_string()),
         probe_suite_id: report.probe_suite_id.clone(),
         probe_suite_version: report.probe_suite_version,
@@ -420,7 +451,7 @@ fn run_external_llama_active_deadline(
             .ok_or_else(|| anyhow::anyhow!("llama.cpp runtime was not found on PATH"))?,
     };
     let runtime = runtime::RuntimeAdapter::new(executable, &limits)?;
-    let identity = runtime.identity();
+    let identity = runtime.identity_with_closure(active.closure_level);
     let canary_a = synthetic_canary(&model_identity, seed, "A");
     let canary_b = synthetic_canary(&model_identity, seed, "B");
     heartbeat.update(format!("phase={phase_label} model-loading"));
@@ -715,6 +746,7 @@ pub fn run_embedded(
             syscall_trace_mechanism: None,
             ..sandbox::SandboxCapabilities::default()
         },
+        closure: None,
     };
     finalize_report(
         model_identity,
@@ -999,7 +1031,24 @@ mod tests {
             executable_sha256: "00".repeat(32),
             version: None,
             sandbox: sandbox::SandboxCapabilities::default(),
+            closure: None,
         }
+    }
+
+    #[test]
+    fn legacy_replay_manifest_remains_compatible() {
+        let manifest = replay_manifest(&report("legacy", &[]), None);
+        let mut value = serde_json::to_value(manifest).expect("serialize replay manifest");
+        let object = value.as_object_mut().expect("manifest object");
+        object.remove("runtime_closure_id");
+        object.remove("closure_level");
+        object.remove("component_summary");
+        object.remove("coverage_state");
+
+        let decoded: BehaviourReplayManifest =
+            serde_json::from_value(value).expect("legacy replay manifest remains readable");
+        assert!(decoded.runtime_closure_id.is_empty());
+        assert!(decoded.component_summary.is_empty());
     }
 
     fn execution(id: &str, category: &str, response: &str) -> ProbeExecution {

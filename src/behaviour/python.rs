@@ -241,6 +241,16 @@ fn run_transformers_deadline(
         let _ = stderr_tx.send(read_capped_drain(stderr, MAX_RUNNER_LOG_BYTES));
     });
 
+    let sandbox_caps = super::sandbox::capabilities(wrapper.as_ref());
+    let closure = super::closure::discover_runtime_closure(
+        "transformers",
+        &executable,
+        active.closure_level,
+        &sandbox_caps,
+        &runtime_support,
+        None,
+    );
+
     let runtime = super::RuntimeIdentity {
         backend: if base.is_some() && model.join("adapter_config.json").is_file() {
             "transformers-peft".to_owned()
@@ -250,7 +260,8 @@ fn run_transformers_deadline(
         executable: executable.display().to_string(),
         executable_sha256: format!("sha256:{admitted_runtime_sha256}"),
         version: admitted_runtime_version,
-        sandbox: super::sandbox::capabilities(wrapper.as_ref()),
+        sandbox: sandbox_caps,
+        closure: Some(closure),
     };
 
     let mut executions = Vec::new();

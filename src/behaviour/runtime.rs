@@ -55,12 +55,29 @@ impl RuntimeAdapter {
     }
 
     pub fn identity(&self) -> super::RuntimeIdentity {
+        self.identity_with_closure(super::closure::ClosureLevel::Standard)
+    }
+
+    pub fn identity_with_closure(
+        &self,
+        level: super::closure::ClosureLevel,
+    ) -> super::RuntimeIdentity {
+        let sandbox_caps = super::sandbox::capabilities(self.wrapper.as_ref());
+        let closure = super::closure::discover_runtime_closure(
+            "llama-cpp",
+            &self.executable,
+            level,
+            &sandbox_caps,
+            &[],
+            None,
+        );
         super::RuntimeIdentity {
             backend: "llama-cpp-server".to_owned(),
             executable: self.executable.display().to_string(),
             executable_sha256: format!("sha256:{}", self.executable_sha256),
             version: self.version.clone(),
-            sandbox: super::sandbox::capabilities(self.wrapper.as_ref()),
+            sandbox: sandbox_caps,
+            closure: Some(closure),
         }
     }
 

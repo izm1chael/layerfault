@@ -391,6 +391,7 @@ mod tests {
             microvm_config: MicrovmConfig::default(),
             allow_static_blocked: false,
             execute_custom_code: false,
+            closure_level: crate::behaviour::closure::ClosureLevel::Standard,
         };
         // Requiring execution stack without valid microvm image MUST error
         let result = backend.require_execution_stack(active);
