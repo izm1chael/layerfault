@@ -256,7 +256,7 @@ ORPHAN_PATH="$STORE/blobs/sha256-$(printf orphan | sha256sum | awk '{print $1}')
 [[ ! -e "$ORPHAN_PATH" ]] || { echo "GC execute did not remove demonstrably orphaned blob" >&2; exit 1; }
 
 # SBOM generation is local and deterministic.
-python3 scripts/build/sbom.py "$TMP/layerfault-sbom.cdx.json" >/dev/null
+python3 scripts/release/sbom.py "$TMP/layerfault-sbom.cdx.json" >/dev/null
 python3 - "$TMP/layerfault-sbom.cdx.json" <<'PY'
 import json,sys
 x=json.load(open(sys.argv[1])); assert x["bomFormat"]=="CycloneDX" and x["specVersion"]=="1.7"

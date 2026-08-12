@@ -30,7 +30,7 @@ The workflow does not label a single-host-architecture macOS executable as unive
 - External GitHub Actions are referenced by immutable commit IDs with the human release version in a comment.
 - Release builds use `Cargo.lock`.
 - Each binary is accompanied by SHA-256 checksums.
-- `scripts/build/sbom.py` creates a local CycloneDX 1.7 dependency SBOM from `Cargo.lock` without installing an extra generator.
+- `scripts/release/sbom.py` creates a local CycloneDX 1.7 dependency SBOM from `Cargo.lock` without installing an extra generator.
 - GitHub artifact attestations provide build provenance for generated binaries.
 - Layerfault's model attestations and GitHub's build attestations are separate trust domains.
 

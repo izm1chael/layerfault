@@ -38,11 +38,11 @@ jobs:
         run: cargo clippy --locked --all-targets --all-features -- -D warnings
       - name: Shell/static contracts
         run: |
-          bash -n create_poisoned_model.sh
+          bash -n scripts/fixtures/create-poisoned-ollama-model.sh
           bash -n scripts/security/gates.sh
           bash -n scripts/corpus/adversarial-gate.sh
           python3 scripts/security/schema-gates.py
-          python3 scripts/build/sbom.py /tmp/layerfault-sbom.cdx.json
+          python3 scripts/release/sbom.py /tmp/layerfault-sbom.cdx.json
           python3 -m json.tool /tmp/layerfault-sbom.cdx.json >/dev/null
       - name: Synthetic admission/security gate
         run: bash scripts/security/gates.sh

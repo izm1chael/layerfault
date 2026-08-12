@@ -49,11 +49,11 @@ jobs:
           bash -n install.sh
           bash -n scripts/install/active-runtime.sh
           bash -n scripts/install/uninstall.sh
-          bash -n scripts/package/release.sh
-          bash -n scripts/package/smoke.sh
-          bash -n scripts/build/linux-release.sh
-          bash -n scripts/package/distribution-dry-run.sh
-          python3 -m py_compile scripts/package/generate-homebrew-formula.py
+          bash -n scripts/release/package-linux.sh
+          bash -n scripts/release/package-smoke.sh
+          bash -n scripts/release/linux-build.sh
+          bash -n scripts/release/distribution-dry-run.sh
+          python3 -m py_compile scripts/release/generate-homebrew-formula.py
 
   linux:
     needs: gate
@@ -71,8 +71,8 @@ jobs:
       - name: Build GNU and musl release binaries
         run: |
           mkdir -p dist/build
-          bash scripts/build/linux-release.sh gnu "$(pwd)/dist/build/layerfault-gnu"
-          bash scripts/build/linux-release.sh musl "$(pwd)/dist/build/layerfault-musl"
+          bash scripts/release/linux-build.sh gnu "$(pwd)/dist/build/layerfault-gnu"
+          bash scripts/release/linux-build.sh musl "$(pwd)/dist/build/layerfault-musl"
           dist/build/layerfault-gnu --version
           docker run --rm -v "$PWD/dist/build:/dist:ro" almalinux:9 /dist/layerfault-gnu selftest --json >/dev/null
           docker run --rm -v "$PWD/dist/build:/dist:ro" alpine:3.21 /dist/layerfault-musl selftest --json >/dev/null
@@ -83,16 +83,16 @@ jobs:
           GOBIN="$RUNNER_TEMP/bin" go install github.com/goreleaser/nfpm/v2/cmd/nfpm@${NFPM_VERSION}
       - name: Build native Linux packages
         run: |
-          bash scripts/build/cli-assets.sh "$(pwd)" "$(pwd)/dist/build/layerfault-gnu"
+          bash scripts/release/cli-assets.sh "$(pwd)" "$(pwd)/dist/build/layerfault-gnu"
           mkdir -p dist/root-gnu dist/root-musl
           cp dist/build/layerfault-gnu dist/root-gnu/layerfault
           cp dist/build/layerfault-musl dist/root-musl/layerfault
           gnu_formats="deb rpm"
           if [[ "${{ matrix.arch }}" == "amd64" ]]; then gnu_formats="$gnu_formats archlinux"; fi
-          LAYERFAULT_PACKAGE_FORMATS="$gnu_formats" bash scripts/package/release.sh "${RELEASE_VERSION}" "${{ matrix.arch }}" "$(pwd)/dist/root-gnu/layerfault" dist
-          LAYERFAULT_PACKAGE_FORMATS="apk" bash scripts/package/release.sh "${RELEASE_VERSION}" "${{ matrix.arch }}" "$(pwd)/dist/root-musl/layerfault" dist
+          LAYERFAULT_PACKAGE_FORMATS="$gnu_formats" bash scripts/release/package-linux.sh "${RELEASE_VERSION}" "${{ matrix.arch }}" "$(pwd)/dist/root-gnu/layerfault" dist
+          LAYERFAULT_PACKAGE_FORMATS="apk" bash scripts/release/package-linux.sh "${RELEASE_VERSION}" "${{ matrix.arch }}" "$(pwd)/dist/root-musl/layerfault" dist
           tar -C dist/root-musl -czf "dist/layerfault-linux-${{ matrix.arch }}.tar.gz" layerfault
-          python3 scripts/build/sbom.py "dist/layerfault-linux-${{ matrix.arch }}.sbom.cdx.json"
+          python3 scripts/release/sbom.py "dist/layerfault-linux-${{ matrix.arch }}.sbom.cdx.json"
       - name: Smoke native packages on supported baselines
         run: |
           set -euo pipefail
@@ -131,7 +131,7 @@ jobs:
           cp dist/root/usr/local/bin/layerfault dist/pkgroot/usr/local/bin/layerfault
           tar -C dist/root/usr/local/bin -czf dist/layerfault-macos-universal.tar.gz layerfault
           pkgbuild --root dist/pkgroot --identifier com.layerfault.cli --version "${RELEASE_VERSION}" --install-location / dist/layerfault-macos-universal.unsigned.pkg
-          python3 scripts/build/sbom.py dist/layerfault-macos-universal.sbom.cdx.json
+          python3 scripts/release/sbom.py dist/layerfault-macos-universal.sbom.cdx.json
           dist/root/usr/local/bin/layerfault --version
           dist/root/usr/local/bin/layerfault selftest --json >/dev/null
           (cd dist && shasum -a 256 layerfault-macos-universal* > SHA256SUMS-macos)
@@ -234,7 +234,7 @@ jobs:
         run: |
           sha="$(sha256sum release-assets/layerfault-macos-universal.tar.gz | awk '{print $1}')"
           url="https://github.com/${GITHUB_REPOSITORY}/releases/download/v${RELEASE_VERSION}/layerfault-macos-universal.tar.gz"
-          python3 scripts/package/generate-homebrew-formula.py --version "${RELEASE_VERSION}" --arm-url "$url" --arm-sha256 "$sha" --intel-url "$url" --intel-sha256 "$sha" --output release-assets/layerfault.rb
+          python3 scripts/release/generate-homebrew-formula.py --version "${RELEASE_VERSION}" --arm-url "$url" --arm-sha256 "$sha" --intel-url "$url" --intel-sha256 "$sha" --output release-assets/layerfault.rb
           sha256sum release-assets/layerfault.rb >> release-assets/SHA256SUMS
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
