@@ -20,17 +20,17 @@ OUT="${1:-dist-dry-run}"
 rm -rf "$OUT"
 mkdir -p "$OUT/build" "$OUT/root-gnu" "$OUT/root-musl"
 
-bash scripts/build/linux-release.sh gnu "$OUT/build/layerfault-gnu"
-bash scripts/build/linux-release.sh musl "$OUT/build/layerfault-musl"
-bash scripts/build/cli-assets.sh "$ROOT" "$ROOT/$OUT/build/layerfault-gnu"
+bash scripts/release/linux-build.sh gnu "$OUT/build/layerfault-gnu"
+bash scripts/release/linux-build.sh musl "$OUT/build/layerfault-musl"
+bash scripts/release/cli-assets.sh "$ROOT" "$ROOT/$OUT/build/layerfault-gnu"
 cp "$OUT/build/layerfault-gnu" "$OUT/root-gnu/layerfault"
 cp "$OUT/build/layerfault-musl" "$OUT/root-musl/layerfault"
 formats="deb rpm"
 [[ "$ARCH" == amd64 ]] && formats="$formats archlinux"
-LAYERFAULT_PACKAGE_FORMATS="$formats" bash scripts/package/release.sh "$VERSION" "$ARCH" "$ROOT/$OUT/root-gnu/layerfault" "$OUT"
-LAYERFAULT_PACKAGE_FORMATS="apk" bash scripts/package/release.sh "$VERSION" "$ARCH" "$ROOT/$OUT/root-musl/layerfault" "$OUT"
+LAYERFAULT_PACKAGE_FORMATS="$formats" bash scripts/release/package-linux.sh "$VERSION" "$ARCH" "$ROOT/$OUT/root-gnu/layerfault" "$OUT"
+LAYERFAULT_PACKAGE_FORMATS="apk" bash scripts/release/package-linux.sh "$VERSION" "$ARCH" "$ROOT/$OUT/root-musl/layerfault" "$OUT"
 tar -C "$OUT/root-musl" -czf "$OUT/layerfault-linux-${ARCH}.tar.gz" layerfault
-python3 scripts/build/sbom.py "$OUT/layerfault-linux-${ARCH}.sbom.cdx.json"
+python3 scripts/release/sbom.py "$OUT/layerfault-linux-${ARCH}.sbom.cdx.json"
 
 # Native compatibility smoke tests. Arch Linux is x86_64-only in this release
 # matrix; ARM64 users receive the portable musl archive instead.

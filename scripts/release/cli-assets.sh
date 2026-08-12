@@ -7,7 +7,7 @@ mkdir -p "$ROOT/completions" "$ROOT/docs/man"
 HELP="$($BIN --help)"
 COMMANDS="$(printf '%s\n' "$HELP" | awk '/^Commands:/{flag=1;next} flag && /^[[:space:]]{2}[A-Za-z0-9_-]+/{print $1} flag && /^Options:/{flag=0}' | tr '\n' ' ')"
 cat > "$ROOT/completions/layerfault.bash" <<BASH
-# Generated from layerfault --help by scripts/build/cli-assets.sh
+# Generated from layerfault --help by scripts/release/cli-assets.sh
 _layerfault() {
     local cur
     cur="\${COMP_WORDS[COMP_CWORD]}"
@@ -21,11 +21,11 @@ complete -F _layerfault layerfault
 BASH
 cat > "$ROOT/completions/_layerfault" <<ZSH
 #compdef layerfault
-# Generated from layerfault --help by scripts/build/cli-assets.sh
+# Generated from layerfault --help by scripts/release/cli-assets.sh
 _arguments '1:command:($COMMANDS)' '*:argument:_files'
 ZSH
 {
-  echo '# Generated from layerfault --help by scripts/build/cli-assets.sh'
+  echo '# Generated from layerfault --help by scripts/release/cli-assets.sh'
   for cmd in $COMMANDS; do
     printf 'complete -c layerfault -n "__fish_use_subcommand" -a "%s"\n' "$cmd"
   done

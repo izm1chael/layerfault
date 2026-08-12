@@ -6,7 +6,7 @@ cd "$ROOT"
 
 CORPUS_MANIFEST="$ROOT/tests/corpus/manifest.json"
 if [[ ! -f "$CORPUS_MANIFEST" ]]; then
-    python3 "$ROOT/scripts/security/generate_corpus.py" >/dev/null
+    python3 "$ROOT/scripts/corpus/generate-parser-fixtures.py" >/dev/null
 fi
 
 FUZZ_CORPUS_DIR="$ROOT/fuzz/corpus"

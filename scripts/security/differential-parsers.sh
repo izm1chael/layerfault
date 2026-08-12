@@ -9,7 +9,7 @@ cargo build --locked --quiet
 
 MANIFEST="$ROOT/tests/corpus/manifest.json"
 if [[ ! -f "$MANIFEST" ]]; then
-    python3 "$ROOT/scripts/security/generate_corpus.py" >/dev/null
+    python3 "$ROOT/scripts/corpus/generate-parser-fixtures.py" >/dev/null
 fi
 
 TMP="$(mktemp -d)"

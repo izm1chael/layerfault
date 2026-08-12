@@ -15,7 +15,7 @@ fake_key = 'AKIA' + 'ABCDEFGHIJKLMNOP'
 for path in [Path('Cargo.toml'), Path('README.md'), Path('SECURITY.md')]:
     if owner_typo in path.read_text():
         raise SystemExit(f'{path}: stale repository-owner typo found')
-for path in list(Path('src').rglob('*.rs')) + list(Path('tests').rglob('*.rs')) + [Path('create_poisoned_model.sh')]:
+for path in list(Path('src').rglob('*.rs')) + list(Path('tests').rglob('*.rs')) + [Path('scripts/fixtures/create-poisoned-ollama-model.sh')]:
     if fake_key in path.read_text(errors='replace'):
         raise SystemExit(f'{path}: credential-shaped fixture literal found; construct detector fixtures at runtime')
 PY

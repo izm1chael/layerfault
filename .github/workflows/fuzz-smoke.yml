@@ -21,7 +21,7 @@ jobs:
         run: cargo install cargo-fuzz --version 0.13.2 --locked
       - name: Verify deterministic seed corpus
         run: |
-          python3 fuzz/generate_corpus.py
+          python3 scripts/corpus/generate-fuzz-corpus.py
           git diff --exit-code -- fuzz/corpus fuzz/CORPUS_INDEX.json
       - name: Run all fuzz targets against seeded corpora
         working-directory: fuzz
