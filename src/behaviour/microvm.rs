@@ -258,6 +258,7 @@ impl crate::behaviour::sandbox::SandboxBackend for MicrovmBackend {
             microvm_kvm_accelerated: kvm,
             microvm_hypervisor: hypervisor.map(|h| h.name),
             microvm_image_hash: hash,
+            cgroup: crate::behaviour::cgroup::detect_host_capabilities(),
         }
     }
 
@@ -392,6 +393,7 @@ mod tests {
             allow_static_blocked: false,
             execute_custom_code: false,
             closure_level: crate::behaviour::closure::ClosureLevel::Standard,
+            require_cgroup: false,
         };
         // Requiring execution stack without valid microvm image MUST error
         let result = backend.require_execution_stack(active);

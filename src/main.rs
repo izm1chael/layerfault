@@ -1093,6 +1093,9 @@ struct BehaviourArgs {
     /// Software environment runtime closure level (minimal, standard, deep).
     #[arg(long, default_value = "standard")]
     closure_level: String,
+    /// Require cgroup v2 process-tree resource controls. Fail closed if unavailable.
+    #[arg(long, default_value_t = false)]
+    require_cgroup: bool,
     #[arg(long, default_value_t = false)]
     json: bool,
 }
@@ -1137,6 +1140,9 @@ struct CompareBehaviourArgs {
     /// Software environment runtime closure level (minimal, standard, deep).
     #[arg(long, default_value = "standard")]
     closure_level: String,
+    /// Require cgroup v2 process-tree resource controls. Fail closed if unavailable.
+    #[arg(long, default_value_t = false)]
+    require_cgroup: bool,
     #[arg(long, default_value_t = false)]
     json: bool,
 }
@@ -1178,6 +1184,9 @@ struct ReviewArgs {
     /// Permit custom Hugging Face Python loader execution in the sandboxed Transformers backend.
     #[arg(long, default_value_t = false)]
     execute_custom_code: bool,
+    /// Require cgroup v2 process-tree resource controls. Fail closed if unavailable.
+    #[arg(long, default_value_t = false)]
+    require_cgroup: bool,
     #[arg(long)]
     evidence_out: Option<PathBuf>,
     #[arg(long)]

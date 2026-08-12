@@ -1,5 +1,6 @@
 //! Bounded local behavioural security harness.
 
+pub mod cgroup;
 pub mod closure;
 pub mod evaluate;
 pub mod microvm;
@@ -121,6 +122,9 @@ pub struct ActiveExecutionOptions {
     pub execute_custom_code: bool,
     /// Closure profile level for software environment runtime discovery.
     pub closure_level: closure::ClosureLevel,
+    /// Enforce cgroup v2 process-tree resource limits. Fail closed if unavailable.
+    #[serde(default)]
+    pub require_cgroup: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -450,7 +454,7 @@ fn run_external_llama_active_deadline(
             .or_else(|| crate::sources::find_executable("main"))
             .ok_or_else(|| anyhow::anyhow!("llama.cpp runtime was not found on PATH"))?,
     };
-    let runtime = runtime::RuntimeAdapter::new(executable, &limits)?;
+    let runtime = runtime::RuntimeAdapter::new(executable, &limits, &active)?;
     let identity = runtime.identity_with_closure(active.closure_level);
     let canary_a = synthetic_canary(&model_identity, seed, "A");
     let canary_b = synthetic_canary(&model_identity, seed, "B");

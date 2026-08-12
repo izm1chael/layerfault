@@ -313,6 +313,7 @@ pub(crate) fn run_behaviour(args: BehaviourArgs) -> Result<()> {
             allow_static_blocked: args.allow_static_blocked,
             execute_custom_code: args.execute_custom_code,
             closure_level: replay.closure_level,
+            require_cgroup: require_cgroup_from_env_or_arg(args.require_cgroup),
         };
         let mut report = match args.runtime.as_str() {
             "llama-cpp" => layerfault::behaviour::run_external_llama_active(
@@ -365,6 +366,7 @@ pub(crate) fn run_behaviour(args: BehaviourArgs) -> Result<()> {
         allow_static_blocked: args.allow_static_blocked,
         execute_custom_code: args.execute_custom_code,
         closure_level,
+        require_cgroup: require_cgroup_from_env_or_arg(args.require_cgroup),
     };
     let mut report = match args.runtime.as_str() {
         "llama-cpp" => {
@@ -451,6 +453,7 @@ pub(crate) fn run_compare_behaviour(args: CompareBehaviourArgs) -> Result<()> {
         allow_static_blocked: args.allow_static_blocked,
         execute_custom_code: args.execute_custom_code,
         closure_level,
+        require_cgroup: args.require_cgroup,
     };
     let report = match args.runtime.as_str() {
         "llama-cpp" => {
@@ -756,6 +759,7 @@ pub(crate) fn run_review(args: ReviewArgs) -> Result<()> {
         allow_static_blocked: args.allow_static_blocked,
         execute_custom_code: args.execute_custom_code,
         closure_level: layerfault::behaviour::closure::ClosureLevel::Standard,
+        require_cgroup: require_cgroup_from_env_or_arg(args.require_cgroup),
     };
     let (behavior, behaviour_domain) = if static_block && !args.allow_static_blocked {
         (None, domain_not_run("static admission blocked the model"))
@@ -1323,4 +1327,9 @@ fn apply_watch_strings(report: &mut layerfault::behaviour::BehaviourReport, watc
     }
     report.findings.sort();
     report.findings.dedup();
+}
+
+fn require_cgroup_from_env_or_arg(arg: bool) -> bool {
+    arg || std::env::var("LAYERFAULT_BEHAVIOUR_REQUIRE_CGROUP")
+        .is_ok_and(|v| v == "1" || v.eq_ignore_ascii_case("true"))
 }

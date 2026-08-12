@@ -70,6 +70,8 @@ pub struct SandboxCapabilities {
     pub microvm_kvm_accelerated: bool,
     pub microvm_hypervisor: Option<String>,
     pub microvm_image_hash: Option<String>,
+    #[serde(default)]
+    pub cgroup: crate::behaviour::cgroup::CgroupCapabilities,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -86,6 +88,7 @@ pub struct SandboxTelemetry {
     pub snapshot_overflow: bool,
     pub total_filesystem_mutations: usize,
     pub suspicious_filesystem_mutations: usize,
+    pub cgroup: Option<crate::behaviour::cgroup::CgroupTelemetry>,
 }
 
 impl SandboxTelemetry {
@@ -409,6 +412,7 @@ pub fn capabilities(wrapper: Option<&(PathBuf, String)>) -> SandboxCapabilities 
         microvm_kvm_accelerated: kvm,
         microvm_hypervisor: hypervisor.map(|h| h.name),
         microvm_image_hash: None,
+        cgroup: crate::behaviour::cgroup::detect_host_capabilities(),
     }
 }
 
@@ -430,9 +434,9 @@ impl SandboxBackend for BwrapBackend {
     }
 
     fn require_execution_stack(&self, active: ActiveExecutionOptions) -> Result<()> {
-        require_external_execution_stack()?;
+        require_external_execution_stack_options(&active)?;
         if active.allow_static_blocked || active.execute_custom_code {
-            require_high_risk_observation_stack()?;
+            require_high_risk_observation_stack_options(&active)?;
         }
         Ok(())
     }
@@ -454,11 +458,29 @@ pub fn get_backend(
 /// limiting. This prevents a model/runtime failure from becoming a trivial
 /// host memory/process/file-descriptor exhaustion path.
 pub fn require_external_execution_stack() -> Result<()> {
+    require_external_execution_stack_options(&ActiveExecutionOptions::default())
+}
+
+pub fn require_external_execution_stack_options(active: &ActiveExecutionOptions) -> Result<()> {
     if detect_network_wrapper().is_none() {
         bail!("external active analysis requires bubblewrap (bwrap)");
     }
     if crate::sources::find_executable("prlimit").is_none() {
         bail!("external active analysis requires prlimit so CPU/process/address-space limits are enforced");
+    }
+    if active.require_cgroup {
+        let caps = crate::behaviour::cgroup::detect_host_capabilities();
+        if !caps.cgroup_v2
+            || !caps.delegated_writable
+            || !caps.memory_controller
+            || !caps.pids_controller
+            || !caps.cpu_controller
+        {
+            bail!(
+                "require_cgroup policy enforced but cgroup v2 is unavailable or missing required controllers: {}",
+                caps.unavailable_reason.unwrap_or_else(|| "cgroup v2 unavailable".to_owned())
+            );
+        }
     }
     Ok(())
 }
@@ -468,14 +490,18 @@ pub fn require_external_execution_stack() -> Result<()> {
 /// closed here prevents a missing lab dependency from silently degrading a
 /// hostile-code run.
 pub fn require_high_risk_observation_stack() -> Result<()> {
-    require_external_execution_stack()?;
+    require_high_risk_observation_stack_options(&ActiveExecutionOptions::default())
+}
+
+pub fn require_high_risk_observation_stack_options(active: &ActiveExecutionOptions) -> Result<()> {
+    require_external_execution_stack_options(active)?;
     if crate::sources::find_executable("strace").is_none() {
         bail!("high-risk active analysis requires strace so loader/runtime side effects are observable");
     }
     Ok(())
 }
 
-fn configured_memory_budget_bytes() -> u64 {
+pub(crate) fn configured_memory_budget_bytes() -> u64 {
     crate::doctor::recommended_active_memory_budget_bytes()
         .unwrap_or(4 * 1024 * 1024 * 1024)
         .clamp(

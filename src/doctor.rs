@@ -257,6 +257,25 @@ pub fn capabilities() -> CapabilityReport {
                 .to_owned(),
         );
     }
+    let cgroup_caps = crate::behaviour::cgroup::detect_host_capabilities();
+    if cgroup_caps.cgroup_v2 {
+        if cgroup_caps.delegated_writable
+            && cgroup_caps.memory_controller
+            && cgroup_caps.pids_controller
+            && cgroup_caps.cpu_controller
+        {
+            notes.push(format!(
+                "cgroup v2 preflight: ready at /sys/fs/cgroup/{} (controllers: {})",
+                cgroup_caps.cgroup_path.as_deref().unwrap_or(""),
+                cgroup_caps.enabled_controllers.join(", ")
+            ));
+        } else if let Some(reason) = cgroup_caps.unavailable_reason {
+            notes.push(format!("cgroup v2 preflight: {reason}"));
+        }
+    } else {
+        notes.push("cgroup v2 preflight: cgroup v2 unified hierarchy is not active".to_owned());
+    }
+
     if let (Some(total), Some(limit)) = (physical, budget) {
         if total <= 8 * 1024 * 1024 * 1024 {
             notes.push(format!(

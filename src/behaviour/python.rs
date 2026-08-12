@@ -190,12 +190,48 @@ fn run_transformers_deadline(
     if let Some(b) = staged_base.as_ref() {
         b.revalidate()?;
     }
+    let host_fs = std::sync::Arc::new(super::cgroup::HostCgroupFs::new());
+    let cgroup_caps = super::cgroup::detect_capabilities(host_fs.as_ref());
+    let mut cgroup_guard = if cgroup_caps.cgroup_v2
+        && cgroup_caps.delegated_writable
+        && cgroup_caps.memory_controller
+        && cgroup_caps.pids_controller
+        && cgroup_caps.cpu_controller
+    {
+        let limits_cfg = super::cgroup::CgroupLimits {
+            memory_max_bytes: super::sandbox::configured_memory_budget_bytes(),
+            pids_max: 512,
+            ..Default::default()
+        };
+        match super::cgroup::CgroupGuard::create(
+            host_fs.clone(),
+            &cgroup_caps,
+            &limits_cfg,
+            "python",
+        ) {
+            Ok(guard) => Some(guard),
+            Err(err) if active.require_cgroup => return Err(err),
+            Err(_) => None,
+        }
+    } else {
+        None
+    };
+
     let mut child = command.spawn().with_context(|| {
         format!(
             "unable to start sandboxed Python runtime '{}'",
             executable.display()
         )
     })?;
+    if let Some(guard) = cgroup_guard.as_ref() {
+        if let Err(err) = guard.attach_process(child.id()) {
+            if active.require_cgroup {
+                let _ = super::sandbox::terminate_process_tree(&mut child, Duration::from_secs(1));
+                return Err(err);
+            }
+            cgroup_guard = None;
+        }
+    }
     let mut stdin = match child.stdin.take() {
         Some(value) => value,
         None => {
@@ -436,7 +472,19 @@ fn run_transformers_deadline(
             status.code()
         ));
     }
-    let telemetry = workspace.collect_telemetry(trace_enabled)?;
+    let mut telemetry = workspace.collect_telemetry(trace_enabled)?;
+    if let Some(mut guard) = cgroup_guard {
+        let mut cg_telemetry = guard.collect_telemetry();
+        cg_telemetry.cleanup_state = guard.teardown();
+        if cg_telemetry.oom_kill_events > 0 || cg_telemetry.oom_events > 0 {
+            if session_error.is_none() {
+                session_error = Some("cgroup v2 memory limit exceeded (OOM killed)".to_owned());
+            }
+        } else if cg_telemetry.pids_events_max > 0 && session_error.is_none() {
+            session_error = Some("cgroup v2 process limit exceeded (pids.max)".to_owned());
+        }
+        telemetry.cgroup = Some(cg_telemetry);
+    }
     let mut telemetry_eval = super::evaluate::evaluate_runtime(
         "runtime_side_effects",
         "",

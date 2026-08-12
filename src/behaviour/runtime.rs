@@ -24,12 +24,17 @@ pub struct RuntimeAdapter {
     executable_sha256: String,
     version: Option<String>,
     limits: super::BehaviourLimits,
+    require_cgroup: bool,
     wrapper: Option<(PathBuf, String)>,
 }
 
 impl RuntimeAdapter {
-    pub fn new(requested: PathBuf, limits: &super::BehaviourLimits) -> Result<Self> {
-        super::sandbox::require_external_execution_stack()?;
+    pub fn new(
+        requested: PathBuf,
+        limits: &super::BehaviourLimits,
+        active: &super::ActiveExecutionOptions,
+    ) -> Result<Self> {
+        super::sandbox::require_external_execution_stack_options(active)?;
         let executable = resolve_llama_server(&requested)?;
         let executable = std::fs::canonicalize(&executable).with_context(|| {
             format!(
@@ -50,6 +55,7 @@ impl RuntimeAdapter {
             executable_sha256,
             version,
             limits: limits.clone(),
+            require_cgroup: active.require_cgroup,
             wrapper,
         })
     }
@@ -145,12 +151,51 @@ impl RuntimeAdapter {
                 .arg("--no-webui");
             let started = Instant::now();
             runtime_binding.revalidate()?;
+            let host_fs = std::sync::Arc::new(super::cgroup::HostCgroupFs::new());
+            let cgroup_caps = super::cgroup::detect_capabilities(host_fs.as_ref());
+            let mut cgroup_guard = if cgroup_caps.cgroup_v2
+                && cgroup_caps.delegated_writable
+                && cgroup_caps.memory_controller
+                && cgroup_caps.pids_controller
+                && cgroup_caps.cpu_controller
+            {
+                let limits_cfg = super::cgroup::CgroupLimits {
+                    memory_max_bytes: super::sandbox::configured_memory_budget_bytes(),
+                    pids_max: 512,
+                    ..Default::default()
+                };
+                match super::cgroup::CgroupGuard::create(
+                    host_fs,
+                    &cgroup_caps,
+                    &limits_cfg,
+                    "llama-cpp",
+                ) {
+                    Ok(guard) => Some(guard),
+                    Err(err) if self.require_cgroup => return Err(err),
+                    Err(_) => None,
+                }
+            } else {
+                None
+            };
+
             let mut child = command.spawn().with_context(|| {
                 format!(
                     "unable to start persistent runtime '{}'",
                     self.executable.display()
                 )
             })?;
+            if let Some(guard) = cgroup_guard.as_ref() {
+                if let Err(err) = guard.attach_process(child.id()) {
+                    if self.require_cgroup {
+                        let _ = super::sandbox::terminate_process_tree(
+                            &mut child,
+                            Duration::from_secs(1),
+                        );
+                        return Err(err);
+                    }
+                    cgroup_guard = None;
+                }
+            }
             let stdout = match child.stdout.take() {
                 Some(value) => value,
                 None => {
@@ -225,6 +270,7 @@ impl RuntimeAdapter {
                 stderr_rx: Some(stderr_rx),
                 _runtime_binding: runtime_binding,
                 closed: false,
+                cgroup_guard,
             })
         }
     }
@@ -240,6 +286,7 @@ pub struct RuntimeSession<'a> {
     stderr_rx: Option<mpsc::Receiver<Result<Vec<u8>>>>,
     _runtime_binding: crate::binding::StagedArtifact,
     closed: bool,
+    cgroup_guard: Option<super::cgroup::CgroupGuard>,
 }
 
 impl RuntimeSession<'_> {
@@ -356,7 +403,13 @@ impl RuntimeSession<'_> {
 
     pub fn close(mut self) -> Result<super::sandbox::SandboxTelemetry> {
         self.shutdown()?;
-        self.workspace.collect_telemetry(self.trace_enabled)
+        let mut telemetry = self.workspace.collect_telemetry(self.trace_enabled)?;
+        if let Some(mut guard) = self.cgroup_guard.take() {
+            let mut cg_telemetry = guard.collect_telemetry();
+            cg_telemetry.cleanup_state = guard.teardown();
+            telemetry.cgroup = Some(cg_telemetry);
+        }
+        Ok(telemetry)
     }
 
     fn shutdown(&mut self) -> Result<()> {
