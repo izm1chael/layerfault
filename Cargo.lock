@@ -1910,6 +1910,7 @@ dependencies = [
  "aya",
  "clap",
  "layerfault-telemetry-protocol",
+ "tempfile",
 ]
 
 [[package]]
