@@ -7,6 +7,11 @@ pub const DEFAULT_MAX_DEFINITIONS: usize = 10_000;
 pub const DEFAULT_MAX_STRING_LITERAL_EVIDENCE_BYTES: usize = 1_024;
 pub const DEFAULT_MAX_RELATIONSHIPS: usize = 10_000;
 pub const DEFAULT_MAX_CAPABILITY_FINDINGS_PER_FILE: usize = 1_000;
+pub const DEFAULT_MAX_TAINT_CALL_DEPTH: usize = 5;
+pub const DEFAULT_MAX_TAINT_FUNCTIONS_VISITED: usize = 50;
+pub const DEFAULT_MAX_TAINT_STATE_MERGES: usize = 100;
+pub const DEFAULT_MAX_TAINT_LABELS_PER_VALUE: usize = 16;
+pub const DEFAULT_MAX_TAINT_FLOWS_PER_FILE: usize = 100;
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct PythonAnalysisLimits {
@@ -19,6 +24,11 @@ pub struct PythonAnalysisLimits {
     pub max_string_literal_bytes: usize,
     pub max_relationships: usize,
     pub max_capability_findings_per_file: usize,
+    pub max_taint_call_depth: usize,
+    pub max_taint_functions_visited: usize,
+    pub max_taint_state_merges: usize,
+    pub max_taint_labels_per_value: usize,
+    pub max_taint_flows_per_file: usize,
 }
 
 impl Default for PythonAnalysisLimits {
@@ -33,6 +43,11 @@ impl Default for PythonAnalysisLimits {
             max_string_literal_bytes: DEFAULT_MAX_STRING_LITERAL_EVIDENCE_BYTES,
             max_relationships: DEFAULT_MAX_RELATIONSHIPS,
             max_capability_findings_per_file: DEFAULT_MAX_CAPABILITY_FINDINGS_PER_FILE,
+            max_taint_call_depth: DEFAULT_MAX_TAINT_CALL_DEPTH,
+            max_taint_functions_visited: DEFAULT_MAX_TAINT_FUNCTIONS_VISITED,
+            max_taint_state_merges: DEFAULT_MAX_TAINT_STATE_MERGES,
+            max_taint_labels_per_value: DEFAULT_MAX_TAINT_LABELS_PER_VALUE,
+            max_taint_flows_per_file: DEFAULT_MAX_TAINT_FLOWS_PER_FILE,
         }
     }
 }

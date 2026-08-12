@@ -33,12 +33,14 @@ fn finding(
     builder.finish()
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn convert_analysis_to_findings(
     relative_path: &str,
     digest: &str,
     syntax_state: &PythonSyntaxState,
     call_sites: &[CallSite],
     reachability_map: &std::collections::BTreeMap<usize, ReachabilityState>,
+    taint_result: &super::taint::TaintAnalysisResult,
     is_auto_mapped: bool,
     started: Instant,
 ) -> Vec<LayerScanResult> {
@@ -84,6 +86,109 @@ pub fn convert_analysis_to_findings(
             subject.clone(),
             None,
         ));
+    }
+
+    if taint_result.incomplete {
+        let reason = taint_result
+            .incomplete_reason
+            .as_deref()
+            .unwrap_or("bounds exceeded or dynamic dispatch encountered");
+        out.push(finding(
+            digest,
+            CheckType::PackageSecurity,
+            ScanStatus::Warn,
+            FindingClass::Structural,
+            Confidence::High,
+            "LF-PY-TAINT-INCOMPLETE",
+            format!(
+                "Python data-flow analysis incomplete for '{}': {reason}.",
+                relative_path
+            ),
+            subject.clone(),
+            None,
+        ));
+    }
+
+    for flow in &taint_result.flows {
+        let rule_id = match (&flow.source_kind, &flow.sink_kind) {
+            (
+                super::taint::TaintSourceKind::CredentialEnv { .. },
+                super::taint::TaintSinkKind::NetworkBodyQueryHeader { .. }
+                | super::taint::TaintSinkKind::SocketSend { .. },
+            ) => "LF-PY-FLOW-CREDENTIAL-NETWORK",
+            (
+                super::taint::TaintSourceKind::CredentialFile { .. }
+                | super::taint::TaintSourceKind::SensitiveFile { .. },
+                super::taint::TaintSinkKind::NetworkBodyQueryHeader { .. }
+                | super::taint::TaintSinkKind::SocketSend { .. },
+            ) => "LF-PY-FLOW-FILE-NETWORK",
+            (
+                super::taint::TaintSourceKind::UntrustedParameter { .. },
+                super::taint::TaintSinkKind::DynamicCodeEval { .. }
+                | super::taint::TaintSinkKind::SubprocessCommand { .. },
+            ) => "LF-PY-FLOW-INPUT-EXEC",
+            (
+                super::taint::TaintSourceKind::NetworkInput { .. },
+                super::taint::TaintSinkKind::DynamicCodeEval { .. }
+                | super::taint::TaintSinkKind::SubprocessCommand { .. },
+            ) => "LF-PY-FLOW-NETWORK-EXEC",
+            (super::taint::TaintSourceKind::CredentialEnv { .. }, _) => {
+                "LF-PY-FLOW-CREDENTIAL-NETWORK"
+            }
+            (
+                super::taint::TaintSourceKind::CredentialFile { .. }
+                | super::taint::TaintSourceKind::SensitiveFile { .. },
+                _,
+            ) => "LF-PY-FLOW-FILE-NETWORK",
+            (super::taint::TaintSourceKind::UntrustedParameter { .. }, _) => {
+                "LF-PY-FLOW-INPUT-EXEC"
+            }
+            _ => "LF-PY-FLOW-CREDENTIAL-NETWORK",
+        };
+
+        let confidence = if flow.source_kind.is_high_confidence_secret() {
+            Confidence::High
+        } else {
+            Confidence::Medium
+        };
+
+        let detail = format!(
+            "Data flow detected in '{}': source '{}' at line {} -> sink '{}' at line {}.",
+            relative_path, flow.source_expr, flow.source_line, flow.sink_expr, flow.sink_line
+        );
+
+        let line = flow.sink_line as u64;
+        let flow_evidence = source_excerpt(
+            subject.clone(),
+            line,
+            line,
+            &flow.sink_expr,
+            &flow.sink_expr,
+        )
+        .structured(serde_json::json!({
+            "source_expr": flow.source_expr,
+            "source_line": flow.source_line,
+            "source_kind": format!("{:?}", flow.source_kind),
+            "sink_expr": flow.sink_expr,
+            "sink_line": flow.sink_line,
+            "sink_kind": format!("{:?}", flow.sink_kind),
+            "transfer_steps": flow.transfer_steps,
+            "execution_context": format!("{:?}", flow.execution_context),
+        }));
+
+        let mut f_flow = finding(
+            digest,
+            CheckType::PackageSecurity,
+            ScanStatus::Warn,
+            FindingClass::ContentIndicator,
+            confidence,
+            rule_id,
+            detail,
+            subject.clone(),
+            Some(flow_evidence),
+        );
+        f_flow.duration_ms = crate::scanner::duration_ms(started);
+        out.push(f_flow);
     }
 
     for (idx, call) in call_sites.iter().enumerate() {

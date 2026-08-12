@@ -4,6 +4,7 @@ pub mod limits;
 pub mod parser;
 pub mod reachability;
 pub mod symbols;
+pub mod taint;
 
 use anyhow::Result;
 use calls::{CallSite, CallSiteExtractor, ExecutionContext};
@@ -14,6 +15,7 @@ use rustpython_parser::ast::{self, Stmt, Suite};
 use std::collections::BTreeSet;
 use std::time::Instant;
 use symbols::{Definition, DefinitionKind, ImportBinding, SymbolTable};
+use taint::{TaintAnalysisResult, TaintEngine};
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct PythonAnalysis {
@@ -25,6 +27,7 @@ pub struct PythonAnalysis {
     pub entry_points: Vec<EntryPoint>,
     pub relationships: Vec<PythonRelationship>,
     pub coverage: PythonCoverage,
+    pub taint_result: TaintAnalysisResult,
 }
 
 /// Content-intrinsic Python facts: parsing, symbol table and call-site
@@ -43,9 +46,10 @@ struct PythonContentFacts {
     call_sites: Vec<CallSite>,
     definitions: Vec<Definition>,
     coverage: PythonCoverage,
+    taint_result: TaintAnalysisResult,
 }
 
-const PYTHON_CONTENT_CACHE_DISCRIMINATOR: &str = "python-ast:v1";
+const PYTHON_CONTENT_CACHE_DISCRIMINATOR: &str = "python-ast:v2";
 /// Fixed source label used only for parser error-message text when computing
 /// cacheable content facts, so the cached record never embeds a real path.
 const CONTENT_FACTS_SOURCE_LABEL: &str = "<content>";
@@ -55,6 +59,11 @@ fn analyze_content(source: &str, limits: &PythonAnalysisLimits) -> PythonContent
     let line_index = LineIndex::new(source);
     let mut symbol_table = SymbolTable::new();
     let mut call_sites = Vec::new();
+    let mut taint_result = TaintAnalysisResult {
+        flows: Vec::new(),
+        incomplete: false,
+        incomplete_reason: None,
+    };
 
     if let Some(ref suite) = parse_res.ast {
         // Step 1: Collect symbols & imports
@@ -64,6 +73,10 @@ fn analyze_content(source: &str, limits: &PythonAnalysisLimits) -> PythonContent
         let mut extractor = CallSiteExtractor::new(&symbol_table, limits, &line_index);
         extractor.extract_suite(suite, ExecutionContext::ModuleScope);
         call_sites = extractor.call_sites;
+
+        // Step 3: Run taint flow analysis
+        let mut taint_engine = TaintEngine::new(&symbol_table, limits, &line_index, false);
+        taint_result = taint_engine.analyze_suite(suite);
     }
 
     let imports = symbol_table.imports.into_values().collect();
@@ -75,6 +88,7 @@ fn analyze_content(source: &str, limits: &PythonAnalysisLimits) -> PythonContent
         call_sites,
         definitions,
         coverage: parse_res.coverage,
+        taint_result,
     }
 }
 
@@ -134,6 +148,7 @@ pub fn analyze(
         entry_points,
         relationships,
         coverage: facts.coverage,
+        taint_result: facts.taint_result,
     })
 }
 
@@ -166,6 +181,7 @@ pub fn analyze_and_convert_findings(
         &analysis.syntax_state,
         &analysis.call_sites,
         &reach_graph.reachability_map,
+        &analysis.taint_result,
         is_auto_mapped,
         started,
     );

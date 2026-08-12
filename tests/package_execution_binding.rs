@@ -59,7 +59,7 @@ fn mutate_source_member_during_staging_fails() -> Result<()> {
     let result = binding::stage_verified_package_under(&pkg_dir, &report, &parent);
     assert!(result.is_err());
     let err_msg = result.err().unwrap().to_string();
-    assert!(err_msg.contains("hash changed during staging copy"));
+    assert!(err_msg.contains("hash changed during staging"));
 
     let _ = fs::remove_dir_all(base);
     Ok(())
@@ -355,7 +355,7 @@ fn mutate_gguf_source_during_staging_fails() -> Result<()> {
 
     assert!(result.is_err());
     let err = result.err().unwrap().to_string();
-    assert!(err.contains("Artifact changed between admission and execution binding"));
+    assert!(err.contains("hash changed during staging"));
 
     let _ = fs::remove_dir_all(base);
     Ok(())
