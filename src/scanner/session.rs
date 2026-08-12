@@ -11,7 +11,7 @@ use crate::hashcache::{
     FileIdentity,
 };
 use crate::scanner::binary::BinaryStreamScanner;
-use crate::scanner::{CheckType, Confidence, FindingClass, LayerScanResult, ScanStatus};
+use crate::scanner::{scratch, CheckType, Confidence, FindingClass, LayerScanResult, ScanStatus};
 use anyhow::{anyhow, Result};
 use sha2::{Digest, Sha256};
 use std::cell::RefCell;
@@ -148,6 +148,19 @@ impl StreamObserver for BinaryStreamObserver {
     }
 }
 
+/// ASCII case-insensitive substring search that avoids allocating a lowercased
+/// copy of `haystack`. `needle` must already be lowercase ASCII (all current
+/// callers pass hardcoded lowercase ASCII literals).
+fn contains_ascii_case_insensitive(haystack: &[u8], needle: &str) -> bool {
+    let needle = needle.as_bytes();
+    if needle.is_empty() || needle.len() > haystack.len() {
+        return needle.is_empty();
+    }
+    haystack
+        .windows(needle.len())
+        .any(|w| w.eq_ignore_ascii_case(needle))
+}
+
 /// Observer performing streaming text searches for dangerous python patterns and Jinja markers.
 pub struct TextStreamObserver {
     rel_path: String,
@@ -156,6 +169,7 @@ pub struct TextStreamObserver {
     dangerous: Vec<(&'static str, &'static str)>,
     jinja_needles: Vec<(&'static str, &'static str)>,
     carry: Vec<u8>,
+    window: Vec<u8>,
     window_start: u64,
     window_start_line: u64,
     findings: Vec<LayerScanResult>,
@@ -191,6 +205,7 @@ impl TextStreamObserver {
                 ("namespace.__init__", "LF-TEMPLATE-INTROSPECTION"),
             ],
             carry: Vec::new(),
+            window: Vec::new(),
             window_start: 0,
             window_start_line: 1,
             findings: Vec::new(),
@@ -205,17 +220,16 @@ impl StreamObserver for TextStreamObserver {
     }
 
     fn observe(&mut self, offset: u64, chunk: &[u8]) -> Result<()> {
-        let mut window = Vec::with_capacity(self.carry.len() + chunk.len());
-        window.extend_from_slice(&self.carry);
-        window.extend_from_slice(chunk);
-        let lower = String::from_utf8_lossy(&window).to_ascii_lowercase();
+        self.window.clear();
+        self.window.extend_from_slice(&self.carry);
+        self.window.extend_from_slice(chunk);
 
         if !self.is_doc && !self.is_vocab {
             for (needle, rule) in &self.dangerous {
                 if self.seen_rules.contains(*rule) {
                     continue;
                 }
-                if lower.contains(needle) {
+                if contains_ascii_case_insensitive(&self.window, needle) {
                     self.seen_rules.insert((*rule).to_owned());
                 }
             }
@@ -225,22 +239,26 @@ impl StreamObserver for TextStreamObserver {
             if self.seen_rules.contains(*rule) {
                 continue;
             }
-            if lower.contains(needle) {
+            if contains_ascii_case_insensitive(&self.window, needle) {
                 self.seen_rules.insert((*rule).to_owned());
             }
         }
 
-        let consumed = window.len().saturating_sub(512);
+        let consumed = self.window.len().saturating_sub(512);
         if consumed > 0 {
-            let consumed_bytes = &window[..consumed];
-            let newlines = consumed_bytes.iter().filter(|&&b| b == b'\n').count() as u64;
+            let newlines = self.window[..consumed]
+                .iter()
+                .filter(|&&b| b == b'\n')
+                .count() as u64;
             self.window_start_line = self.window_start_line.saturating_add(newlines);
             self.window_start = offset
                 .saturating_add(chunk.len() as u64)
-                .saturating_sub((window.len() - consumed) as u64);
-            self.carry = window[consumed..].to_vec();
+                .saturating_sub((self.window.len() - consumed) as u64);
+            self.carry.clear();
+            self.carry.extend_from_slice(&self.window[consumed..]);
         } else {
-            self.carry = window;
+            self.carry.clear();
+            self.carry.extend_from_slice(&self.window);
         }
 
         Ok(())
@@ -438,31 +456,46 @@ impl<'a> ScanSession<'a> {
 
                 let mut hasher = Sha256::new();
                 let compute_digest = plan.cached_digest.is_none();
-                let mut read_buf = vec![0_u8; STREAM_CHUNK_BYTES];
+                // Size the retained buffer to what this file actually needs rather than
+                // always pinning a full STREAM_CHUNK_BYTES per worker thread: package
+                // scans fan out across many threads, and most package members are far
+                // smaller than the chunk cap, so sizing to the true minimum keeps the
+                // thread-local buffer small for the common case while still capping at
+                // STREAM_CHUNK_BYTES for large files.
+                let mut read_buf = scratch::take_read_buf(
+                    usize::try_from(self.size.max(1))
+                        .unwrap_or(usize::MAX)
+                        .min(STREAM_CHUNK_BYTES),
+                );
                 let mut offset = 0_u64;
 
                 self.metrics.borrow_mut().record_full_pass();
 
-                loop {
-                    let count = reader.read(&mut read_buf)?;
-                    if count == 0 {
-                        break;
-                    }
-                    let chunk = &read_buf[..count];
-                    self.metrics
-                        .borrow_mut()
-                        .record_sequential_read(count as u64);
+                let read_result = (|| -> Result<()> {
+                    loop {
+                        let count = reader.read(&mut read_buf)?;
+                        if count == 0 {
+                            break;
+                        }
+                        let chunk = &read_buf[..count];
+                        self.metrics
+                            .borrow_mut()
+                            .record_sequential_read(count as u64);
 
-                    if compute_digest {
-                        hasher.update(chunk);
-                    }
+                        if compute_digest {
+                            hasher.update(chunk);
+                        }
 
-                    for &idx in &active_indices {
-                        observers[idx].observe(offset, chunk)?;
-                    }
+                        for &idx in &active_indices {
+                            observers[idx].observe(offset, chunk)?;
+                        }
 
-                    offset = offset.saturating_add(count as u64);
-                }
+                        offset = offset.saturating_add(count as u64);
+                    }
+                    Ok(())
+                })();
+                scratch::return_read_buf(read_buf);
+                read_result?;
 
                 let calculated_digest = if let Some(cd) = plan.cached_digest {
                     cd

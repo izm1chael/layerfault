@@ -166,10 +166,16 @@ def run_single_benchmark(
 
         peak_rss_kib = 0
         try:
-            val = pathlib.Path(time_outfile.name).read_text().strip()
-            peak_rss_kib = int(val)
-        except Exception:
-            pass
+            content = pathlib.Path(time_outfile.name).read_text().strip()
+            # GNU time prepends a "Command exited with non-zero status N" line
+            # ahead of the -f format output whenever the wrapped command exits
+            # non-zero (routine for this CLI: policy warnings/blocks are
+            # expected exit codes) -- the %M value is always the last line.
+            lines = [ln for ln in content.splitlines() if ln.strip()]
+            if lines:
+                peak_rss_kib = int(lines[-1].strip())
+        except (OSError, ValueError) as exc:
+            print(f"Warning: failed to parse peak RSS from '{time_outfile.name}': {exc}", file=sys.stderr)
         finally:
             pathlib.Path(time_outfile.name).unlink(missing_ok=True)
     else:

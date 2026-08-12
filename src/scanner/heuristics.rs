@@ -1,5 +1,6 @@
 use crate::scanner::{
-    duration_ms, CheckType, Confidence, FindingClass, LayerScanResult, ScanStatus,
+    duration_ms, scratch, CheckType, Confidence, FindingClass, LayerScanResult, ScanStatus,
+    STREAM_CHUNK_BYTES,
 };
 use anyhow::Result;
 use lazy_static::lazy_static;
@@ -10,7 +11,6 @@ use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
 use std::time::Instant;
 
-const STREAM_CHUNK_BYTES: usize = 1024 * 1024;
 const STREAM_OVERLAP_BYTES: usize = 8 * 1024;
 const MAX_RETAINED_MATCHES: usize = 256;
 const MAX_RETAINED_PER_SIGNATURE: usize = 16;
@@ -841,38 +841,55 @@ impl HeuristicsScanner {
         let len = file.metadata()?.len();
         let mut reader = file.try_clone()?;
         reader.seek(SeekFrom::Start(0))?;
-        let mut buffer = vec![0_u8; STREAM_CHUNK_BYTES];
+        // Size the retained buffer to this file's actual length rather than always
+        // pinning a full STREAM_CHUNK_BYTES per worker thread; see the matching
+        // comment in ScanSession::run for why this matters for package scans.
+        let mut buffer = scratch::take_read_buf(
+            usize::try_from(len.max(1))
+                .unwrap_or(usize::MAX)
+                .min(STREAM_CHUNK_BYTES),
+        );
+        let mut raw_window = scratch::take_window_buf();
+        let mut normalize_buf = scratch::take_normalize_buf();
         let mut carry = Vec::<u8>::new();
         let mut accumulator = ScanAccumulator::new();
         let mut decode_budget = DecodeBudget::default();
         let mut bytes_scanned = 0usize;
 
-        loop {
-            let count = reader.read(&mut buffer)?;
-            if count == 0 {
-                break;
-            }
-            bytes_scanned = bytes_scanned.saturating_add(count);
-            // Normalize the overlap and new bytes as one window. Doing this before
-            // splitting text avoids treating a valid multibyte UTF-8 scalar that
-            // happens to cross the I/O boundary as malformed input.
-            let mut raw_window = Vec::with_capacity(carry.len() + count);
-            raw_window.extend_from_slice(&carry);
-            raw_window.extend_from_slice(&buffer[..count]);
-            let (window, invalid, invisible, confusables) = normalize_detection_bytes(&raw_window);
-            accumulator.record_normalization(invalid, invisible, confusables);
+        let scan_result = (|| -> Result<()> {
+            loop {
+                let count = reader.read(&mut buffer)?;
+                if count == 0 {
+                    break;
+                }
+                bytes_scanned = bytes_scanned.saturating_add(count);
+                // Normalize the overlap and new bytes as one window. Doing this before
+                // splitting text avoids treating a valid multibyte UTF-8 scalar that
+                // happens to cross the I/O boundary as malformed input.
+                raw_window.clear();
+                raw_window.extend_from_slice(&carry);
+                raw_window.extend_from_slice(&buffer[..count]);
+                let (invalid, invisible, confusables) =
+                    normalize_detection_bytes_into(&raw_window, &mut normalize_buf);
+                accumulator.record_normalization(invalid, invisible, confusables);
 
-            // The normalized prefix can be a few bytes longer than the same prefix
-            // inside `window` when `carry` ends midway through a UTF-8 scalar. Back
-            // the suppression boundary up by four bytes so a cross-boundary match
-            // cannot be hidden. At worst this recounts a tiny overlap; evidence is
-            // bounded independently.
-            let (normalized_carry, _, _, _) = normalize_detection_bytes(&carry);
-            let ignore_before = normalized_carry.len().saturating_sub(4);
-            accumulator.scan_text(&window, ignore_before);
-            scan_decoded_candidates(&window, &mut accumulator, &mut decode_budget, 0);
-            update_carry(&mut carry, &buffer[..count]);
-        }
+                // The normalized prefix can be a few bytes longer than the same prefix
+                // inside `window` when `carry` ends midway through a UTF-8 scalar. Back
+                // the suppression boundary up by four bytes so a cross-boundary match
+                // cannot be hidden. At worst this recounts a tiny overlap; evidence is
+                // bounded independently.
+                let ignore_before = normalized_detection_len(&carry).saturating_sub(4);
+                accumulator.scan_text(&normalize_buf, ignore_before);
+                scan_decoded_candidates(&normalize_buf, &mut accumulator, &mut decode_budget, 0);
+                update_carry(&mut carry, &buffer[..count]);
+            }
+            Ok(())
+        })();
+
+        scratch::return_read_buf(buffer);
+        scratch::return_window_buf(raw_window);
+        scratch::return_normalize_buf(normalize_buf);
+        scan_result?;
 
         debug_assert_eq!(u64::try_from(bytes_scanned).unwrap_or(u64::MAX), len);
         accumulator.decode_truncated = decode_budget.exhausted;
@@ -1019,9 +1036,18 @@ fn update_carry(carry: &mut Vec<u8>, chunk: &[u8]) {
 }
 
 fn normalize_detection_bytes(bytes: &[u8]) -> (String, usize, usize, usize) {
+    let mut output = String::new();
+    let (invalid, invisible, confusables) = normalize_detection_bytes_into(bytes, &mut output);
+    (output, invalid, invisible, confusables)
+}
+
+/// Same character-mapping rules as `normalize_detection_bytes`, but writes
+/// into a caller-provided buffer (cleared first) instead of allocating a new
+/// `String`, so a worker-owned scratch buffer can be reused across calls.
+fn normalize_detection_bytes_into(bytes: &[u8], output: &mut String) -> (usize, usize, usize) {
+    output.clear();
     let invalid_input = std::str::from_utf8(bytes).is_err();
     let decoded = String::from_utf8_lossy(bytes);
-    let mut output = String::with_capacity(decoded.len());
     let mut invalid = 0usize;
     let mut invisible = 0usize;
     let mut confusables = 0usize;
@@ -1042,9 +1068,31 @@ fn normalize_detection_bytes(bytes: &[u8]) -> (String, usize, usize, usize) {
             output.push(ch);
         }
     }
-    (output, invalid, invisible, confusables)
+    (invalid, invisible, confusables)
 }
 
+/// Same character-mapping rules as `normalize_detection_bytes`, but returns only
+/// the resulting byte length instead of materializing the normalized `String`.
+/// Used to derive a suppression boundary from a small buffer without allocating.
+fn normalized_detection_len(bytes: &[u8]) -> usize {
+    let invalid_input = std::str::from_utf8(bytes).is_err();
+    let decoded = String::from_utf8_lossy(bytes);
+    let mut len = 0usize;
+    for ch in decoded.chars() {
+        if is_invisible_or_bidi(ch) {
+            continue;
+        }
+        if invalid_input && ch == '\u{fffd}' {
+            len = len.saturating_add(1);
+            continue;
+        }
+        let mapped = common_confusable(ch).unwrap_or(ch);
+        len = len.saturating_add(mapped.len_utf8());
+    }
+    len
+}
+
+#[inline(always)]
 fn common_confusable(ch: char) -> Option<char> {
     Some(match ch {
         // Common Cyrillic/Greek look-alikes used in prompt/signature evasion.
@@ -1072,6 +1120,7 @@ fn common_confusable(ch: char) -> Option<char> {
     })
 }
 
+#[inline(always)]
 fn is_invisible_or_bidi(ch: char) -> bool {
     matches!(
         ch,

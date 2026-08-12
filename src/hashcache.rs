@@ -266,17 +266,27 @@ pub fn sha256_hex(path: &Path, file: &File) -> Result<HashOutcome> {
 }
 
 pub fn sha256_uncached_prefixed(file: &File) -> Result<String> {
+    let len = file.metadata()?.len();
     let mut reader = file.try_clone()?;
     reader.seek(SeekFrom::Start(0))?;
     let mut hasher = Sha256::new();
-    let mut buffer = vec![0_u8; 1024 * 1024];
-    loop {
-        let count = reader.read(&mut buffer)?;
-        if count == 0 {
-            break;
+    let mut buffer = crate::scanner::scratch::take_read_buf(
+        usize::try_from(len.max(1))
+            .unwrap_or(usize::MAX)
+            .min(crate::scanner::session::STREAM_CHUNK_BYTES),
+    );
+    let result = (|| -> Result<()> {
+        loop {
+            let count = reader.read(&mut buffer)?;
+            if count == 0 {
+                break;
+            }
+            hasher.update(&buffer[..count]);
         }
-        hasher.update(&buffer[..count]);
-    }
+        Ok(())
+    })();
+    crate::scanner::scratch::return_read_buf(buffer);
+    result?;
     Ok(format!("sha256:{}", hex::encode(hasher.finalize())))
 }
 
@@ -284,18 +294,28 @@ fn sha256_uncached_prefixed_with_observer<F>(file: &File, observe: &mut F) -> Re
 where
     F: FnMut(&[u8]) -> Result<()>,
 {
+    let len = file.metadata()?.len();
     let mut reader = file.try_clone()?;
     reader.seek(SeekFrom::Start(0))?;
     let mut hasher = Sha256::new();
-    let mut buffer = vec![0_u8; 1024 * 1024];
-    loop {
-        let count = reader.read(&mut buffer)?;
-        if count == 0 {
-            break;
+    let mut buffer = crate::scanner::scratch::take_read_buf(
+        usize::try_from(len.max(1))
+            .unwrap_or(usize::MAX)
+            .min(crate::scanner::session::STREAM_CHUNK_BYTES),
+    );
+    let result = (|| -> Result<()> {
+        loop {
+            let count = reader.read(&mut buffer)?;
+            if count == 0 {
+                break;
+            }
+            hasher.update(&buffer[..count]);
+            observe(&buffer[..count])?;
         }
-        hasher.update(&buffer[..count]);
-        observe(&buffer[..count])?;
-    }
+        Ok(())
+    })();
+    crate::scanner::scratch::return_read_buf(buffer);
+    result?;
     Ok(format!("sha256:{}", hex::encode(hasher.finalize())))
 }
 

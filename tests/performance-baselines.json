@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "description": "Layerfault performance, memory, and I/O regression baselines for PR-safe micro/medium scenarios.",
+  "description": "Layerfault performance, memory, and I/O regression baselines for PR-safe micro/medium scenarios. warm_cache/incremental_unchanged peak_rss_kib recalibrated from benchmark_harness.py measurements after fixing a bug where GNU time's 'Command exited with non-zero status N' line (written whenever the wrapped CLI invocation exits non-zero, which is routine for policy warnings/blocks) broke int() parsing and silently zeroed peak_rss_kib for any non-zero-exit scenario; other scenario RSS values were re-measured and confirmed already within threshold, so were left unchanged.",
   "baselines": {
     "many_tiny_files": {
       "scenario": "many_tiny_files",
@@ -103,7 +103,7 @@
       "metrics": {
         "wall_time_ms": 200.0,
         "cpu_time_ms": 190.0,
-        "peak_rss_kib": 40000,
+        "peak_rss_kib": 48200,
         "logical_source_bytes": 1048576,
         "physical_bytes_read": 0,
         "full_file_passes": 0,
@@ -119,7 +119,7 @@
       "metrics": {
         "wall_time_ms": 200.0,
         "cpu_time_ms": 190.0,
-        "peak_rss_kib": 40000,
+        "peak_rss_kib": 48700,
         "logical_source_bytes": 1048576,
         "physical_bytes_read": 0,
         "full_file_passes": 0,

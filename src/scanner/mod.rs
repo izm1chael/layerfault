@@ -3,6 +3,7 @@ pub mod config;
 pub mod heuristics;
 pub mod integrity;
 pub mod metadata;
+pub(crate) mod scratch;
 pub mod session;
 
 pub use session::{
