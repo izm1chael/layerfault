@@ -39,6 +39,7 @@ pub mod language_frontend;
 pub mod lineage;
 pub mod lora;
 pub mod manifest;
+pub mod model;
 pub mod modeldiff;
 pub mod modelmeta;
 pub mod object_cache;

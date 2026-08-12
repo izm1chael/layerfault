@@ -7,11 +7,19 @@ use layerfault::perf_metrics::{
 use layerfault::safeio::open_readonly_nofollow;
 use layerfault::scanner::{BinaryStreamObserver, ScanSession, TextStreamObserver};
 use std::io::Write;
+use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
 use tempfile::tempdir;
 
+static PERFORMANCE_COUNTER_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+
+fn performance_counter_lock() -> &'static Mutex<()> {
+    PERFORMANCE_COUNTER_LOCK.get_or_init(|| Mutex::new(()))
+}
+
 #[test]
 fn test_performance_metrics_atomic_counters() {
+    let _counter_guard = performance_counter_lock().lock().unwrap();
     reset_global_counters();
     record_logical_bytes(2048);
     record_physical_bytes(4096);
@@ -158,6 +166,7 @@ fn test_performance_report_serialization() {
 
 #[test]
 fn test_single_pass_scan_session_counter_integration() {
+    let _counter_guard = performance_counter_lock().lock().unwrap();
     reset_global_counters();
     let dir = tempdir().unwrap();
     let file_path = dir.path().join("counter_test.bin");
