@@ -272,7 +272,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn classify_recognizes_p0_and_p1_manifests() {
+    fn classify_recognizes_supported_manifests() {
         assert_eq!(
             classify_manifest("requirements.txt", "txt"),
             Some(ManifestKind::Requirements)

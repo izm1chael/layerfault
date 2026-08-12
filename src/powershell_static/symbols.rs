@@ -5,7 +5,7 @@
 //! Much thinner than Python's `symbols.rs`, mirroring `shell_static::symbols`:
 //! PowerShell has no import system here, so resolution is intentionally
 //! one-level-only (an alias/variable value is not itself re-resolved
-//! through another alias/variable), matching the plan's stated scope.
+//! through another alias/variable).
 
 use super::parser::PowerShellFunctionDef;
 use std::collections::BTreeMap;

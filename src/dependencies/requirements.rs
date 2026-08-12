@@ -1,7 +1,7 @@
 //! Pip requirements-file syntax (`requirements.txt`, `requirements-*.txt`,
 //! `requirements.lock`) parsed without shell execution or network access.
 //!
-//! Supports the pip syntax subset named in the spec: version specifiers,
+//! Supports version specifiers, direct references, hashes, editable installs,
 //! extras, PEP 508 direct references, `git+`/`hg+`/`svn+`/`bzr+` VCS
 //! references, `-e`/`--editable`, `-r`/`--requirement` and `-c`/`--constraint`
 //! includes (bounded, cycle-safe, package-relative only), `--index-url`,

@@ -578,7 +578,7 @@ pub fn inspect_with_scheduler(
         .with_context(|| format!("Unable to canonicalize package root '{}'", root.display()))?;
     let mut findings = Vec::new();
 
-    // Phase 1: safe discovery + path normalisation
+    // Discover members safely and normalize paths.
     let mut discovery = discover_package(&root)?;
     for (rel, target) in discovery.symlinks {
         let rendered = target
@@ -605,7 +605,7 @@ pub fn inspect_with_scheduler(
         .paths
         .sort_by_key(|path| safe_relative(&root, path).unwrap_or_default());
 
-    // Phase 2: member identity/hash establishment
+    // Establish member identities and hashes.
     let mut member_headers = Vec::with_capacity(discovery.paths.len());
     let mut auto_map_modules = BTreeSet::new();
     let mut total_bytes = 0_u64;
@@ -647,7 +647,7 @@ pub fn inspect_with_scheduler(
         });
     }
 
-    // Phase 3: independent member analysis (parallel)
+    // Analyze members independently in parallel.
     let max_workers = scheduler.config().max_workers.max(1);
     let discovered_member_count = member_headers.len();
     let mut analyses = Vec::with_capacity(member_headers.len());
@@ -703,7 +703,7 @@ pub fn inspect_with_scheduler(
         }
     }
 
-    // Phase 4: deterministic merge
+    // Merge results deterministically.
     let mut files = Vec::with_capacity(analyses.len());
     let mut member_evidence = Vec::with_capacity(analyses.len());
     let mut aggregate_metrics = crate::scanner::ScanMetrics::default();
@@ -732,11 +732,11 @@ pub fn inspect_with_scheduler(
     let fingerprint = package_fingerprint(&files);
     let (merkle_identity, merkle_manifest) = compute_merkle_tree(&files, None);
 
-    // Phase 5: relationship graph construction
+    // Construct the relationship graph.
     correlate_custom_code(&files, &member_evidence, &mut findings);
     sort_findings_canonically(&mut findings);
 
-    // Phase 6: correlation
+    // Correlate related findings.
     let evidence_bytes = serde_json::to_vec(&findings)?.len() as u64;
     let evidence_failure = if control_interruption.is_some() {
         None
@@ -774,7 +774,7 @@ pub fn inspect_with_scheduler(
 
     let correlations = crate::correlate::correlate(&findings);
 
-    // Phase 7: coverage/package aggregate/policy
+    // Aggregate coverage and package policy results.
     let mut coverage = crate::coverage::Coverage::complete(files.len() as u64, total_bytes);
     coverage.files_discovered = discovered_member_count as u64;
     let incomplete_member_count = incomplete_members.len() as u64;

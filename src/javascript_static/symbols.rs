@@ -21,8 +21,8 @@
 //! assignment (`name = ...`) to a name that already has an import binding
 //! marks that binding shadowed, so a later call through that name does not
 //! resolve to the original import. This is deliberately simpler than a full
-//! scope-aware shadow check (no per-scope shadow stack), matching the plan's
-//! stated tolerance for shell's equally simple one-level-only resolution.
+//! scope-aware shadow check (no per-scope shadow stack), consistent with the
+//! other script frontends' one-level resolution.
 
 use super::limits::JavaScriptAnalysisLimits;
 use super::parser::LineIndex;

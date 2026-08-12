@@ -120,7 +120,7 @@ def create_pickle_heavy_fixture(path: pathlib.Path) -> None:
 def create_high_finding_count_package(target_dir: pathlib.Path, member_count: int = 2000) -> None:
     """A package whose static scan produces thousands of findings, so the
     `--json`/`--sarif` serialization path (not just the scan itself) is
-    the dominant cost -- the scenario spec 19's streaming-serialization
+    the dominant cost -- the streaming-serialization scenario's
     work is meant to keep bounded rather than proportional to report size.
     """
     target_dir.mkdir(parents=True, exist_ok=True)

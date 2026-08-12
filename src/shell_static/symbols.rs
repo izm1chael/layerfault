@@ -4,7 +4,7 @@
 //! Much thinner than Python's `symbols.rs`: shell has no import system, so
 //! there is no `ImportBinding` equivalent. Resolution is intentionally
 //! one-level-only (an alias/variable value is not itself re-resolved
-//! through another alias/variable), matching the plan's stated scope.
+//! through another alias/variable).
 
 use super::parser::ShellFunctionDef;
 use std::collections::BTreeMap;

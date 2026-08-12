@@ -269,7 +269,7 @@ mod tests {
     fn test_one_hop_rebinding_resolution() {
         // One-hop rebinding: `run` aliases the already-resolved
         // `child_process.exec` target. Multi-hop rebinding (an alias of an
-        // alias) is out of scope, matching the plan's stated one-hop
+        // alias) is not modeled by the one-hop
         // requirement.
         let code =
             "const child_process = require('child_process');\nconst run = child_process.exec;\nrun('id');\n";
