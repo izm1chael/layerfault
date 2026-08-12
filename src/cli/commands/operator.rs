@@ -1,4 +1,4 @@
-use crate::*;
+use super::super::*;
 
 pub(crate) fn run_policy(args: PolicyArgs) -> Result<()> {
     match args.command {
@@ -275,8 +275,8 @@ pub(crate) fn run_version(args: VersionArgs) -> Result<()> {
                 "name":"layerfault",
                 "version":env!("CARGO_PKG_VERSION"),
                 "build_id":env!("LAYERFAULT_BUILD_ID"),
-                "scanner_revision":crate::explain::scanner_revision(),
-                "ruleset_sha256":crate::explain::ruleset_sha256(),
+                "scanner_revision":layerfault::explain::scanner_revision(),
+                "ruleset_sha256":layerfault::explain::ruleset_sha256(),
                 "report_schema":"1.0", "policy_schema":1, "baseline_schema":1,
                 "supported_formats":["gguf","safetensors","safetensors-index","pytorch-zip","torchscript","torch-package","executorch","openvino-ir","tensorrt-engine","coreml-model","coreml-package","mlx-package","model-package"],
                 "sources":["ollama","lmstudio","llama-cpp","hf-cache","file","directory"],
@@ -288,7 +288,7 @@ pub(crate) fn run_version(args: VersionArgs) -> Result<()> {
             "layerfault {} ({}) ruleset:{}",
             env!("CARGO_PKG_VERSION"),
             env!("LAYERFAULT_BUILD_ID"),
-            crate::explain::ruleset_sha256()
+            layerfault::explain::ruleset_sha256()
         );
     }
     Ok(())

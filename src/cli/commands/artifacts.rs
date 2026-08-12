@@ -1,4 +1,4 @@
-use crate::*;
+use super::super::*;
 
 pub(crate) fn run_inspect(args: InspectArgs) -> Result<()> {
     let budget = standalone_budget(

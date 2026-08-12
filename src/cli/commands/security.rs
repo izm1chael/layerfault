@@ -1,4 +1,4 @@
-use crate::*;
+use super::super::*;
 
 pub(crate) fn run_advisories(args: AdvisoryArgs) -> Result<()> {
     match args.command {

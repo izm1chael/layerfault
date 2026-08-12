@@ -1,4 +1,4 @@
-use crate::*;
+use super::super::*;
 
 pub(crate) fn run_scan(args: ScanArgs) -> Result<()> {
     let prepared = prepare(&args.common)?;

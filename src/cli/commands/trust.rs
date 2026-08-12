@@ -1,4 +1,4 @@
-use crate::*;
+use super::super::*;
 
 pub(crate) fn run_trust(args: TrustArgs) -> Result<()> {
     let mut store = TrustStore::load(args.store.as_deref())?;

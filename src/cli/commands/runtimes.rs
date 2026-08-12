@@ -1,4 +1,4 @@
-use crate::*;
+use super::super::*;
 
 pub(crate) fn run_guarded(args: RunArgs) -> Result<()> {
     match SourceKind::parse(&args.source)? {
@@ -63,7 +63,7 @@ pub(crate) fn run_guarded_ollama(args: RunArgs) -> Result<()> {
     // nosemgrep: rust.actix.path-traversal.tainted-path.tainted-path
     let mut process =
         // nosemgrep: rust.actix.path-traversal.tainted-path.tainted-path
-        crate::safeio::command_for_executable(std::path::Path::new(&runtime.runtime.executable))?;
+        layerfault::safeio::command_for_executable(std::path::Path::new(&runtime.runtime.executable))?;
     let status = process
         .arg("run")
         .arg(&args.model)
