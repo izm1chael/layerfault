@@ -21,6 +21,7 @@ declare -A REQUIRED_CHILDREN=(
     [src/model/weights]="types discovery statistics compare sampling decode"
     [src/model/dataset]="types readers inventory sampling analysis indicators"
     [src/hub]="types client cache"
+    [src/cli]="args dispatch output scan_setup validation"
 )
 
 # mod.rs -> max line count.
@@ -31,6 +32,7 @@ declare -A MOD_LINE_LIMITS=(
     [src/model/weights/mod.rs]=300
     [src/model/dataset/mod.rs]=300
     [src/hub/mod.rs]=350
+    [src/cli/mod.rs]=350
 )
 
 # Monolith locations that must not return as substantive files. A file here

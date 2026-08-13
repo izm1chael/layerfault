@@ -1,0 +1,48 @@
+use super::args::{Cli, Command};
+use super::commands;
+use anyhow::Result;
+
+pub(super) fn dispatch(cli: Cli) -> Result<()> {
+    match cli.command {
+        Some(Command::Scan(args)) => commands::ollama::run_scan(args),
+        Some(Command::Inspect(args)) => commands::artifacts::run_inspect(args),
+        Some(Command::VerifyFile(args)) => commands::artifacts::run_verify_file(args),
+        Some(Command::ScanDir(args)) => commands::artifacts::run_scan_dir(args),
+        Some(Command::Fingerprint(args)) => commands::artifacts::run_fingerprint(args),
+        Some(Command::VerifyPackage(args)) => commands::artifacts::run_verify_package(args),
+        Some(Command::Pipeline(args)) => commands::artifacts::run_pipeline(args),
+        Some(Command::Verify(args)) => commands::ollama::run_verify(args),
+        Some(Command::Run(args)) => commands::runtimes::run_guarded(args),
+        Some(Command::Import(args)) => commands::runtimes::run_import(args),
+        Some(Command::Serve(args)) => commands::runtimes::run_serve(args),
+        Some(Command::Trust(args)) => commands::trust::run_trust(args),
+        Some(Command::Attest(args)) => commands::trust::run_attest(args),
+        Some(Command::Audit(args)) => commands::stores::run_audit(args),
+        Some(Command::Baseline(args)) => commands::stores::run_baseline(args),
+        Some(Command::Quarantine(args)) => commands::stores::run_quarantine(args),
+        Some(Command::Policy(args)) => commands::operator::run_policy(args),
+        Some(Command::Gc(args)) => commands::stores::run_gc(args),
+        Some(Command::Doctor(args)) => commands::operator::run_doctor(args),
+        Some(Command::Capabilities(args)) => commands::operator::run_capabilities(args),
+        Some(Command::Sources(args)) => commands::operator::run_sources(args),
+        Some(Command::Explain(args)) => commands::operator::run_explain(args),
+        Some(Command::Diff(args)) => commands::operator::run_diff(args),
+        Some(Command::Compare(args)) => commands::lineage::run_compare(args),
+        Some(Command::Behaviour(args)) => commands::behaviour::run_behaviour(args),
+        Some(Command::CompareBehaviour(args)) => commands::behaviour::run_compare_behaviour(args),
+        Some(Command::Review(args)) => commands::review::run_review(args),
+        Some(Command::Models(args)) => commands::models::run_models(args),
+        Some(Command::Drift(args)) => commands::models::run_drift(args),
+        Some(Command::Lineage(args)) => commands::lineage::run_lineage(args),
+        Some(Command::Dataset(args)) => commands::dataset::run_dataset(args),
+        Some(Command::Research(args)) => commands::research::run_research(args),
+        Some(Command::Hub(args)) => commands::hub::run_hub(args),
+        Some(Command::Platform(args)) => commands::platform::run_platform(args),
+        Some(Command::Selftest(args)) => commands::operator::run_selftest(args),
+        Some(Command::Certify(args)) => commands::operator::run_certify(args),
+        Some(Command::Advisories(args)) => commands::security::run_advisories(args),
+        Some(Command::Evidence(args)) => commands::security::run_evidence(args),
+        Some(Command::Version(args)) => commands::operator::run_version(args),
+        None => commands::ollama::run_scan(cli.legacy_scan),
+    }
+}
