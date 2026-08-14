@@ -75,7 +75,7 @@ toml = "0.8"
 # tags, matching the no-tags/no-object-construction requirement for
 # untrusted manifest parsing. Chosen over serde_yaml, which is upstream
 # maintenance-only.
-yaml-rust2 = "0.8"
+yaml-rust2 = "0.11"
 
 # JS/TS parser for `javascript_static`'s bounded AST-based capability
 # analysis of untrusted `.js`/`.mjs`/`.cjs`/`.ts`/`.tsx`/`.jsx` package
