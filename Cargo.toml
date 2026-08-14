@@ -95,7 +95,7 @@ oxc_parser = { version = "=0.96.0", default-features = false }
 oxc_allocator = "=0.96.0"
 oxc_ast = "=0.96.0"
 oxc_span = "=0.96.0"
-oxc_ast_visit = "=0.96.0"
+oxc_ast_visit = "=0.143.0"
 
 [build-dependencies]
 sha2 = "0.11"
