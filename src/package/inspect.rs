@@ -441,6 +441,14 @@ pub(super) fn prepare_verified_member(
             .unwrap_or_else(|_| "<unreadable after change>".to_owned());
         return Err(Box::new(race_analysis(header, &observed)));
     }
+    #[cfg(windows)]
+    {
+        let observed = crate::hashcache::sha256_uncached_prefixed(&file)
+            .unwrap_or_else(|_| "<unreadable after change>".to_owned());
+        if observed != header.sha256 {
+            return Err(Box::new(race_analysis(header, &observed)));
+        }
+    }
     Ok(VerifiedPackageMember {
         header: header.clone(),
         file,

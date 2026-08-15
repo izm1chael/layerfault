@@ -122,6 +122,70 @@ pub fn write_private(path: &Path, bytes: &[u8]) -> Result<()> {
     Ok(())
 }
 
+/// Atomically install an immutable private file, accepting an existing regular
+/// file when another writer wins the race for the same content-addressed key.
+pub fn write_private_noclobber(path: &Path, bytes: &[u8]) -> Result<()> {
+    let parent = path
+        .parent()
+        .filter(|value| !value.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."));
+    ensure_private_dir(parent)?;
+    let prefix = format!(
+        ".{}.tmp-",
+        path.file_name()
+            .and_then(|value| value.to_str())
+            .unwrap_or("layerfault")
+    );
+    let mut tmp = tempfile::Builder::new()
+        .prefix(&prefix)
+        .tempfile_in(parent)
+        .with_context(|| {
+            format!(
+                "Unable to reserve private temporary file for '{}'",
+                path.display()
+            )
+        })?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        tmp.as_file()
+            .set_permissions(fs::Permissions::from_mode(0o600))?;
+    }
+    tmp.as_file_mut()
+        .write_all(bytes)
+        .with_context(|| format!("Unable to write temporary file for '{}'", path.display()))?;
+    tmp.as_file()
+        .sync_all()
+        .with_context(|| format!("Unable to sync temporary file for '{}'", path.display()))?;
+    match tmp.persist_noclobber(path) {
+        Ok(_) => Ok(()),
+        Err(error)
+            if matches!(
+                error.error.kind(),
+                std::io::ErrorKind::AlreadyExists | std::io::ErrorKind::PermissionDenied
+            ) && std::fs::symlink_metadata(path)
+                .is_ok_and(|metadata| metadata.is_file() && !metadata.file_type().is_symlink()) =>
+        {
+            let existing_matches = crate::safeio::open_readonly_nofollow(path)
+                .and_then(|file| {
+                    crate::safeio::read_all_from_file(
+                        &file,
+                        u64::try_from(bytes.len()).unwrap_or(u64::MAX),
+                    )
+                })
+                .is_ok_and(|existing| existing == bytes);
+            if existing_matches {
+                Ok(())
+            } else {
+                drop(error.file);
+                write_private(path, bytes)
+            }
+        }
+        Err(error) => Err(error.error)
+            .with_context(|| format!("Unable to atomically install '{}'", path.display())),
+    }
+}
+
 pub fn now_unix() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)

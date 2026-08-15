@@ -217,7 +217,7 @@ where
     };
     let path = record_path(&key_digest)?;
     let bytes = serde_json::to_vec(&record).context("Unable to serialize content cache record")?;
-    crate::paths::write_private(&path, &bytes)?;
+    crate::paths::write_private_noclobber(&path, &bytes)?;
     maybe_sample_gc();
     Ok(())
 }

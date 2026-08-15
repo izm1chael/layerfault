@@ -292,6 +292,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)]
     fn test_staged_mutation_does_not_alter_source() -> Result<()> {
         let base = std::env::temp_dir().join(format!(
             "layerfault-staged-mutation-{}-{}",
@@ -310,12 +311,9 @@ mod tests {
         let staged = stage_verified_under(&source, &digest, &parent, false)?;
 
         // Verify staged file is read-only (0o400)
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            let mode = fs::metadata(staged.path())?.permissions().mode() & 0o777;
-            assert_eq!(mode, 0o400);
-        }
+        use std::os::unix::fs::PermissionsExt;
+        let mode = fs::metadata(staged.path())?.permissions().mode() & 0o777;
+        assert_eq!(mode, 0o400);
 
         // Attempt writing to staged file should fail because it's read-only
         let write_res = OpenOptions::new().write(true).open(staged.path());

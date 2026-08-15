@@ -7,8 +7,8 @@ use std::time::{Duration, Instant};
 
 const MAX_JOURNAL_BYTES: u64 = 64 * 1024 * 1024;
 const MAX_EVENTS: usize = 100_000;
-const LOCK_TIMEOUT: Duration = Duration::from_secs(10);
-const STALE_LOCK_AGE: Duration = Duration::from_secs(60);
+const LOCK_TIMEOUT: Duration = Duration::from_secs(60);
+const STALE_LOCK_AGE: Duration = Duration::from_secs(5 * 60);
 
 pub fn load(path: &Path) -> Result<Vec<TrustEvent>> {
     let _lock = JournalLock::acquire(path)?;
@@ -116,7 +116,11 @@ impl JournalLock {
                     file.sync_data()?;
                     return Ok(Self { path });
                 }
-                Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+                Err(error)
+                    if error.kind() == std::io::ErrorKind::AlreadyExists
+                        || (error.kind() == std::io::ErrorKind::PermissionDenied
+                            && path.exists()) =>
+                {
                     if lock_is_stale(&path) {
                         match std::fs::remove_file(&path) {
                             Ok(()) => continue,

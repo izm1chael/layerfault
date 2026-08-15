@@ -17,6 +17,7 @@ impl EnvGuard {
         let dir = tempdir().unwrap();
         std::env::set_var("LAYERFAULT_CACHE_DIR", dir.path());
         std::env::set_var("LAYERFAULT_OBJECT_CACHE", "on");
+        std::env::set_var("LAYERFAULT_OBJECT_CACHE_MIN_FREE_BYTES", "0");
         Self { _lock: lock, dir }
     }
 
