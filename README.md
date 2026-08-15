@@ -281,6 +281,13 @@ Before publishing or cutting a release, run the consolidated local gate:
 bash scripts/security/pre-push.sh
 ```
 
+Install the tracked Git hooks once per checkout so every ordinary push runs
+that same exhaustive gate automatically:
+
+```bash
+git config core.hooksPath .githooks
+```
+
 The binary will be available at:
 
 ```text

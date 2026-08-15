@@ -2,6 +2,7 @@ use anyhow::Result;
 use layerfault::binding::{self, BindingKind};
 use sha2::{Digest, Sha256};
 use std::fs;
+#[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
 
 #[test]
@@ -96,6 +97,7 @@ fn mutate_source_after_staging_leaves_staged_copy_bound() -> Result<()> {
 }
 
 #[test]
+#[cfg(unix)]
 fn mutate_staged_member_before_launch_fails_revalidation() -> Result<()> {
     let base = std::env::temp_dir().join(format!(
         "layerfault-pkg-binding-test-4-{}-{}",
@@ -152,7 +154,7 @@ fn path_traversal_member_impossible() -> Result<()> {
     let result = binding::stage_verified_package_under(&pkg_dir, &report, &parent);
     assert!(result.is_err());
     let err = result.err().unwrap().to_string();
-    assert!(err.contains("invalid traversal"));
+    assert!(err.contains("unsafe relative member path component"));
 
     let _ = fs::remove_dir_all(base);
     Ok(())
@@ -191,6 +193,7 @@ fn symlink_member_refused() -> Result<()> {
 }
 
 #[test]
+#[cfg(unix)]
 fn readonly_staging_permissions_enforced() -> Result<()> {
     let base = std::env::temp_dir().join(format!(
         "layerfault-pkg-binding-test-7-{}-{}",
@@ -307,6 +310,7 @@ fn mutate_gguf_source_after_staging_leaves_staged_copy_bound() -> Result<()> {
 }
 
 #[test]
+#[cfg(unix)]
 fn mutate_staged_gguf_artifact_before_launch_fails_revalidation() -> Result<()> {
     let base = std::env::temp_dir().join(format!(
         "layerfault-gguf-binding-test-2-{}-{}",

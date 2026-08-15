@@ -150,6 +150,23 @@ pub fn identity(composition: &ModelComposition) -> Result<CompositionIdentity> {
     })
 }
 
+pub fn adapter_set_identity(composition: &ModelComposition) -> Result<String> {
+    validate(composition)?;
+    let adapters = composition
+        .adapters
+        .iter()
+        .map(component)
+        .collect::<Vec<_>>();
+    let bytes = serde_json::to_vec(&adapters)?;
+    let mut hasher = Sha256::new();
+    hasher.update(b"layerfault:adapter-set:v1\0");
+    hasher.update(bytes);
+    Ok(format!(
+        "lfadapterset:v1:sha256:{}",
+        hex::encode(hasher.finalize())
+    ))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -222,21 +239,4 @@ mod tests {
             identity(&right).unwrap().value
         );
     }
-}
-
-pub fn adapter_set_identity(composition: &ModelComposition) -> Result<String> {
-    validate(composition)?;
-    let adapters = composition
-        .adapters
-        .iter()
-        .map(component)
-        .collect::<Vec<_>>();
-    let bytes = serde_json::to_vec(&adapters)?;
-    let mut hasher = Sha256::new();
-    hasher.update(b"layerfault:adapter-set:v1\0");
-    hasher.update(bytes);
-    Ok(format!(
-        "lfadapterset:v1:sha256:{}",
-        hex::encode(hasher.finalize())
-    ))
 }

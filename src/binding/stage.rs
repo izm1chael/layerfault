@@ -138,12 +138,10 @@ pub fn stage_verified_package_under(
             Ok(path) => path,
             Err(error) => {
                 let _ = fs::remove_dir_all(&staging_root);
-                return Err(error).with_context(|| {
-                    format!(
-                        "Package member relative path '{}' is unsafe",
-                        entry.relative_path
-                    )
-                });
+                return Err(anyhow!(
+                    "Package member relative path '{}' is unsafe: {error}",
+                    entry.relative_path
+                ));
             }
         };
 
