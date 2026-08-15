@@ -108,7 +108,7 @@ jobs:
       - name: Checksums
         run: (cd dist && sha256sum layerfault-linux-${{ matrix.arch }}* > SHA256SUMS-linux-${{ matrix.arch }})
       - name: Attest Linux artifacts
-        uses: actions/attest@508db95dd578ae2727ebd6217d5ba78e4fbda05d # v4.2.1
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
         with:
           subject-path: dist/layerfault-linux-${{ matrix.arch }}.*
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -135,7 +135,7 @@ jobs:
           dist/root/usr/local/bin/layerfault --version
           dist/root/usr/local/bin/layerfault selftest --json >/dev/null
           (cd dist && shasum -a 256 layerfault-macos-universal* > SHA256SUMS-macos)
-      - uses: actions/attest@508db95dd578ae2727ebd6217d5ba78e4fbda05d # v4.2.1
+      - uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
         with:
           subject-path: |
             dist/layerfault-macos-universal.tar.gz
@@ -192,7 +192,7 @@ jobs:
         shell: pwsh
         run: |
           Get-ChildItem dist/layerfault-windows-${{ matrix.arch }}* | Get-FileHash -Algorithm SHA256 | ForEach-Object { "$($_.Hash.ToLower())  $([IO.Path]::GetFileName($_.Path))" } | Set-Content dist/SHA256SUMS-windows-${{ matrix.arch }}
-      - uses: actions/attest@508db95dd578ae2727ebd6217d5ba78e4fbda05d # v4.2.1
+      - uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
         with:
           subject-path: dist/layerfault-windows-${{ matrix.arch }}*
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
