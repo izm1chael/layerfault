@@ -89,18 +89,18 @@ make_dirs(dir_nb_jinja)
 dir_nb_deps = ROOT / "negative_benign" / "dependency_manifests"
 make_dirs(dir_nb_deps)
 (dir_nb_deps / "pyproject.toml").write_text("""[build-system]
-requires = ["setuptools==68.0.0"]
+requires = ["setuptools==83.0.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "safe-package"
 version = "0.1.0"
 dependencies = [
-    "torch==2.0.0",
+    "torch==2.13.0",
     "numpy==1.24.3"
 ]
 """)
-(dir_nb_deps / "requirements.txt").write_text("torch==2.1.0\nnumpy==1.24.3\n")
+(dir_nb_deps / "requirements.txt").write_text("torch==2.13.0\nnumpy==1.24.3\n")
 
 # 3. negative_benign / allowlisted_pickle
 dir_nb_pkl = ROOT / "negative_benign" / "allowlisted_pickle"
