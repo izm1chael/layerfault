@@ -111,6 +111,14 @@ pub(crate) enum Command {
     Intelligence(IntelligenceArgs),
     /// Discover and assess local AI runtimes and model/runtime compatibility.
     Runtime(RuntimeArgs),
+    /// Inspect and verify exact executable model compositions.
+    Composition(CompositionArgs),
+    /// Inspect agent, MCP server and tool capability exposure.
+    Agent(AgentArgs),
+    /// Inspect, verify and compare portable model security passports.
+    Passport(PassportArgs),
+    /// Snapshot and evaluate security-relevant execution drift.
+    Continuous(ContinuousArgs),
     /// Snapshot, diff, approve and watch the persistent local model inventory.
     Inventory(InventoryArgs),
     /// Print build/runtime contract information.
@@ -1344,6 +1352,18 @@ pub(crate) enum ModelsCommand {
         target: PathBuf,
         #[arg(long)]
         parent: Option<PathBuf>,
+        #[arg(long)]
+        composition_manifest: Option<PathBuf>,
+        #[arg(long)]
+        agent_config: Option<PathBuf>,
+        #[arg(long, default_value = "agent")]
+        agent_name: String,
+        #[arg(long)]
+        provenance_chain: Option<PathBuf>,
+        #[arg(long)]
+        behaviour_report: Option<PathBuf>,
+        #[arg(long)]
+        trust_store: Option<PathBuf>,
         #[arg(long = "runtime")]
         runtimes: Vec<String>,
         #[arg(long, default_value = "native")]
@@ -1456,6 +1476,24 @@ pub(crate) enum EvidenceCommand {
         #[arg(long)]
         runtime: String,
         #[arg(long)]
+        runtime_config: Option<PathBuf>,
+        #[arg(long)]
+        composition_manifest: Option<PathBuf>,
+        #[arg(long)]
+        agent_config: Option<PathBuf>,
+        #[arg(long, default_value = "agent")]
+        agent_name: String,
+        #[arg(long)]
+        provenance_chain: Option<PathBuf>,
+        #[arg(long)]
+        passport: Option<PathBuf>,
+        #[arg(long)]
+        intelligence_pack: Option<PathBuf>,
+        #[arg(long)]
+        intelligence_signature: Option<PathBuf>,
+        #[arg(long)]
+        intelligence_public_key: Option<PathBuf>,
+        #[arg(long)]
         private_key: PathBuf,
         #[arg(long)]
         output: PathBuf,
@@ -1472,6 +1510,22 @@ pub(crate) enum EvidenceCommand {
         target: PathBuf,
         #[arg(long)]
         runtime: Option<PathBuf>,
+        #[arg(long)]
+        runtime_config: Option<PathBuf>,
+        #[arg(long)]
+        composition_manifest: Option<PathBuf>,
+        #[arg(long)]
+        agent_config: Option<PathBuf>,
+        #[arg(long, default_value = "agent")]
+        agent_name: String,
+        #[arg(long)]
+        passport: Option<PathBuf>,
+        #[arg(long)]
+        intelligence_pack: Option<PathBuf>,
+        #[arg(long)]
+        intelligence_signature: Option<PathBuf>,
+        #[arg(long)]
+        intelligence_public_key: Option<PathBuf>,
         #[arg(long)]
         trust_store: Option<PathBuf>,
         #[arg(long, default_value_t = false)]
@@ -1511,6 +1565,34 @@ pub(crate) enum IntelligenceCommand {
         public_key: PathBuf,
         #[arg(long, default_value_t = false)]
         allow_rollback: bool,
+        #[arg(long, default_value_t = false)]
+        json: bool,
+    },
+    /// Export an already signed intelligence pack as a portable offline bundle.
+    Export {
+        #[arg(long)]
+        pack: PathBuf,
+        #[arg(long)]
+        signature: PathBuf,
+        #[arg(long)]
+        public_key: PathBuf,
+        #[arg(long)]
+        output: PathBuf,
+    },
+    /// Verify and import a portable offline intelligence bundle.
+    Import {
+        bundle: PathBuf,
+        #[arg(long)]
+        pack_output: PathBuf,
+        #[arg(long)]
+        signature_output: PathBuf,
+        #[arg(long)]
+        public_key_output: PathBuf,
+        #[arg(long, default_value_t = false)]
+        allow_rollback: bool,
+    },
+    VerifyBundle {
+        bundle: PathBuf,
         #[arg(long, default_value_t = false)]
         json: bool,
     },
@@ -1555,6 +1637,194 @@ pub(crate) enum RuntimeCommand {
         model: PathBuf,
         #[arg(long = "runtime")]
         runtimes: Vec<String>,
+        #[arg(long, default_value_t = false)]
+        json: bool,
+    },
+}
+
+#[derive(clap::Args, Debug)]
+pub(crate) struct CompositionArgs {
+    #[command(subcommand)]
+    pub(crate) command: CompositionCommand,
+}
+
+#[derive(Subcommand, Debug)]
+pub(crate) enum CompositionCommand {
+    /// Resolve a composition manifest to exact component identities and findings.
+    Inspect {
+        manifest: PathBuf,
+        #[arg(long, default_value_t = false)]
+        json: bool,
+    },
+    /// Inspect one LoRA/adapter package independently of its base model.
+    Adapter {
+        adapter: PathBuf,
+        #[arg(long)]
+        expected_base: Option<String>,
+        #[arg(long, default_value_t = false)]
+        json: bool,
+    },
+    /// Compare a base model, adapter and merged artifact using bounded merge verification.
+    VerifyMerge {
+        #[arg(long)]
+        base: PathBuf,
+        #[arg(long)]
+        adapter: PathBuf,
+        #[arg(long)]
+        merged: PathBuf,
+        #[arg(long, default_value_t = false)]
+        json: bool,
+    },
+    /// Write a minimal composition manifest template.
+    Init { output: PathBuf },
+}
+
+#[derive(clap::Args, Debug)]
+pub(crate) struct AgentArgs {
+    #[command(subcommand)]
+    pub(crate) command: AgentCommand,
+}
+
+#[derive(Subcommand, Debug)]
+pub(crate) enum AgentCommand {
+    /// Statically inspect agent/MCP configuration and normalize tool capabilities.
+    Inspect {
+        config: PathBuf,
+        #[arg(long, default_value = "agent")]
+        name: String,
+        #[arg(long)]
+        composition_manifest: Option<PathBuf>,
+        #[arg(long, default_value_t = false)]
+        json: bool,
+    },
+}
+
+#[derive(clap::Args, Debug)]
+pub(crate) struct PassportArgs {
+    #[command(subcommand)]
+    pub(crate) command: PassportCommand,
+}
+
+#[derive(Subcommand, Debug)]
+pub(crate) enum PassportCommand {
+    Inspect {
+        passport: PathBuf,
+        #[arg(long, default_value_t = false)]
+        json: bool,
+    },
+    /// Verify a signed passport when an envelope is supplied, or validate canonical content for an unsigned passport.
+    Verify {
+        passport: PathBuf,
+        #[arg(long)]
+        trust_store: Option<PathBuf>,
+        #[arg(long, default_value_t = false)]
+        json: bool,
+    },
+    Sign {
+        passport: PathBuf,
+        #[arg(long)]
+        private_key: PathBuf,
+        #[arg(long)]
+        output: PathBuf,
+    },
+    Diff {
+        left: PathBuf,
+        right: PathBuf,
+        #[arg(long, default_value_t = false)]
+        json: bool,
+    },
+}
+
+#[derive(clap::Args, Debug)]
+pub(crate) struct ContinuousArgs {
+    #[command(subcommand)]
+    pub(crate) command: ContinuousCommand,
+}
+
+#[derive(Subcommand, Debug)]
+pub(crate) enum ContinuousCommand {
+    /// Capture security-relevant execution identities without executing the model or tools.
+    Snapshot {
+        #[arg(long)]
+        output: PathBuf,
+        #[arg(long, default_value = "unknown")]
+        state: String,
+        #[arg(long)]
+        model_artifact: Option<PathBuf>,
+        #[arg(long)]
+        composition_manifest: Option<PathBuf>,
+        #[arg(long)]
+        agent_config: Option<PathBuf>,
+        #[arg(long, default_value = "agent")]
+        agent_name: String,
+        #[arg(long)]
+        runtime_binary: Option<PathBuf>,
+        #[arg(long)]
+        runtime_config: Option<PathBuf>,
+        #[arg(long)]
+        policy_file: Option<PathBuf>,
+        #[arg(long)]
+        intelligence_pack: Option<PathBuf>,
+        #[arg(long)]
+        provenance_chain: Option<PathBuf>,
+        #[arg(long)]
+        passport: Option<PathBuf>,
+        #[arg(long)]
+        receipt: Option<PathBuf>,
+        #[arg(long, default_value_t = false)]
+        json: bool,
+    },
+    /// Compare execution snapshots and invalidate only evidence that depends on changed state.
+    Diff {
+        previous: PathBuf,
+        current: PathBuf,
+        #[arg(long)]
+        output: Option<PathBuf>,
+        #[arg(long)]
+        journal: Option<PathBuf>,
+        #[arg(long, default_value = "execution")]
+        entity: String,
+        #[arg(long, default_value_t = false)]
+        json: bool,
+    },
+    Watch {
+        #[arg(long)]
+        state_path: PathBuf,
+        #[arg(long)]
+        journal: PathBuf,
+        #[arg(long, default_value = "execution")]
+        entity: String,
+        #[arg(long, default_value = "unknown")]
+        state: String,
+        #[arg(long, default_value_t = 60)]
+        interval: u64,
+        #[arg(long)]
+        model_artifact: Option<PathBuf>,
+        #[arg(long)]
+        composition_manifest: Option<PathBuf>,
+        #[arg(long)]
+        agent_config: Option<PathBuf>,
+        #[arg(long, default_value = "agent")]
+        agent_name: String,
+        #[arg(long)]
+        runtime_binary: Option<PathBuf>,
+        #[arg(long)]
+        runtime_config: Option<PathBuf>,
+        #[arg(long)]
+        policy_file: Option<PathBuf>,
+        #[arg(long)]
+        intelligence_pack: Option<PathBuf>,
+        #[arg(long)]
+        provenance_chain: Option<PathBuf>,
+        #[arg(long)]
+        passport: Option<PathBuf>,
+        #[arg(long)]
+        receipt: Option<PathBuf>,
+        #[arg(long, default_value_t = false)]
+        jsonl: bool,
+    },
+    Journal {
+        journal: PathBuf,
         #[arg(long, default_value_t = false)]
         json: bool,
     },

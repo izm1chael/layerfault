@@ -289,11 +289,30 @@ target/release/layerfault
 
 ### Validate the checkout
 
+For routine development, run the library tests and the integration target
+covering the code being changed. Limiting build concurrency avoids running
+multiple large Rust link jobs against the disk at once:
+
+```bash
+cargo test --locked --workspace --lib --jobs 4
+cargo test --locked --test <integration-test-name> --jobs 4
+```
+
+Before publication, run the exhaustive gate. It retains all-target coverage
+but defaults to four build jobs; set `LAYERFAULT_BUILD_JOBS` explicitly on a
+host that can sustain more concurrent linking:
+
+```bash
+bash scripts/security/pre-push.sh
+```
+
+The equivalent individual exhaustive checks are:
+
 ```bash
 cargo fmt --all -- --check
-cargo check --locked --all-targets
-cargo test --locked --all-targets
-cargo clippy --locked --all-targets --all-features -- -D warnings
+cargo check --locked --all-targets --jobs 4
+cargo test --locked --all-targets --jobs 4
+cargo clippy --locked --all-targets --all-features --jobs 4 -- -D warnings
 bash scripts/security/gates.sh
 python3 scripts/security/schema-gates.py --binary target/debug/layerfault
 ```

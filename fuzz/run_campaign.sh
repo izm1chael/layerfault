@@ -26,6 +26,11 @@ TARGETS=(
   sources_directory
   lmstudio
   ollama_store
+  composition_manifest
+  agent_mcp
+  security_passport
+  intelligence_pack
+  transformation_chain
 )
 
 usage() {

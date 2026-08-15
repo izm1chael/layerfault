@@ -1,3 +1,4 @@
+pub mod composition;
 pub mod dataset;
 pub mod declarative;
 pub mod diff;

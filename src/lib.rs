@@ -4,6 +4,7 @@
 
 pub mod admission;
 pub mod advisory;
+pub mod agent_security;
 pub mod app;
 pub mod archive;
 pub mod assurance;
@@ -14,6 +15,7 @@ pub mod binding;
 pub mod budget;
 pub mod certify;
 pub mod content_cache;
+pub mod continuous;
 pub mod correlate;
 pub mod coverage;
 pub mod dataset;

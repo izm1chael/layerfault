@@ -137,3 +137,38 @@ path = "fuzz_targets/ebpf_protocol.rs"
 test = false
 doc = false
 bench = false
+
+[[bin]]
+name = "composition_manifest"
+path = "fuzz_targets/composition_manifest.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "agent_mcp"
+path = "fuzz_targets/agent_mcp.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "security_passport"
+path = "fuzz_targets/security_passport.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "intelligence_pack"
+path = "fuzz_targets/intelligence_pack.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "transformation_chain"
+path = "fuzz_targets/transformation_chain.rs"
+test = false
+doc = false
+bench = false

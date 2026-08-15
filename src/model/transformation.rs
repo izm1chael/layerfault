@@ -113,6 +113,8 @@ pub struct TransformationDescriptor {
     #[serde(default)]
     pub tool_version: Option<String>,
     #[serde(default)]
+    pub tool_digest: Option<String>,
+    #[serde(default)]
     pub parameters: BTreeMap<String, Value>,
 }
 
@@ -123,9 +125,22 @@ pub struct TransformationManifest {
     pub child: TransformationEndpoint,
     pub transformation: TransformationDescriptor,
     #[serde(default)]
+    pub materials: Vec<TransformationEndpoint>,
+    #[serde(default)]
+    pub builder: Option<BuilderIdentity>,
+    #[serde(default)]
     pub timestamp: Option<String>,
     #[serde(default)]
     pub signer: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BuilderIdentity {
+    pub identity: String,
+    #[serde(default)]
+    pub invocation_id: Option<String>,
+    #[serde(default)]
+    pub build_type: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -329,6 +344,32 @@ fn validate_manifest(manifest: &TransformationManifest) -> Result<()> {
     }
     if manifest.transformation.tool.trim().is_empty() || manifest.transformation.tool.len() > 4096 {
         bail!("transformation tool identity is empty or too long");
+    }
+    validate_digest(manifest.transformation.tool_digest.as_deref())?;
+    if manifest.materials.len() > 4096 {
+        bail!("transformation material count exceeds safety limit");
+    }
+    for material in &manifest.materials {
+        if material.identity.trim().is_empty() || material.identity.len() > 8192 {
+            bail!("transformation material identity is empty or too long");
+        }
+        validate_digest(material.artifact_sha256.as_deref())?;
+    }
+    if let Some(builder) = &manifest.builder {
+        if builder.identity.trim().is_empty() || builder.identity.len() > 8192 {
+            bail!("builder identity is empty or too long");
+        }
+        for value in [
+            builder.invocation_id.as_deref(),
+            builder.build_type.as_deref(),
+        ]
+        .into_iter()
+        .flatten()
+        {
+            if value.len() > 8192 {
+                bail!("builder metadata exceeds safety limit");
+            }
+        }
     }
     if manifest.transformation.parameters.len() > 4096 {
         bail!("transformation parameter count exceeds safety limit");

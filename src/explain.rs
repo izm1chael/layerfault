@@ -335,6 +335,14 @@ pub fn risk_lookup(rule: &str) -> RiskExplanation {
             vec!["unassessed parser and loading behavior"],
             vec!["Prefer GGUF or Safetensors, or make an explicit policy decision for this unknown format."],
         ),
+        x if x.starts_with("LF-INTEL-") => (
+            "Security intelligence finding",
+            vec!["Security Intelligence", "Trust"],
+            "Current signed security intelligence contains a security-relevant record that applies to the observed execution context.",
+            "Revocations and malicious or compromised identity records can invalidate an earlier trust decision even when the underlying artifact bytes have not changed.",
+            vec!["revoked trust", "known malicious component", "compromised supply-chain identity"],
+            vec!["Do not rely on the earlier admission decision.", "Refresh intelligence, replace the affected component or identity, and repeat admission before execution."],
+        ),
         x if x.starts_with("LF-BEHAV-") || x.starts_with("LF-DIFF-") => (
             "Behavioural security evidence",
             vec!["Behavioural Security", "Differential Behaviour"],

@@ -85,6 +85,15 @@ pub(crate) fn run_evidence(args: EvidenceArgs) -> Result<()> {
         EvidenceCommand::Admit {
             target,
             runtime,
+            runtime_config,
+            composition_manifest,
+            agent_config,
+            agent_name,
+            provenance_chain,
+            passport,
+            intelligence_pack,
+            intelligence_signature,
+            intelligence_public_key,
             private_key,
             output,
             policy: profile,
@@ -101,13 +110,23 @@ pub(crate) fn run_evidence(args: EvidenceArgs) -> Result<()> {
             };
             let effective = policy_doc.effective();
             let trust = TrustStore::load(trust_store.as_deref())?;
+            let mut observed =
+                super::execution_context::observe(super::execution_context::ObservationRequest {
+                    composition_manifest: composition_manifest.as_deref(),
+                    runtime_config: runtime_config.as_deref(),
+                    agent_config: agent_config.as_deref(),
+                    agent_name: &agent_name,
+                    provenance_chain: provenance_chain.as_deref(),
+                    passport: passport.as_deref(),
+                    trust_store: &trust,
+                })?;
             let snapshot = layerfault::modelmeta::build_snapshot(&target)?;
             let identity = snapshot
                 .identity
                 .artifact_sha256
                 .clone()
                 .unwrap_or_else(|| snapshot.identity.canonical.clone());
-            let admission = admission::inspect_and_evaluate(
+            let mut admission = admission::inspect_and_evaluate(
                 &target,
                 &identity,
                 SourceKind::File,
@@ -116,6 +135,7 @@ pub(crate) fn run_evidence(args: EvidenceArgs) -> Result<()> {
                 None,
                 None,
             )?;
+            admission.report.results.extend(observed.findings.clone());
             let layered = layerfault::model::identity::build(
                 &target,
                 None,
@@ -126,8 +146,15 @@ pub(crate) fn run_evidence(args: EvidenceArgs) -> Result<()> {
                 &Default::default(),
             )?;
             let kind = layerfault::runtime_security::RuntimeKind::parse(&runtime)?;
-            let posture = layerfault::runtime_security::audit_kind(kind).into_iter().next()
+            let posture = layerfault::runtime_security::audit_kind(kind)
+                .into_iter()
+                .next()
                 .ok_or_else(|| anyhow!("runtime '{}' was not discovered; receipt creation requires observed runtime identity", kind.as_str()))?;
+            if observed.runtime_configuration_identity.is_none() {
+                observed.runtime_configuration_identity = Some(
+                    layerfault::runtime_security::configuration_identity(&posture.configuration)?,
+                );
+            }
             let subject = layerfault::finding_evidence::EvidenceSubject::identity(
                 &identity,
                 "application/vnd.layerfault.model+json",
@@ -142,7 +169,32 @@ pub(crate) fn run_evidence(args: EvidenceArgs) -> Result<()> {
                     layerfault::coverage::Coverage::complete(1, admission.report.size),
                 );
             model_context.merge_snapshot(&snapshot);
-            let pack = layerfault::intelligence::builtin_pack()?;
+            let pack = super::domains::load_cli_intelligence(
+                intelligence_pack.as_deref(),
+                intelligence_signature.as_deref(),
+                intelligence_public_key.as_deref(),
+            )?;
+            let intelligence_sha256 = layerfault::intelligence::pack_identity(&pack)?;
+            let now = layerfault::paths::now_unix();
+            let mut intelligence_subjects = layerfault::intelligence::IntelligenceSubjects {
+                models: vec![identity.clone()],
+                passports: observed.passport_sha256.iter().cloned().collect(),
+                runtime_releases: Vec::new(),
+                signers: admission.signer_fingerprints.clone(),
+                adapters: observed.adapter_identities.clone(),
+                builders: observed.builder_identities.clone(),
+            };
+            if let Some(digest) = posture.installation.executable_sha256.clone() {
+                intelligence_subjects.runtime_releases.push(digest);
+            }
+            if let Some(version) = posture.installation.parsed_version.as_deref() {
+                intelligence_subjects
+                    .runtime_releases
+                    .push(format!("{}@{version}", kind.as_str()));
+            }
+            let intelligence_findings =
+                layerfault::intelligence::assess_subjects(&pack, now, &intelligence_subjects);
+            admission.report.results.extend(intelligence_findings);
             let exploitability =
                 layerfault::runtime_security::assess_from_pack(&posture, &model_context, &pack);
             let compatibility = layerfault::runtime_security::assess_compatibility(
@@ -150,15 +202,44 @@ pub(crate) fn run_evidence(args: EvidenceArgs) -> Result<()> {
                 &model_context,
                 &exploitability,
             );
-            let receipt = admission::build_receipt(
+
+            let evidence_complete = !admission.report.results.iter().any(|finding| {
+                matches!(
+                    finding.evidence_state,
+                    Some(layerfault::finding_evidence::EvidenceState::Partial)
+                        | Some(layerfault::finding_evidence::EvidenceState::Unavailable)
+                )
+            });
+            let mut policy_context = layerfault::policy::PolicyContext {
+                architecture: snapshot.architecture.architecture.clone(),
+                runtime_compatibility: Some(compatibility.state),
+                coverage_complete: Some(evidence_complete),
+                intelligence_age_days: Some(now.saturating_sub(pack.generated_unix) / 86_400),
+                intelligence_verified: Some(true),
+                runtime_exploitability_blocking: Some(exploitability.iter().any(|item| {
+                    item.state
+                        == layerfault::runtime_security::ExploitabilityState::PreconditionsMet
+                })),
+                admission_receipt_present: Some(true),
+                layered_identity_complete: Some(
+                    layered.completeness == layerfault::assurance::AnalysisCompleteness::Complete,
+                ),
+                evidence_fresh: Some(true),
+                ..layerfault::policy::PolicyContext::default()
+            };
+            observed.apply_policy_context(&mut policy_context);
+            admission::reevaluate_with_context(&mut admission, &effective, policy_context);
+
+            let mut receipt = admission::build_receipt(
                 &admission,
                 Some(&layered),
                 Some(&posture),
                 Some(&compatibility),
                 &exploitability,
-                None,
-                None,
+                Some(&intelligence_sha256),
+                observed.passport_sha256.as_deref(),
             )?;
+            admission::bind_execution_context(&mut receipt, &observed.binding())?;
             let envelope = evidence::create_signed(
                 evidence::EvidenceContext {
                     subject: &identity,
@@ -169,11 +250,18 @@ pub(crate) fn run_evidence(args: EvidenceArgs) -> Result<()> {
                     trust_store: &trust,
                     runtime: None,
                     binding: None,
-                    intelligence_sha256: None,
-                    security_passport_sha256: None,
+                    intelligence_sha256: Some(&intelligence_sha256),
+                    security_passport_sha256: observed.passport_sha256.as_deref(),
                     admission_receipt: Some(&receipt),
                     decision: "ALLOW",
-                    details: serde_json::json!({"runtime": posture, "compatibility": compatibility, "exploitability": exploitability}),
+                    details: serde_json::json!({
+                        "runtime": posture,
+                        "compatibility": compatibility,
+                        "exploitability": exploitability,
+                        "composition_identity": observed.composition_identity,
+                        "agent_identity": observed.agent_identity,
+                        "capability_graph_identity": observed.capability_graph_identity,
+                    }),
                 },
                 &private_key,
             )?;
@@ -184,19 +272,102 @@ pub(crate) fn run_evidence(args: EvidenceArgs) -> Result<()> {
             receipt,
             target,
             runtime,
+            runtime_config,
+            composition_manifest,
+            agent_config,
+            agent_name,
+            passport,
+            intelligence_pack,
+            intelligence_signature,
+            intelligence_public_key,
             trust_store,
             accept_stale_receipt,
             override_reason,
             json,
         } => {
             let trust = TrustStore::load(trust_store.as_deref())?;
-            let mut result = admission::verify_for_execution(
+            let receipt_envelope = evidence::load(&receipt)?;
+            let mut observed =
+                super::execution_context::observe(super::execution_context::ObservationRequest {
+                    composition_manifest: composition_manifest.as_deref(),
+                    runtime_config: runtime_config.as_deref(),
+                    agent_config: agent_config.as_deref(),
+                    agent_name: &agent_name,
+                    provenance_chain: None,
+                    passport: passport.as_deref(),
+                    trust_store: &trust,
+                })?;
+
+            if observed.runtime_configuration_identity.is_none() {
+                if let Some(runtime_path) = runtime.as_deref() {
+                    if let Some(expected) = receipt_envelope
+                        .payload
+                        .admission_receipt
+                        .as_ref()
+                        .and_then(|value| value.runtime.as_ref())
+                    {
+                        if let Ok(kind) =
+                            layerfault::runtime_security::RuntimeKind::parse(&expected.kind)
+                        {
+                            let current_digest = layerfault::safeio::sha256_path(runtime_path)?;
+                            if let Some(posture) = layerfault::runtime_security::audit_kind(kind)
+                                .into_iter()
+                                .find(|posture| {
+                                    posture
+                                        .installation
+                                        .executable_sha256
+                                        .as_deref()
+                                        .is_some_and(|digest| {
+                                            digest.eq_ignore_ascii_case(&current_digest)
+                                        })
+                                })
+                            {
+                                observed.runtime_configuration_identity =
+                                    Some(layerfault::runtime_security::configuration_identity(
+                                        &posture.configuration,
+                                    )?);
+                            }
+                        }
+                    }
+                }
+            }
+
+            let pack = super::domains::load_cli_intelligence(
+                intelligence_pack.as_deref(),
+                intelligence_signature.as_deref(),
+                intelligence_public_key.as_deref(),
+            )?;
+            let intelligence_sha256 = layerfault::intelligence::pack_identity(&pack)?;
+            let mut intelligence_subjects = layerfault::intelligence::IntelligenceSubjects {
+                models: vec![layerfault::safeio::sha256_path(&target)?],
+                passports: observed.passport_sha256.iter().cloned().collect(),
+                runtime_releases: Vec::new(),
+                signers: vec![receipt_envelope.key_fingerprint.clone()],
+                adapters: observed.adapter_identities.clone(),
+                builders: observed.builder_identities.clone(),
+            };
+            if let Some(runtime_path) = runtime.as_deref() {
+                intelligence_subjects
+                    .runtime_releases
+                    .push(layerfault::safeio::sha256_path(runtime_path)?);
+            }
+            let intelligence_findings = layerfault::intelligence::assess_subjects(
+                &pack,
+                layerfault::paths::now_unix(),
+                &intelligence_subjects,
+            );
+            let intelligence_blocking = intelligence_findings
+                .iter()
+                .any(|finding| finding.status == layerfault::scanner::ScanStatus::Fail);
+            let expectation = observed.expectation();
+            let mut result = admission::verify_for_execution_context(
                 &receipt,
                 &trust,
                 &target,
                 runtime.as_deref(),
-                None,
-                None,
+                Some(&intelligence_sha256),
+                observed.passport_sha256.as_deref(),
+                &expectation,
             )?;
             if accept_stale_receipt && !result.allowed {
                 let reason = override_reason
@@ -205,17 +376,23 @@ pub(crate) fn run_evidence(args: EvidenceArgs) -> Result<()> {
                 if reason.trim().len() < 8 {
                     return Err(anyhow!("--override-reason must be at least 8 characters"));
                 }
-                // Staleness may waive ruleset/intelligence/passport freshness only. Artifact/runtime identity,
-                // signature, trust, authorization and ALLOW decision remain mandatory and cannot be bypassed.
+                // Freshness overrides cannot waive artifact, runtime, composition,
+                // agent, capability, signature, trust or authorization identity checks.
                 if result.evidence_valid
                     && result.evidence_trusted
                     && result.artifact_match
                     && result.runtime_match
+                    && result.composition_match != Some(false)
+                    && result.runtime_configuration_match != Some(false)
+                    && result.agent_match != Some(false)
+                    && result.capability_graph_match != Some(false)
+                    && result.mcp_servers_match != Some(false)
+                    && !intelligence_blocking
                 {
-                    let only_stale = result.reasons.iter().all(|r| {
-                        r.contains("ruleset digest")
-                            || r.contains("security intelligence digest")
-                            || r.contains("security passport digest")
+                    let only_stale = result.reasons.iter().all(|reason| {
+                        reason.contains("ruleset digest")
+                            || reason.contains("security intelligence digest")
+                            || reason.contains("security passport digest")
                     });
                     if only_stale {
                         result.allowed = true;
@@ -233,6 +410,19 @@ pub(crate) fn run_evidence(args: EvidenceArgs) -> Result<()> {
                         )?;
                     }
                 }
+            }
+            for finding in &intelligence_findings {
+                let rule = finding.rule_id.as_deref().unwrap_or("INTELLIGENCE");
+                let detail = finding
+                    .detail
+                    .as_deref()
+                    .unwrap_or("current security intelligence applies to this execution context");
+                result.reasons.push(format!("{rule}: {detail}"));
+            }
+            result.reasons.sort();
+            result.reasons.dedup();
+            if intelligence_blocking {
+                result.allowed = false;
             }
             if json {
                 println!("{}", serde_json::to_string_pretty(&result)?);

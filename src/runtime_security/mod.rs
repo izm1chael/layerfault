@@ -8,6 +8,7 @@ mod compatibility;
 mod context;
 mod discover;
 mod exploitability;
+mod identity;
 mod posture;
 mod precondition;
 pub mod process;
@@ -22,6 +23,7 @@ pub use context::{ModelSecurityContext, NormalizedFact};
 pub use exploitability::{
     assess, assess_from_pack, AdvisoryApplicability, ExploitabilityState, Reachability,
 };
+pub use identity::configuration_identity;
 pub use precondition::{evaluate_precondition, PreconditionEvaluation, PreconditionState};
 
 pub use capabilities::{RuntimeCapabilities, SupportState};

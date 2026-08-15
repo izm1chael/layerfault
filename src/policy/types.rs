@@ -118,6 +118,24 @@ pub struct PolicyDocument {
     #[serde(default)]
     pub require_lineage_for_derived_models: Option<bool>,
     #[serde(default)]
+    pub require_complete_composition: Option<bool>,
+    #[serde(default)]
+    pub require_independent_adapter_scan: Option<bool>,
+    #[serde(default)]
+    pub allow_unsigned_adapters: Option<bool>,
+    #[serde(default)]
+    pub require_verified_provenance: Option<bool>,
+    #[serde(default)]
+    pub require_complete_agent_capabilities: Option<bool>,
+    #[serde(default)]
+    pub block_dangerous_capability_chains: Option<bool>,
+    #[serde(default)]
+    pub denied_capability_chain_ids: Vec<String>,
+    #[serde(default)]
+    pub require_behavioural_assurance: Option<bool>,
+    #[serde(default)]
+    pub require_fresh_evidence: Option<bool>,
+    #[serde(default)]
     pub backdoor_signal_action: Option<BackdoorSignalAction>,
 }
 
@@ -151,6 +169,15 @@ impl Default for PolicyDocument {
             require_admission_receipt: None,
             require_layered_identity: None,
             require_lineage_for_derived_models: None,
+            require_complete_composition: None,
+            require_independent_adapter_scan: None,
+            allow_unsigned_adapters: None,
+            require_verified_provenance: None,
+            require_complete_agent_capabilities: None,
+            block_dangerous_capability_chains: None,
+            denied_capability_chain_ids: Vec::new(),
+            require_behavioural_assurance: None,
+            require_fresh_evidence: None,
             backdoor_signal_action: None,
         }
     }
@@ -184,6 +211,15 @@ pub struct EffectivePolicy {
     pub require_admission_receipt: bool,
     pub require_layered_identity: bool,
     pub require_lineage_for_derived_models: bool,
+    pub require_complete_composition: bool,
+    pub require_independent_adapter_scan: bool,
+    pub allow_unsigned_adapters: bool,
+    pub require_verified_provenance: bool,
+    pub require_complete_agent_capabilities: bool,
+    pub block_dangerous_capability_chains: bool,
+    pub denied_capability_chain_ids: Vec<String>,
+    pub require_behavioural_assurance: bool,
+    pub require_fresh_evidence: bool,
     pub backdoor_signal_action: BackdoorSignalAction,
 }
 
@@ -219,6 +255,22 @@ pub struct PolicyContext {
     pub derived_model: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub lineage_consistency: Option<crate::model::lineage::LineageConsistency>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub composition_complete: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub adapters_independently_scanned: Option<bool>,
+    #[serde(default)]
+    pub unsigned_adapter_count: u32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provenance_verified: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_capabilities_complete: Option<bool>,
+    #[serde(default)]
+    pub dangerous_capability_chain_ids: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub behavioural_assurance_complete: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub evidence_fresh: Option<bool>,
     #[serde(default)]
     pub backdoor_static_signals: u32,
     #[serde(default)]

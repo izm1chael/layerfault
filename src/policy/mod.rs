@@ -67,6 +67,25 @@ impl PolicyDocument {
                 ));
             }
         }
+        if self.denied_capability_chain_ids.len() > 4096 {
+            return Err(anyhow!(
+                "denied_capability_chain_ids cannot exceed 4096 entries"
+            ));
+        }
+        let mut denied_chains = std::collections::BTreeSet::new();
+        for chain_id in &self.denied_capability_chain_ids {
+            let normalized = chain_id.trim().to_ascii_lowercase();
+            if normalized.is_empty() || normalized.len() > 16 * 1024 {
+                return Err(anyhow!(
+                    "denied_capability_chain_ids contains an empty or oversized identifier"
+                ));
+            }
+            if !denied_chains.insert(normalized) {
+                return Err(anyhow!(
+                    "denied_capability_chain_ids contains duplicate identifier '{chain_id}'"
+                ));
+            }
+        }
         for suppression in &self.suppressions {
             if suppression.rule_id.trim().is_empty() {
                 return Err(anyhow!("Policy suppression has an empty rule_id"));
@@ -303,6 +322,42 @@ impl PolicyDocument {
             require_lineage_for_derived_models: self
                 .require_lineage_for_derived_models
                 .unwrap_or(lineage),
+            require_complete_composition: self.require_complete_composition.unwrap_or(matches!(
+                self.profile,
+                PolicyProfile::Enterprise
+                    | PolicyProfile::Production
+                    | PolicyProfile::HighAssurance
+            )),
+            require_independent_adapter_scan: self.require_independent_adapter_scan.unwrap_or(
+                matches!(
+                    self.profile,
+                    PolicyProfile::Enterprise
+                        | PolicyProfile::Production
+                        | PolicyProfile::HighAssurance
+                ),
+            ),
+            allow_unsigned_adapters: self
+                .allow_unsigned_adapters
+                .unwrap_or(!matches!(self.profile, PolicyProfile::HighAssurance)),
+            require_verified_provenance: self.require_verified_provenance.unwrap_or(matches!(
+                self.profile,
+                PolicyProfile::Production | PolicyProfile::HighAssurance
+            )),
+            require_complete_agent_capabilities: self
+                .require_complete_agent_capabilities
+                .unwrap_or(matches!(
+                    self.profile,
+                    PolicyProfile::Production | PolicyProfile::HighAssurance
+                )),
+            block_dangerous_capability_chains: self
+                .block_dangerous_capability_chains
+                .unwrap_or(matches!(self.profile, PolicyProfile::HighAssurance)),
+            denied_capability_chain_ids: self.denied_capability_chain_ids.clone(),
+            require_behavioural_assurance: self.require_behavioural_assurance.unwrap_or(false),
+            require_fresh_evidence: self.require_fresh_evidence.unwrap_or(matches!(
+                self.profile,
+                PolicyProfile::Production | PolicyProfile::HighAssurance
+            )),
             backdoor_signal_action: self.backdoor_signal_action.unwrap_or(backdoor),
         }
     }
@@ -574,6 +629,60 @@ impl EffectivePolicy {
         {
             block_reasons
                 .push("Policy requires consistent verified lineage for derived models".to_owned());
+        }
+        if self.require_complete_composition && context.composition_complete != Some(true) {
+            block_reasons.push(
+                "Policy requires a complete executable model composition identity".to_owned(),
+            );
+        }
+        if self.require_independent_adapter_scan
+            && context.adapters_independently_scanned != Some(true)
+        {
+            block_reasons
+                .push("Policy requires every adapter to be independently scanned".to_owned());
+        }
+        if !self.allow_unsigned_adapters && context.unsigned_adapter_count > 0 {
+            block_reasons.push(format!(
+                "Policy forbids unsigned adapters; {} unsigned adapter(s) are present",
+                context.unsigned_adapter_count
+            ));
+        }
+        if self.require_verified_provenance && context.provenance_verified != Some(true) {
+            block_reasons.push("Policy requires verified transformation provenance".to_owned());
+        }
+        if self.require_complete_agent_capabilities
+            && context.agent_capabilities_complete != Some(true)
+        {
+            block_reasons
+                .push("Policy requires complete agent/MCP/tool capability discovery".to_owned());
+        }
+        if self.block_dangerous_capability_chains
+            && !context.dangerous_capability_chain_ids.is_empty()
+        {
+            block_reasons.push(format!(
+                "Policy blocks dangerous agent capability chains: {}",
+                context.dangerous_capability_chain_ids.join(", ")
+            ));
+        }
+        for denied in &self.denied_capability_chain_ids {
+            if context
+                .dangerous_capability_chain_ids
+                .iter()
+                .any(|observed| observed.eq_ignore_ascii_case(denied))
+            {
+                block_reasons.push(format!("Capability chain '{denied}' is denied by policy"));
+            }
+        }
+        if self.require_behavioural_assurance
+            && context.behavioural_assurance_complete != Some(true)
+        {
+            block_reasons.push("Policy requires current behavioural assurance evidence".to_owned());
+        }
+        if self.require_fresh_evidence && context.evidence_fresh != Some(true) {
+            block_reasons.push(
+                "Policy requires non-stale security evidence for the current execution context"
+                    .to_owned(),
+            );
         }
         match self.backdoor_signal_action {
             BackdoorSignalAction::Ignore => {}

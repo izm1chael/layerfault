@@ -8,6 +8,10 @@ pub struct IntelligencePack {
     #[serde(default)]
     pub expires_unix: Option<u64>,
     #[serde(default)]
+    pub channel: IntelligenceChannel,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub epoch: Option<u64>,
+    #[serde(default)]
     pub runtime_advisories: Vec<RuntimeAdvisory>,
     #[serde(default)]
     pub pickle_gadgets: Vec<PickleGadgetRecord>,
@@ -17,6 +21,74 @@ pub struct IntelligencePack {
     pub known_identities: Vec<KnownIdentityRecord>,
     #[serde(default)]
     pub threat_mappings: Vec<ThreatMappingRecord>,
+    #[serde(default)]
+    pub revocations: Vec<RevocationRecord>,
+    #[serde(default)]
+    pub adapter_indicators: Vec<AdapterIndicatorRecord>,
+    #[serde(default)]
+    pub builders: Vec<BuilderRecord>,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum IntelligenceChannel {
+    #[default]
+    Stable,
+    Rapid,
+    Preview,
+    Offline,
+    Enterprise,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RevocationTarget {
+    Signer,
+    Model,
+    Passport,
+    RuntimeRelease,
+    Advisory,
+    Builder,
+    Adapter,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct RevocationRecord {
+    pub id: String,
+    pub target: RevocationTarget,
+    pub value: String,
+    pub effective_unix: u64,
+    pub reason: String,
+    pub reference: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum IntelligenceDisposition {
+    Trusted,
+    Suspicious,
+    Malicious,
+    Revoked,
+    Compromised,
+    Unknown,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct AdapterIndicatorRecord {
+    pub id: String,
+    pub sha256: String,
+    pub disposition: IntelligenceDisposition,
+    #[serde(default)]
+    pub declared_base: Option<String>,
+    pub reference: String,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct BuilderRecord {
+    pub id: String,
+    pub identity: String,
+    pub disposition: IntelligenceDisposition,
+    pub reference: String,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]

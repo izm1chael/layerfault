@@ -4,6 +4,11 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$ROOT"
 
+# Concurrent Rust linkers can saturate local disks because each integration
+# test is a separate large executable. Keep the publication gate exhaustive,
+# but bound build concurrency. Override explicitly on faster build hosts.
+BUILD_JOBS="${LAYERFAULT_BUILD_JOBS:-4}"
+
 log() { printf '\n==> %s\n' "$*"; }
 fail() { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
 
@@ -47,9 +52,9 @@ bash scripts/security/architecture-gates.sh "$ROOT"
 
 log "Rust formatting / compile / tests / Clippy"
 cargo fmt --all -- --check
-cargo check --locked --all-targets
-cargo test --locked --all-targets
-cargo clippy --locked --all-targets --all-features -- -D warnings
+cargo check --locked --all-targets --jobs "$BUILD_JOBS"
+cargo test --locked --all-targets --jobs "$BUILD_JOBS"
+cargo clippy --locked --all-targets --all-features --jobs "$BUILD_JOBS" -- -D warnings
 
 log "Layerfault security and schema contracts"
 bash scripts/security/gates.sh

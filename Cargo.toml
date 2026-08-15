@@ -100,6 +100,14 @@ oxc_ast_visit = "=0.96.0"
 [build-dependencies]
 sha2 = "0.11"
 
+# Layerfault has many integration-test crates and a large dependency graph.
+# Full debug information makes every independently linked test executable
+# hundreds of megabytes, while incremental test state adds several more GiB.
+# Line tables retain useful panic backtraces without saturating local disks.
+[profile.test]
+debug = "line-tables-only"
+incremental = false
+
 # Vendored fork of candelabra 0.2.0 that disables its default native-tls/openssl-sys
 # pulls (via hf-hub's "default-tls" feature and reqwest's default-tls feature) in favor
 # of rustls, so a normal Linux build does not require libssl-dev/pkg-config.

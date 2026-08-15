@@ -6,8 +6,14 @@ use crate::provenance::TrustState;
 use crate::scanner::{CheckType, Confidence, FindingClass, LayerScanResult, ScanStatus};
 use crate::sources::SourceKind;
 use anyhow::Result;
-pub use gate::{verify_for_execution, ExecutionGateVerification};
-pub use receipt::{build_receipt, AdmissionReceiptContext, ReceiptExploitability, ReceiptRuntime};
+pub use gate::{
+    verify_for_execution, verify_for_execution_context, ExecutionContextExpectation,
+    ExecutionGateVerification,
+};
+pub use receipt::{
+    bind_execution_context, build_receipt, AdmissionReceiptContext, ExecutionContextBinding,
+    ReceiptExploitability, ReceiptRuntime,
+};
 use std::path::Path;
 
 #[derive(Debug, Clone, serde::Serialize)]
@@ -173,6 +179,35 @@ pub fn inspect_and_evaluate_with_budget(
         signer_fingerprints,
         policy: decision,
     })
+}
+
+pub fn reevaluate_with_context(
+    admission: &mut ArtifactAdmission,
+    policy: &EffectivePolicy,
+    mut context: PolicyContext,
+) {
+    context
+        .source
+        .get_or_insert_with(|| admission.source.as_str().to_owned());
+    context
+        .format
+        .get_or_insert_with(|| admission.report.format.as_str().to_owned());
+    context.model_size.get_or_insert(admission.report.size);
+    if context.trusted_signatures == 0 {
+        context.trusted_signatures = admission.trusted_signatures;
+    }
+    if context.signer_fingerprints.is_empty() {
+        context.signer_fingerprints = admission.signer_fingerprints.clone();
+    }
+    if context.now_unix == 0 {
+        context.now_unix = crate::paths::now_unix();
+    }
+    admission.policy = policy.evaluate_with_context(
+        &admission.identity,
+        &admission.report.results,
+        admission.trust_state,
+        &context,
+    );
 }
 
 pub fn exit_code(admissions: &[ArtifactAdmission]) -> i32 {

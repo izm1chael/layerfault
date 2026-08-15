@@ -135,6 +135,9 @@ pub fn validate(pack: &IntelligencePack) -> Result<()> {
         ("declarative_edges", pack.declarative_edges.len()),
         ("known_identities", pack.known_identities.len()),
         ("threat_mappings", pack.threat_mappings.len()),
+        ("revocations", pack.revocations.len()),
+        ("adapter_indicators", pack.adapter_indicators.len()),
+        ("builders", pack.builders.len()),
     ] {
         if len > MAX_RECORDS_PER_SECTION {
             bail!("{name} exceeds {MAX_RECORDS_PER_SECTION} records");
@@ -200,6 +203,43 @@ pub fn validate(pack: &IntelligencePack) -> Result<()> {
         if let Some(reference) = identity.reference.as_deref() {
             https_reference("known identity reference", reference)?;
         }
+    }
+
+    ids.clear();
+    for record in &pack.revocations {
+        insert_unique(&mut ids, "revocations", &record.id)?;
+        bounded("revocation value", &record.value)?;
+        bounded("revocation reason", &record.reason)?;
+        if record.effective_unix == 0 {
+            bail!("revocation '{}' has zero effective_unix", record.id);
+        }
+        https_reference("revocation reference", &record.reference)?;
+    }
+
+    ids.clear();
+    for record in &pack.adapter_indicators {
+        insert_unique(&mut ids, "adapter_indicators", &record.id)?;
+        let digest = record
+            .sha256
+            .strip_prefix("sha256:")
+            .unwrap_or(&record.sha256);
+        if digest.len() != 64 || !digest.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+            bail!("adapter indicator '{}' has invalid SHA-256", record.id);
+        }
+        if let Some(base) = &record.declared_base {
+            bounded("adapter declared base", base)?;
+        }
+        https_reference("adapter indicator reference", &record.reference)?;
+    }
+
+    ids.clear();
+    for record in &pack.builders {
+        insert_unique(&mut ids, "builders", &record.id)?;
+        bounded("builder identity", &record.identity)?;
+        if record.identity.trim().is_empty() {
+            bail!("builder '{}' has an empty identity", record.id);
+        }
+        https_reference("builder reference", &record.reference)?;
     }
 
     let mut rules = BTreeSet::new();

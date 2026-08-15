@@ -1,12 +1,17 @@
+pub(crate) mod agent;
 pub(crate) mod artifacts;
 pub(crate) mod behaviour;
+pub(crate) mod composition;
+pub(crate) mod continuous;
 pub(crate) mod dataset;
 pub(crate) mod domains;
+pub(crate) mod execution_context;
 pub(crate) mod hub;
 pub(crate) mod lineage;
 pub(crate) mod models;
 pub(crate) mod ollama;
 pub(crate) mod operator;
+pub(crate) mod passport;
 pub(crate) mod platform;
 pub(crate) mod research;
 pub(crate) mod review;

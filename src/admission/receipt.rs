@@ -16,6 +16,16 @@ pub struct AdmissionReceiptContext {
     pub intelligence_sha256: Option<String>,
     #[serde(default)]
     pub passport_sha256: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub composition_identity: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub runtime_configuration_identity: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_identity: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub capability_graph_identity: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub mcp_server_identities: Vec<String>,
     #[serde(default)]
     pub runtime: Option<ReceiptRuntime>,
     #[serde(default)]
@@ -101,6 +111,11 @@ pub fn build_receipt(
         ruleset_sha256: crate::explain::ruleset_sha256().into(),
         intelligence_sha256: intelligence_sha256.map(str::to_owned),
         passport_sha256: passport_sha256.map(str::to_owned),
+        composition_identity: None,
+        runtime_configuration_identity: None,
+        agent_identity: None,
+        capability_graph_identity: None,
+        mcp_server_identities: Vec::new(),
         runtime,
         compatibility: compatibility.map(|c| c.state),
         exploitability: exploitability
@@ -113,4 +128,59 @@ pub fn build_receipt(
             .collect(),
         limitations: Vec::new(),
     })
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct ExecutionContextBinding<'a> {
+    pub composition_identity: Option<&'a str>,
+    pub runtime_configuration_identity: Option<&'a str>,
+    pub agent_identity: Option<&'a str>,
+    pub capability_graph_identity: Option<&'a str>,
+    pub mcp_server_identities: Vec<&'a str>,
+}
+
+/// Bind a receipt to the security-relevant execution context discovered after
+/// the artifact admission decision. Values are immutable identities, never
+/// configuration paths or credential material.
+pub fn bind_execution_context(
+    receipt: &mut AdmissionReceiptContext,
+    binding: &ExecutionContextBinding<'_>,
+) -> Result<()> {
+    for value in [
+        binding.composition_identity,
+        binding.runtime_configuration_identity,
+        binding.agent_identity,
+        binding.capability_graph_identity,
+    ]
+    .into_iter()
+    .flatten()
+    {
+        if value.trim().is_empty() || value.len() > 64 * 1024 {
+            bail!("execution-context identity is empty or exceeds the safety limit");
+        }
+    }
+    receipt.composition_identity = binding.composition_identity.map(str::to_owned);
+    receipt.runtime_configuration_identity =
+        binding.runtime_configuration_identity.map(str::to_owned);
+    receipt.agent_identity = binding.agent_identity.map(str::to_owned);
+    receipt.capability_graph_identity = binding.capability_graph_identity.map(str::to_owned);
+    receipt.mcp_server_identities = binding
+        .mcp_server_identities
+        .iter()
+        .map(|value| (*value).to_owned())
+        .collect();
+    receipt.mcp_server_identities.sort();
+    receipt.mcp_server_identities.dedup();
+    if receipt.composition_identity.is_some()
+        || receipt.runtime_configuration_identity.is_some()
+        || receipt.agent_identity.is_some()
+        || receipt.capability_graph_identity.is_some()
+        || !receipt.mcp_server_identities.is_empty()
+    {
+        receipt.version = 2;
+    }
+    if receipt.mcp_server_identities.len() > 4096 {
+        bail!("admission receipt exceeds the MCP server identity safety limit");
+    }
+    Ok(())
 }

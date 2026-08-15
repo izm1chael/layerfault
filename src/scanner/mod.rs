@@ -124,6 +124,10 @@ pub enum CheckType {
     BackdoorForensics,
     RemotePreflight,
     SecurityPassport,
+    ModelComposition,
+    AgentSecurity,
+    McpSecurity,
+    ContinuousTrust,
     InventoryDrift,
     #[default]
     ScanError,

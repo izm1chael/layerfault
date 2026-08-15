@@ -52,6 +52,46 @@ pub(crate) fn run_intelligence(args: IntelligenceArgs) -> Result<()> {
                 println!("Sequence: {}", verified.pack.sequence);
             }
         }
+        IntelligenceCommand::Export {
+            pack,
+            signature,
+            public_key,
+            output,
+        } => {
+            layerfault::intelligence::export_bundle(&pack, &signature, &public_key, &output)?;
+            println!("{}", output.display());
+        }
+        IntelligenceCommand::Import {
+            bundle,
+            pack_output,
+            signature_output,
+            public_key_output,
+            allow_rollback,
+        } => {
+            let verified = layerfault::intelligence::verify_bundle(&bundle)?;
+            layerfault::intelligence::enforce_no_rollback(&verified, allow_rollback)?;
+            let imported = layerfault::intelligence::import_bundle(
+                &bundle,
+                &pack_output,
+                &signature_output,
+                &public_key_output,
+            )?;
+            layerfault::intelligence::record_accepted(&imported)?;
+            println!("Imported intelligence pack: {}", imported.sha256);
+            println!("Pack: {}", pack_output.display());
+            println!("Signature: {}", signature_output.display());
+            println!("Public key: {}", public_key_output.display());
+        }
+        IntelligenceCommand::VerifyBundle { bundle, json } => {
+            let verified = layerfault::intelligence::verify_bundle(&bundle)?;
+            if json {
+                write_stdout_json(&verified, true)?;
+            } else {
+                println!("Verified offline intelligence bundle: {}", verified.sha256);
+                println!("Signer: {}", verified.signer_sha256);
+                println!("Epoch: {}", layerfault::intelligence::epoch(&verified.pack));
+            }
+        }
     }
     Ok(())
 }
@@ -340,7 +380,7 @@ fn inventory_options(
     }
 }
 
-fn load_cli_intelligence(
+pub(super) fn load_cli_intelligence(
     pack: Option<&Path>,
     signature: Option<&Path>,
     public_key: Option<&Path>,

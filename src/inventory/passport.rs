@@ -10,12 +10,24 @@ pub struct ModelSecurityPassport {
     pub ruleset_sha256: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub intelligence_sha256: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub intelligence_epoch: Option<u64>,
     pub subject: PassportSubject,
     pub identity: crate::model::identity::LayeredModelIdentity,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source: Option<PassportSource>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub lineage: Option<crate::model::lineage::LineageVerification>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub composition: Option<PassportCompositionSummary>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent: Option<PassportAgentSummary>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provenance: Option<PassportProvenanceSummary>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub behavioural: Option<PassportBehaviourSummary>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub completeness: Option<PassportCompleteness>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tokenizer: Option<PassportTokenizerSummary>,
     #[serde(default)]
@@ -74,16 +86,117 @@ pub struct PassportPolicyDecision {
     pub reasons: Vec<String>,
     pub overrides: Vec<String>,
 }
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PassportCompositionSummary {
+    pub identity: String,
+    pub component_count: u64,
+    pub adapter_count: u64,
+    pub completeness: crate::assurance::AnalysisCompleteness,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PassportAgentSummary {
+    pub agent_identity: String,
+    pub capability_graph_identity: String,
+    pub server_count: u64,
+    pub tool_count: u64,
+    #[serde(default)]
+    pub high_impact_capabilities: Vec<String>,
+    #[serde(default)]
+    pub dangerous_chains: Vec<String>,
+    pub completeness: crate::assurance::AnalysisCompleteness,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PassportProvenanceSummary {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub transformation_chain_sha256: Option<String>,
+    pub state: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub builder_identity: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PassportBehaviourSummary {
+    pub suite_id: String,
+    pub suite_version: String,
+    pub trial_count: u64,
+    pub state: String,
+    pub completeness: crate::assurance::AnalysisCompleteness,
+    #[serde(default)]
+    pub limitations: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PassportCompleteness {
+    #[serde(default)]
+    pub domains: std::collections::BTreeMap<String, crate::assurance::AnalysisCompleteness>,
+}
+
+impl PassportCompositionSummary {
+    pub fn from_assessment(assessment: &crate::model::composition::CompositionAssessment) -> Self {
+        Self {
+            identity: assessment.identity.value.clone(),
+            component_count: assessment.identity.component_count,
+            adapter_count: assessment.composition.adapters.len() as u64,
+            completeness: assessment.identity.completeness,
+        }
+    }
+}
+
+impl PassportAgentSummary {
+    pub fn from_graph(graph: &crate::agent_security::CapabilityGraph) -> Self {
+        let tool_count = graph
+            .servers
+            .iter()
+            .map(|server| server.tools.len() as u64)
+            .sum();
+        let mut high_impact_capabilities = graph
+            .agent
+            .capabilities
+            .iter()
+            .filter(|grant| grant.capability.high_impact())
+            .map(|grant| {
+                format!("{}:{:?}", grant.capability.as_str(), grant.scope).to_ascii_lowercase()
+            })
+            .collect::<Vec<_>>();
+        high_impact_capabilities.sort();
+        high_impact_capabilities.dedup();
+        let mut dangerous_chains = graph
+            .dangerous_chains
+            .iter()
+            .map(|chain| chain.id.clone())
+            .collect::<Vec<_>>();
+        dangerous_chains.sort();
+        dangerous_chains.dedup();
+        Self {
+            agent_identity: graph.agent.identity.clone(),
+            capability_graph_identity: graph.graph_identity.clone(),
+            server_count: graph.servers.len() as u64,
+            tool_count,
+            high_impact_capabilities,
+            dangerous_chains,
+            completeness: graph.completeness,
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct PassportInputs {
     pub generated_unix: u64,
     pub scanner_revision: String,
     pub ruleset_sha256: String,
     pub intelligence_sha256: Option<String>,
+    pub intelligence_epoch: Option<u64>,
     pub subject: PassportSubject,
     pub identity: crate::model::identity::LayeredModelIdentity,
     pub source: Option<PassportSource>,
     pub lineage: Option<crate::model::lineage::LineageVerification>,
+    pub composition: Option<PassportCompositionSummary>,
+    pub agent: Option<PassportAgentSummary>,
+    pub provenance: Option<PassportProvenanceSummary>,
+    pub behavioural: Option<PassportBehaviourSummary>,
+    pub completeness: Option<PassportCompleteness>,
     pub tokenizer: Option<PassportTokenizerSummary>,
     pub runtime: Vec<PassportRuntimeAssessment>,
     pub findings: Vec<crate::scanner::LayerScanResult>,
@@ -130,17 +243,44 @@ pub fn build_passport(mut i: PassportInputs) -> Result<ModelSecurityPassport> {
     }
     i.limitations.sort();
     i.limitations.dedup();
+    let version = if i.composition.is_some()
+        || i.agent.is_some()
+        || i.provenance.is_some()
+        || i.behavioural.is_some()
+        || i.completeness.is_some()
+        || i.intelligence_epoch.is_some()
+    {
+        2
+    } else {
+        1
+    };
+    if let Some(agent) = &mut i.agent {
+        agent.high_impact_capabilities.sort();
+        agent.high_impact_capabilities.dedup();
+        agent.dangerous_chains.sort();
+        agent.dangerous_chains.dedup();
+    }
+    if let Some(behavioural) = &mut i.behavioural {
+        behavioural.limitations.sort();
+        behavioural.limitations.dedup();
+    }
     Ok(ModelSecurityPassport {
-        version: 1,
+        version,
         generated_unix: i.generated_unix,
         layerfault_version: env!("CARGO_PKG_VERSION").into(),
         scanner_revision: i.scanner_revision,
         ruleset_sha256: i.ruleset_sha256,
         intelligence_sha256: i.intelligence_sha256,
+        intelligence_epoch: i.intelligence_epoch,
         subject: i.subject,
         identity: i.identity,
         source: i.source,
         lineage: i.lineage,
+        composition: i.composition,
+        agent: i.agent,
+        provenance: i.provenance,
+        behavioural: i.behavioural,
+        completeness: i.completeness,
         tokenizer: i.tokenizer,
         runtime: i.runtime,
         findings: PassportFindingSummary {
@@ -170,12 +310,22 @@ pub fn canonical_passport_bytes(passport: &ModelSecurityPassport) -> Result<Vec<
     p.findings.finding_ids.dedup();
     p.framework_mappings
         .sort_by(|a, b| a.rule_id.cmp(&b.rule_id));
+    if let Some(agent) = &mut p.agent {
+        agent.high_impact_capabilities.sort();
+        agent.high_impact_capabilities.dedup();
+        agent.dangerous_chains.sort();
+        agent.dangerous_chains.dedup();
+    }
+    if let Some(behavioural) = &mut p.behavioural {
+        behavioural.limitations.sort();
+        behavioural.limitations.dedup();
+    }
     p.limitations.sort();
     Ok(serde_json::to_vec(&p)?)
 }
 pub fn passport_sha256(p: &ModelSecurityPassport) -> Result<String> {
     let mut h = Sha256::new();
-    h.update(b"layerfault:security-passport:v1\0");
+    h.update(format!("layerfault:security-passport:v{}\0", p.version).as_bytes());
     h.update(canonical_passport_bytes(p)?);
     Ok(format!("sha256:{}", hex::encode(h.finalize())))
 }
