@@ -5,6 +5,7 @@ COPY Cargo.toml Cargo.lock build.rs ./
 COPY src ./src
 COPY helpers ./helpers
 COPY advisories ./advisories
+COPY intelligence ./intelligence
 COPY schemas ./schemas
 COPY policies ./policies
 COPY vendor ./vendor
