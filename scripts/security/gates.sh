@@ -269,6 +269,6 @@ bash scripts/security/differential-parsers.sh "$ROOT" >/dev/null
 python3 scripts/corpus/detector-quality-gate.py --binary "$BIN" >/dev/null
 
 # Performance, memory and I/O regression gate
-python3 scripts/benchmarks/performance-gate.py --binary "$BIN" >/dev/null
+python3 scripts/benchmarks/performance-gate.py --binary "$BIN"
 
 echo "PASS: Layerfault development admission/sources/formats/trust/policy/baseline/quarantine/inventory gate"
