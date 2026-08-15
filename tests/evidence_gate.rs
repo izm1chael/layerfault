@@ -31,6 +31,11 @@ const KNOWN_NON_RULE_SENTINELS: &[&str] = &[
     "LF-UNRECOGNIZED",
     "LF-NOT-A-REAL-RULE",
     "LF-UNCLASSIFIED",
+    // Data-quality diagnostics and mapping identities, not emitted findings.
+    "LF-BAD-CVE",
+    "LF-DUPLICATE",
+    "LF-EXACT",
+    "LF-NO-MAPPING",
 ];
 
 fn collect_rule_literals(root: &Path) -> BTreeSet<String> {

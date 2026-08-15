@@ -1,0 +1,22 @@
+{
+  "envelope_version": 1,
+  "payload": {
+    "version": 1,
+    "created_unix": 1700000000,
+    "subject": "fixture/model.gguf",
+    "source": "file",
+    "subject_fingerprint": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "layerfault_version": "1.0.0-rc.1",
+    "build_id": "legacy-v1-fixture",
+    "detector_contract": "layerfault-security-contract",
+    "policy_sha256": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "trust_store_sha256": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+    "runtime": null,
+    "execution_binding": null,
+    "decision": "ALLOW",
+    "details": {}
+  },
+  "key_fingerprint": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+  "public_key_hex": "0000000000000000000000000000000000000000000000000000000000000000",
+  "signature_hex": "00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"
+}

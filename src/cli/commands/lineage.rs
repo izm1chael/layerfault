@@ -1,5 +1,5 @@
 use super::super::{CompareArgs, LineageArgs, LineageCommand};
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, Context, Result};
 use layerfault::json_stream::write_stdout_json;
 use serde_json::{json, Value};
 use std::path::Path;
@@ -27,6 +27,99 @@ pub(crate) fn run_lineage(args: LineageArgs) -> Result<()> {
                     "LINEAGE CHAIN\n{:?}\n\n{} link(s) verified",
                     report.state,
                     report.links.len()
+                );
+            }
+        }
+        LineageCommand::Verify {
+            parent,
+            child,
+            relation,
+            adapter,
+            chain,
+            json: emit_json,
+        } => {
+            let relation = parse_claimed_relation(&relation)?;
+            let parent_identity = layered_identity(&parent)?;
+            let child_identity = layered_identity(&child)?;
+            let mut evidence = Vec::new();
+            if let Some(path) = adapter {
+                evidence.push(format!("adapter:{}", path.display()));
+            }
+            if let Some(path) = chain {
+                let trust = layerfault::trust::TrustStore::load(None)?;
+                let verified = layerfault::transformation::verify_chain(&path, &trust)?;
+                evidence.push(format!(
+                    "signed-chain:{:?}:{}-links",
+                    verified.state,
+                    verified.links.len()
+                ));
+            }
+            let claim = layerfault::model::lineage::LineageClaim {
+                relation,
+                parent_identity: parent_identity.subject.clone(),
+                child_identity: child_identity.subject.clone(),
+                evidence,
+            };
+            let report =
+                layerfault::model::lineage::verify(&claim, &parent_identity, &child_identity);
+            if emit_json {
+                write_stdout_json(&report, true)?;
+            } else {
+                println!(
+                    "LINEAGE VERIFICATION\n{:?}\n{}",
+                    report.consistency,
+                    report.reasons.join("\n")
+                );
+            }
+        }
+        LineageCommand::Graph {
+            manifests,
+            json: emit_json,
+        } => {
+            let mut graph = layerfault::model::lineage::LineageGraph::default();
+            let mut nodes = std::collections::BTreeSet::new();
+            for path in manifests {
+                let bytes = std::fs::read(&path).with_context(|| {
+                    format!("unable to read lineage manifest '{}'", path.display())
+                })?;
+                let claim: layerfault::model::lineage::LineageClaim =
+                    serde_json::from_slice(&bytes).with_context(|| {
+                        format!(
+                            "lineage manifest '{}' is not a LineageClaim JSON document",
+                            path.display()
+                        )
+                    })?;
+                nodes.insert(claim.parent_identity.clone());
+                nodes.insert(claim.child_identity.clone());
+                graph.edges.push(layerfault::model::lineage::LineageEdge {
+                    parent: claim.parent_identity,
+                    child: claim.child_identity,
+                    relation: claim.relation,
+                });
+            }
+            graph.nodes = nodes
+                .into_iter()
+                .map(|id| layerfault::model::lineage::LineageNode { id, label: None })
+                .collect();
+            let cycle = graph.cycle();
+            #[derive(serde::Serialize)]
+            struct GraphReport {
+                graph: layerfault::model::lineage::LineageGraph,
+                cycle: Option<Vec<String>>,
+            }
+            let report = GraphReport { graph, cycle };
+            if emit_json {
+                write_stdout_json(&report, true)?;
+            } else {
+                println!(
+                    "LINEAGE GRAPH\n{} node(s), {} edge(s){}",
+                    report.graph.nodes.len(),
+                    report.graph.edges.len(),
+                    if report.cycle.is_some() {
+                        "\nWARNING: cycle detected"
+                    } else {
+                        ""
+                    }
                 );
             }
         }
@@ -231,4 +324,35 @@ pub(super) fn single_weight_analysis(path: &Path, profile: &str, seed_material: 
         }),
         Err(error) => json!({"state":"FAILED","report":Value::Null,"reason":error.to_string()}),
     }
+}
+
+fn parse_claimed_relation(value: &str) -> Result<layerfault::model::lineage::ClaimedRelation> {
+    use layerfault::model::lineage::ClaimedRelation;
+    match value.trim().to_ascii_lowercase().as_str() {
+        "repackaged" => Ok(ClaimedRelation::Repackaged),
+        "quantized" => Ok(ClaimedRelation::Quantized),
+        "fine-tuned" | "finetuned" => Ok(ClaimedRelation::FineTuned),
+        "adapter-merged" => Ok(ClaimedRelation::AdapterMerged),
+        "converted" => Ok(ClaimedRelation::Converted),
+        "derived" => Ok(ClaimedRelation::Derived),
+        other => Err(anyhow!("unknown lineage relation '{other}'")),
+    }
+}
+
+fn layered_identity(path: &Path) -> Result<layerfault::model::identity::LayeredModelIdentity> {
+    let snapshot = layerfault::modelmeta::build_snapshot(path)?;
+    let package = if path.is_dir() {
+        Some(layerfault::package::inspect(path)?)
+    } else {
+        None
+    };
+    layerfault::model::identity::build(
+        path,
+        package.as_ref(),
+        &snapshot,
+        None,
+        None,
+        None,
+        &Default::default(),
+    )
 }

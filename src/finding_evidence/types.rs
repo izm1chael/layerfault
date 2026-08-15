@@ -32,6 +32,15 @@ pub enum EvidenceKind {
     DatasetRecord,
     Correlation,
     CoverageGap,
+    IntelligenceRecord,
+    RuntimeConfiguration,
+    ExecutionEdge,
+    TokenizerRecord,
+    ModelIdentity,
+    LineageEvidence,
+    ForensicStatistic,
+    CarvedObject,
+    InventoryState,
     Other,
 }
 
@@ -74,6 +83,12 @@ impl EvidenceSubject {
             package_relative_path: Some(relative_path.to_owned()),
             ..Self::default()
         }
+    }
+
+    #[must_use]
+    pub fn with_package_relative_path(mut self, path: Option<String>) -> Self {
+        self.package_relative_path = path;
+        self
     }
 
     #[must_use]

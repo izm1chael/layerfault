@@ -1,0 +1,19 @@
+{
+  "version": 1,
+  "profile": "workstation",
+  "require_trusted_attestation": false,
+  "block_unknown_layers": false,
+  "block_on_warnings": false,
+  "allowed_model_patterns": [],
+  "denied_rule_ids": [],
+  "suppressions": [],
+  "allowed_sources": [],
+  "allowed_formats": [],
+  "allowed_architectures": [],
+  "allowed_quantizations": [],
+  "max_model_bytes": null,
+  "minimum_trusted_signatures": null,
+  "required_signer_fingerprints": [],
+  "block_finding_classes": [],
+  "block_confidence_at_or_above": null
+}

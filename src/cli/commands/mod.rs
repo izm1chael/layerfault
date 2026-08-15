@@ -1,6 +1,7 @@
 pub(crate) mod artifacts;
 pub(crate) mod behaviour;
 pub(crate) mod dataset;
+pub(crate) mod domains;
 pub(crate) mod hub;
 pub(crate) mod lineage;
 pub(crate) mod models;

@@ -615,15 +615,11 @@ pub fn inspect_with_scheduler(
         findings.extend(analysis.findings);
     }
 
-    sort_findings_canonically(&mut findings);
-
     let fingerprint = package_fingerprint(&files);
     let (merkle_identity, merkle_manifest) = compute_merkle_tree(&files, None);
 
     // Construct the relationship graph.
     correlate_custom_code(&files, &member_evidence, &mut findings);
-    sort_findings_canonically(&mut findings);
-
     // Correlate related findings.
     let evidence_bytes = serde_json::to_vec(&findings)?.len() as u64;
     let evidence_failure = if control_interruption.is_some() {
@@ -656,6 +652,37 @@ pub fn inspect_with_scheduler(
         .finish();
         result.evidence_reason = Some(serde_json::to_string(&usage)?);
         findings.push(result);
+    }
+
+    // Normalize only known executable configuration files. No imports or model code are executed.
+    let mut declarative_facts = Vec::new();
+    for entry in &files {
+        let path = root.join(&entry.relative_path);
+        if let Ok(file) = crate::safeio::open_readonly_nofollow(&path) {
+            if let Ok(bytes) = crate::safeio::read_all_from_file(&file, 4 * 1024 * 1024) {
+                if let Ok(mut facts) =
+                    crate::model::declarative::normalized_config_facts(&entry.relative_path, &bytes)
+                {
+                    declarative_facts.append(&mut facts);
+                }
+            }
+        }
+    }
+    let execution_edges = crate::model::declarative::detect(&declarative_facts, None);
+    findings.extend(crate::model::declarative::findings(
+        &execution_edges,
+        &merkle_identity,
+    ));
+
+    let tokenizer_file_list = files
+        .iter()
+        .map(|e| e.relative_path.clone())
+        .collect::<Vec<_>>();
+    let tokenizer_security =
+        crate::model::tokenizer::inspect_package(&root, &tokenizer_file_list, &merkle_identity)
+            .ok();
+    if let Some(report) = tokenizer_security.as_ref() {
+        findings.extend(report.findings.clone());
     }
 
     sort_findings_canonically(&mut findings);
@@ -714,6 +741,8 @@ pub fn inspect_with_scheduler(
         merkle_manifest,
         total_bytes,
         findings,
+        execution_edges,
+        tokenizer_security,
         correlations,
         coverage,
         metrics: Some(aggregate_metrics),

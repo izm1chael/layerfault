@@ -107,6 +107,12 @@ pub(crate) enum Command {
     Advisories(AdvisoryArgs),
     /// Verify signed Layerfault scan/admission evidence.
     Evidence(EvidenceArgs),
+    /// Inspect and verify signed data-only Layerfault intelligence packs.
+    Intelligence(IntelligenceArgs),
+    /// Discover and assess local AI runtimes and model/runtime compatibility.
+    Runtime(RuntimeArgs),
+    /// Snapshot, diff, approve and watch the persistent local model inventory.
+    Inventory(InventoryArgs),
     /// Print build/runtime contract information.
     Version(VersionArgs),
 }
@@ -390,7 +396,13 @@ pub(crate) struct RunArgs {
     /// Runtime/source: ollama, lmstudio, llama-cpp.
     #[arg(long, default_value = "ollama")]
     pub(crate) source: String,
-    /// Override a policy-only block with a mandatory audited reason. Scanner/provenance failures cannot be overridden.
+    /// Require a trusted admission receipt bound to the current artifact and runtime.
+    #[arg(long, value_name = "PATH")]
+    pub(crate) require_receipt: Option<PathBuf>,
+    /// Permit an audited stale receipt; identity mismatches remain non-bypassable.
+    #[arg(long, default_value_t = false, requires = "require_receipt")]
+    pub(crate) accept_stale_receipt: bool,
+    /// Override a policy-only block or explain an accepted stale receipt.
     #[arg(long, value_name = "REASON")]
     pub(crate) override_reason: Option<String>,
     #[arg(long)]
@@ -805,6 +817,40 @@ pub(crate) enum ResearchCommand {
         #[arg(long, default_value_t = false)]
         json: bool,
     },
+    BackdoorStatic {
+        #[arg(long)]
+        model: PathBuf,
+        #[arg(long)]
+        parent: Option<PathBuf>,
+        #[arg(long)]
+        dataset: Option<PathBuf>,
+        #[arg(long)]
+        adapter: Option<PathBuf>,
+        #[arg(long, default_value = "standard")]
+        profile: String,
+        #[arg(long, default_value_t = false)]
+        json: bool,
+    },
+    TriggerHunt {
+        #[arg(long)]
+        model: PathBuf,
+        #[arg(long)]
+        parent: Option<PathBuf>,
+        #[arg(long)]
+        runtime: Option<String>,
+        #[arg(long = "candidate")]
+        candidates: Vec<String>,
+        #[arg(long, default_value_t = false)]
+        from_tokenizer: bool,
+        #[arg(long, default_value_t = 32)]
+        beam_width: usize,
+        #[arg(long, default_value_t = 2)]
+        beam_rounds: usize,
+        #[arg(long, default_value = "standard")]
+        profile: String,
+        #[arg(long, default_value_t = false)]
+        json: bool,
+    },
 }
 
 #[derive(clap::Args, Debug)]
@@ -856,6 +902,19 @@ pub(crate) enum HubCommand {
         limit: usize,
         #[arg(long)]
         cursor: Option<String>,
+        #[arg(long, default_value_t = false)]
+        json: bool,
+    },
+    Preflight {
+        repo: String,
+        #[arg(long)]
+        revision: Option<String>,
+        #[arg(long, default_value = "workstation")]
+        profile: String,
+        #[arg(long)]
+        policy: Option<PathBuf>,
+        #[arg(long)]
+        write_report: Option<PathBuf>,
         #[arg(long, default_value_t = false)]
         json: bool,
     },
@@ -985,6 +1044,14 @@ pub(crate) struct OutputArgs {
 #[derive(clap::Args, Debug)]
 pub(crate) struct ExplainArgs {
     pub(crate) rule_id: String,
+    #[arg(long, default_value_t = false)]
+    pub(crate) mappings: bool,
+    #[arg(long)]
+    pub(crate) intelligence_pack: Option<PathBuf>,
+    #[arg(long)]
+    pub(crate) intelligence_signature: Option<PathBuf>,
+    #[arg(long)]
+    pub(crate) intelligence_public_key: Option<PathBuf>,
     #[arg(long, default_value_t = false)]
     pub(crate) json: bool,
 }
@@ -1251,6 +1318,39 @@ pub(crate) enum ModelsCommand {
         #[arg(long, default_value_t = false)]
         json: bool,
     },
+    Identity {
+        target: PathBuf,
+        #[arg(long, default_value_t = false)]
+        weights: bool,
+        #[arg(long, default_value_t = false)]
+        json: bool,
+    },
+    IdentityCompare {
+        left: PathBuf,
+        right: PathBuf,
+        #[arg(long, default_value_t = false)]
+        weights: bool,
+        #[arg(long, default_value_t = false)]
+        json: bool,
+    },
+    Carve {
+        target: PathBuf,
+        #[arg(long, default_value = "standard")]
+        profile: String,
+        #[arg(long, default_value_t = false)]
+        json: bool,
+    },
+    Passport {
+        target: PathBuf,
+        #[arg(long)]
+        parent: Option<PathBuf>,
+        #[arg(long = "runtime")]
+        runtimes: Vec<String>,
+        #[arg(long, default_value = "native")]
+        format: String,
+        #[arg(long)]
+        output: Option<PathBuf>,
+    },
 }
 
 #[derive(clap::Args, Debug)]
@@ -1274,6 +1374,26 @@ pub(crate) struct LineageArgs {
 pub(crate) enum LineageCommand {
     VerifyChain {
         chain: PathBuf,
+        #[arg(long, default_value_t = false)]
+        json: bool,
+    },
+    Verify {
+        #[arg(long)]
+        parent: PathBuf,
+        #[arg(long)]
+        child: PathBuf,
+        #[arg(long)]
+        relation: String,
+        #[arg(long)]
+        adapter: Option<PathBuf>,
+        #[arg(long)]
+        chain: Option<PathBuf>,
+        #[arg(long, default_value_t = false)]
+        json: bool,
+    },
+    Graph {
+        #[arg(long = "manifest", required = true)]
+        manifests: Vec<PathBuf>,
         #[arg(long, default_value_t = false)]
         json: bool,
     },
@@ -1330,6 +1450,167 @@ pub(crate) enum EvidenceCommand {
         trust_store: Option<PathBuf>,
         #[arg(long, default_value_t = false)]
         json: bool,
+    },
+    Admit {
+        target: PathBuf,
+        #[arg(long)]
+        runtime: String,
+        #[arg(long)]
+        private_key: PathBuf,
+        #[arg(long)]
+        output: PathBuf,
+        #[arg(long, default_value = "workstation")]
+        policy: String,
+        #[arg(long)]
+        policy_file: Option<PathBuf>,
+        #[arg(long)]
+        trust_store: Option<PathBuf>,
+    },
+    Gate {
+        receipt: PathBuf,
+        #[arg(long)]
+        target: PathBuf,
+        #[arg(long)]
+        runtime: Option<PathBuf>,
+        #[arg(long)]
+        trust_store: Option<PathBuf>,
+        #[arg(long, default_value_t = false)]
+        accept_stale_receipt: bool,
+        #[arg(long, requires = "accept_stale_receipt")]
+        override_reason: Option<String>,
+        #[arg(long, default_value_t = false)]
+        json: bool,
+    },
+    Predicate {
+        receipt: PathBuf,
+        #[arg(long)]
+        output: PathBuf,
+    },
+}
+
+#[derive(clap::Args, Debug)]
+pub(crate) struct IntelligenceArgs {
+    #[command(subcommand)]
+    pub(crate) command: IntelligenceCommand,
+}
+
+#[derive(Subcommand, Debug)]
+pub(crate) enum IntelligenceCommand {
+    Show {
+        #[arg(long)]
+        pack: Option<PathBuf>,
+        #[arg(long, default_value_t = false)]
+        json: bool,
+    },
+    Verify {
+        #[arg(long)]
+        pack: PathBuf,
+        #[arg(long)]
+        signature: PathBuf,
+        #[arg(long)]
+        public_key: PathBuf,
+        #[arg(long, default_value_t = false)]
+        allow_rollback: bool,
+        #[arg(long, default_value_t = false)]
+        json: bool,
+    },
+}
+
+#[derive(clap::Args, Debug)]
+pub(crate) struct RuntimeArgs {
+    #[command(subcommand)]
+    pub(crate) command: RuntimeCommand,
+}
+
+#[derive(Subcommand, Debug)]
+pub(crate) enum RuntimeCommand {
+    List {
+        #[arg(long)]
+        runtime: Option<String>,
+        #[arg(long, default_value_t = false)]
+        json: bool,
+    },
+    Audit {
+        #[arg(long)]
+        runtime: Option<String>,
+        #[arg(long, default_value_t = false)]
+        json: bool,
+    },
+    Assess {
+        #[arg(long)]
+        runtime: String,
+        #[arg(long)]
+        model: PathBuf,
+        #[arg(long)]
+        intelligence_pack: Option<PathBuf>,
+        #[arg(long)]
+        intelligence_signature: Option<PathBuf>,
+        #[arg(long)]
+        intelligence_public_key: Option<PathBuf>,
+        #[arg(long, default_value_t = false)]
+        json: bool,
+    },
+    Matrix {
+        #[arg(long)]
+        model: PathBuf,
+        #[arg(long = "runtime")]
+        runtimes: Vec<String>,
+        #[arg(long, default_value_t = false)]
+        json: bool,
+    },
+}
+
+#[derive(clap::Args, Debug)]
+pub(crate) struct InventoryArgs {
+    #[command(subcommand)]
+    pub(crate) command: InventoryCommand,
+}
+
+#[derive(Subcommand, Debug)]
+pub(crate) enum InventoryCommand {
+    Snapshot {
+        #[arg(long)]
+        state: Option<PathBuf>,
+        #[arg(long, default_value_t = false)]
+        runtime_aware: bool,
+        #[arg(long = "dir")]
+        directories: Vec<PathBuf>,
+        #[arg(long, default_value_t = false)]
+        json: bool,
+    },
+    Diff {
+        #[arg(long)]
+        previous: PathBuf,
+        #[arg(long, conflicts_with = "scan")]
+        current: Option<PathBuf>,
+        #[arg(long, default_value_t = false)]
+        scan: bool,
+        #[arg(long, default_value_t = false)]
+        json: bool,
+    },
+    Approve {
+        #[arg(long)]
+        state: PathBuf,
+        #[arg(long)]
+        identity: String,
+        #[arg(long)]
+        receipt: PathBuf,
+        #[arg(long)]
+        trust_store: Option<PathBuf>,
+    },
+    Watch {
+        #[arg(long)]
+        state: Option<PathBuf>,
+        #[arg(long, default_value_t = 60)]
+        interval: u64,
+        #[arg(long, default_value_t = false)]
+        runtime_aware: bool,
+        #[arg(long, default_value_t = false)]
+        verbose: bool,
+        #[arg(long = "dir")]
+        directories: Vec<PathBuf>,
+        #[arg(long, default_value_t = false)]
+        jsonl: bool,
     },
 }
 

@@ -23,3 +23,6 @@
 # Python bytecode caches
 __pycache__/
 *.py[cod]
+
+# Windows download metadata
+*:Zone.Identifier

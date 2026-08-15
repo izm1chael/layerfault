@@ -42,6 +42,9 @@ pub(super) fn dispatch(cli: Cli) -> Result<()> {
         Some(Command::Certify(args)) => commands::operator::run_certify(args),
         Some(Command::Advisories(args)) => commands::security::run_advisories(args),
         Some(Command::Evidence(args)) => commands::security::run_evidence(args),
+        Some(Command::Intelligence(args)) => commands::domains::run_intelligence(args),
+        Some(Command::Runtime(args)) => commands::domains::run_runtime(args),
+        Some(Command::Inventory(args)) => commands::domains::run_inventory(args),
         Some(Command::Version(args)) => commands::operator::run_version(args),
         None => commands::ollama::run_scan(cli.legacy_scan),
     }

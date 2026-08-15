@@ -1,10 +1,14 @@
 pub mod dataset;
+pub mod declarative;
 pub mod diff;
+pub mod forensics;
+pub mod identity;
 pub mod lineage;
 pub mod lora;
 pub mod metadata;
 pub mod observations;
 pub mod quantization;
 pub mod research;
+pub mod tokenizer;
 pub mod transformation;
 pub mod weights;

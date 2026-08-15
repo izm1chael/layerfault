@@ -18,6 +18,7 @@ import struct
 import zipfile
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent.parent
+ROOT = REPO_ROOT / "fuzz"
 CORPUS = REPO_ROOT / "fuzz" / "corpus"
 SECTION = b"\n--LAYERFAULT-FUZZ-SECTION--\n"
 

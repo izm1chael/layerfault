@@ -191,6 +191,171 @@ pub(crate) fn run_research(args: ResearchArgs) -> Result<()> {
                 println!("MODEL CAMPAIGN CORRELATION\n{} observation(s), {} shared component correlation(s)",report.records_examined,report.shared_component_hashes.len());
             }
         }
+        ResearchCommand::BackdoorStatic {
+            model,
+            parent,
+            dataset,
+            adapter,
+            profile,
+            json: emit_json,
+        } => {
+            let profile = match profile.to_ascii_lowercase().as_str() {
+                "standard" => layerfault::model::forensics::BackdoorProfile::Standard,
+                "research" => layerfault::model::forensics::BackdoorProfile::Research,
+                other => bail!("unknown backdoor profile '{other}'; use standard or research"),
+            };
+            let subject = layerfault::safeio::sha256_path(&model)
+                .unwrap_or_else(|_| model.display().to_string());
+            let reference = parent
+                .as_ref()
+                .map(|p| layerfault::safeio::sha256_path(p))
+                .transpose()?;
+            let mut delta_masses = Vec::new();
+            if let Some(parent) = parent.as_deref() {
+                let safetensors = |p: &std::path::Path| {
+                    p.extension()
+                        .and_then(|v| v.to_str())
+                        .is_some_and(|v| v.eq_ignore_ascii_case("safetensors"))
+                };
+                if safetensors(parent) && safetensors(&model) {
+                    if let Ok(stats) =
+                        layerfault::weights::compare_safetensors(parent, &model, 100_000)
+                    {
+                        delta_masses = stats
+                            .into_iter()
+                            .map(|s| layerfault::model::forensics::TensorDeltaMass {
+                                tensor: s.tensor,
+                                absolute_delta: s.l1_delta,
+                            })
+                            .collect();
+                    }
+                }
+            }
+            // Dataset poisoning remains a separate typed report today; do not fabricate scanner findings from it.
+            // Running the review here still validates/parses the supplied dataset and keeps the evidence boundary explicit.
+            if let Some(path) = dataset.as_deref() {
+                let _ = layerfault::dataset::poisoning_review(path)?;
+            }
+            let dataset_findings = Vec::new();
+            let adapter_findings = adapter
+                .as_deref()
+                .and_then(|p| layerfault::package::inspect(p).ok())
+                .map(|r| r.findings)
+                .unwrap_or_default();
+            let report = layerfault::model::forensics::analyze_backdoor_static(
+                layerfault::model::forensics::BackdoorStaticInput {
+                    subject,
+                    reference,
+                    profile,
+                    tensor_anomalies: Vec::new(),
+                    embedding_candidates: Vec::new(),
+                    ordinary_embedding_norms: Vec::new(),
+                    delta_masses,
+                    nonfinite: Vec::new(),
+                    dataset_findings,
+                    adapter_findings,
+                },
+            );
+            if emit_json {
+                write_stdout_json(&report, true)?;
+            } else {
+                println!(
+                    "STATIC BACKDOOR FORENSICS\n{} finding(s)\ncompleteness={:?}",
+                    report.findings.len(),
+                    report.completeness
+                );
+                for limitation in &report.limitations {
+                    println!("LIMITATION: {limitation}");
+                }
+                println!("Static statistical indicators are probabilistic evidence and do not establish malicious intent.");
+            }
+        }
+        ResearchCommand::TriggerHunt {
+            model,
+            parent,
+            runtime,
+            mut candidates,
+            from_tokenizer,
+            beam_width,
+            beam_rounds,
+            profile,
+            json: emit_json,
+        } => {
+            if profile != "standard" && profile != "research" {
+                bail!(
+                    "unknown trigger-hunt profile '{}'; use standard or research",
+                    profile
+                );
+            }
+            let tokenizer_path = if model.is_dir() {
+                ["tokenizer.json", "tokenizer.model"]
+                    .into_iter()
+                    .map(|name| model.join(name))
+                    .find(|p| p.is_file())
+            } else {
+                None
+            };
+            if from_tokenizer {
+                let tokenizer = tokenizer_path.as_deref().ok_or_else(|| anyhow!("--from-tokenizer requires a discoverable tokenizer.json/tokenizer.model in the model package"))?;
+                let mut rare = layerfault::research::rare_token_candidates(tokenizer)?;
+                rare.truncate(if profile == "research" { 4096 } else { 512 });
+                candidates.extend(rare);
+            }
+            if beam_rounds > 0 && !candidates.is_empty() {
+                let seeds = candidates.iter().take(16).cloned().collect::<Vec<_>>();
+                let additions = [
+                    "-".into(),
+                    "_".into(),
+                    "RFC".into(),
+                    "CVE".into(),
+                    "79".into(),
+                ];
+                candidates.extend(layerfault::research::beam_candidates(
+                    &seeds,
+                    &additions,
+                    beam_width.max(1),
+                    beam_rounds,
+                    if profile == "research" { 8192 } else { 2048 },
+                )?);
+            }
+            candidates.sort();
+            candidates.dedup();
+            let cap = if profile == "research" {
+                100_000
+            } else {
+                10_000
+            };
+            if candidates.len() > cap {
+                bail!(
+                    "trigger candidate count {} exceeds {} profile cap {}",
+                    candidates.len(),
+                    profile,
+                    cap
+                );
+            }
+            if candidates.is_empty() {
+                bail!("trigger hunt requires at least one --candidate or --from-tokenizer");
+            }
+            let mut report = match runtime.as_deref() {
+                Some("llama-cpp") => layerfault::research::search_external(&model, parent.as_deref(), None, &candidates, 0, 120)?,
+                Some(other) => bail!("active trigger hunt runtime '{}' is not available through the current guarded behavioural backend; use llama-cpp or omit --runtime for embedded analysis", other),
+                None => {
+                    let tokenizer = tokenizer_path.as_deref().ok_or_else(|| anyhow!("embedded trigger hunt is unavailable for this target; supply --runtime llama-cpp"))?;
+                    layerfault::research::search_embedded(&model, parent.as_deref(), tokenizer, &candidates, 0, 120)?
+                }
+            };
+            report.boundary = layerfault::model::research::HUNT_BOUNDARY.into();
+            if emit_json {
+                write_stdout_json(&report, true)?;
+            } else {
+                println!(
+                    "TRIGGER HUNT\n{} candidate(s) executed\n{} suspicious transition(s)\n\n{}",
+                    report.executed,
+                    report.suspicious.len(),
+                    report.boundary
+                );
+            }
+        }
     }
     Ok(())
 }

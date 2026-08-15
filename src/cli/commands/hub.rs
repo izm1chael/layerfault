@@ -94,6 +94,33 @@ pub(crate) fn run_hub(args: HubArgs) -> Result<()> {
                 }
             }
         }
+        HubCommand::Preflight {
+            repo,
+            revision,
+            profile,
+            policy,
+            write_report,
+            json: emit_json,
+        } => {
+            // Parse policy/profile here so typos fail early. Preflight remains a bounded
+            // remote static inspection; full local admission still occurs after download.
+            let _profile = layerfault::policy::PolicyProfile::parse(&profile)?;
+            if let Some(path) = policy.as_deref() {
+                let _ = layerfault::policy::PolicyDocument::load(path)?;
+            }
+            let report =
+                layerfault::hub::preflight::preflight(&client, &repo, revision.as_deref())?;
+            if let Some(path) = write_report.as_deref() {
+                let bytes = serde_json::to_vec_pretty(&report)?;
+                layerfault::paths::write_private(path, &bytes)?;
+            }
+            if emit_json {
+                write_stdout_json(&report, true)?;
+            } else {
+                println!("HUB PREFLIGHT\n{}@{}\n{} file(s), {} bytes fetched of {} estimated\nfull download required for final admission: {}",
+                    report.repo, report.resolved_revision, report.files.len(), report.bytes_fetched, report.estimated_download_bytes, report.full_download_required_for_final_admission);
+            }
+        }
     }
     Ok(())
 }

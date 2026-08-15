@@ -590,6 +590,8 @@ mod tests {
             component_hashes: BTreeMap::new(),
             package_members: Vec::new(),
             claims: BTreeMap::new(),
+            tokenizer_security_digest: None,
+            tokenizer_security_finding_count: 0,
         }
     }
 

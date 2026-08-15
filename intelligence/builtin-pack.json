@@ -1,0 +1,283 @@
+{
+  "version": 1,
+  "sequence": 1,
+  "generated_unix": 1786492800,
+  "expires_unix": null,
+  "runtime_advisories": [
+    {
+      "id": "CVE-2026-7482",
+      "runtime": "ollama",
+      "severity": "critical",
+      "title": "GGUF tensor offset/size out-of-bounds read during model creation",
+      "matcher": {
+        "scheme": "semver_lt",
+        "fixed": "0.17.1"
+      },
+      "reference": "https://nvd.nist.gov/vuln/detail/CVE-2026-7482"
+    },
+    {
+      "id": "CVE-2025-49847",
+      "runtime": "llama-cpp",
+      "severity": "high",
+      "title": "Malicious GGUF vocabulary buffer overflow",
+      "matcher": {
+        "scheme": "build_lt",
+        "fixed": "b5662"
+      },
+      "reference": "https://nvd.nist.gov/vuln/detail/CVE-2025-49847"
+    },
+    {
+      "id": "CVE-2025-52566",
+      "runtime": "llama-cpp",
+      "severity": "high",
+      "title": "Tokenizer signed/unsigned heap overflow",
+      "matcher": {
+        "scheme": "build_lt",
+        "fixed": "b5721"
+      },
+      "reference": "https://nvd.nist.gov/vuln/detail/CVE-2025-52566"
+    },
+    {
+      "id": "CVE-2026-27940",
+      "runtime": "llama-cpp",
+      "severity": "high",
+      "title": "GGUF mem_size integer overflow to heap buffer overflow",
+      "matcher": {
+        "scheme": "build_lt",
+        "fixed": "b8146"
+      },
+      "reference": "https://nvd.nist.gov/vuln/detail/CVE-2026-27940"
+    },
+    {
+      "id": "GHSA-96jg-mvhq-q7q7",
+      "runtime": "llama-cpp",
+      "severity": "critical",
+      "title": "llama.cpp GGUF memory corruption during model load",
+      "matcher": {
+        "scheme": "build_lt",
+        "fixed": "b7824"
+      },
+      "reference": "https://github.com/ggerganov/llama.cpp/security/advisories/GHSA-96jg-mvhq-q7q7",
+      "cve": [
+        "CVE-2026-33298"
+      ],
+      "cwe": [],
+      "impact": [
+        "code_execution",
+        "memory_corruption",
+        "denial_of_service"
+      ],
+      "preconditions": [
+        {
+          "type": "artifact_format",
+          "format": "gguf"
+        }
+      ],
+      "remediation": "Upgrade to an upstream release containing build b7824 or later.",
+      "version_matcher": {
+        "type": "build_lt",
+        "fixed": "b7824"
+      },
+      "upstream_id": "GHSA-96jg-mvhq-q7q7"
+    },
+    {
+      "id": "GHSA-j8rj-fmpv-wcxw",
+      "runtime": "llama-cpp",
+      "severity": "critical",
+      "title": "llama.cpp RPC backend remote memory corruption",
+      "matcher": {
+        "scheme": "build_lt",
+        "fixed": "b7992"
+      },
+      "reference": "https://github.com/ggerganov/llama.cpp/security/advisories/GHSA-j8rj-fmpv-wcxw",
+      "cve": [
+        "CVE-2026-34159"
+      ],
+      "cwe": [],
+      "impact": [
+        "code_execution",
+        "memory_corruption",
+        "information_disclosure"
+      ],
+      "preconditions": [
+        {
+          "type": "runtime_executable_name",
+          "names": [
+            "rpc-server"
+          ]
+        }
+      ],
+      "remediation": "Disable or isolate the RPC backend until an authoritative fixed boundary is available.",
+      "version_matcher": {
+        "type": "build_range",
+        "max_inclusive": "b7991"
+      },
+      "upstream_id": "GHSA-j8rj-fmpv-wcxw"
+    },
+    {
+      "id": "GHSA-2pc9-4j83-qjmr",
+      "runtime": "vllm",
+      "severity": "critical",
+      "title": "vLLM auto_map code execution path",
+      "matcher": {
+        "scheme": "semver_lt",
+        "fixed": "0.14.0"
+      },
+      "reference": "https://github.com/vllm-project/vllm/security/advisories/GHSA-2pc9-4j83-qjmr",
+      "cve": [
+        "CVE-2026-22807"
+      ],
+      "cwe": [],
+      "impact": [
+        "code_execution"
+      ],
+      "preconditions": [
+        {
+          "type": "config_field_present",
+          "path": "config.auto_map"
+        }
+      ],
+      "remediation": "Upgrade to vLLM 0.14.0 or later and reject untrusted custom loading metadata.",
+      "version_matcher": {
+        "type": "semver_range",
+        "min_inclusive": "0.10.1",
+        "max_exclusive": "0.14.0"
+      },
+      "upstream_id": "GHSA-2pc9-4j83-qjmr"
+    },
+    {
+      "id": "GHSA-q8gq-377p-jq3r#sentence-transformers",
+      "runtime": "vllm",
+      "severity": "high",
+      "title": "vLLM optimized-Python activation function import path",
+      "matcher": {
+        "scheme": "semver_lt",
+        "fixed": "0.22.0"
+      },
+      "reference": "https://github.com/vllm-project/vllm/security/advisories/GHSA-q8gq-377p-jq3r",
+      "cve": [
+        "CVE-2026-41523"
+      ],
+      "cwe": [],
+      "impact": [
+        "code_execution"
+      ],
+      "preconditions": [
+        {
+          "type": "environment_boolean",
+          "name": "PYTHONOPTIMIZE",
+          "value": true
+        },
+        {
+          "type": "config_field_present",
+          "path": "config.sentence_transformers.activation_fn"
+        }
+      ],
+      "remediation": "Upgrade to vLLM 0.22.0 or later and avoid optimized-Python loading of untrusted activation metadata.",
+      "version_matcher": {
+        "type": "semver_lt",
+        "fixed": "0.22.0"
+      },
+      "upstream_id": "GHSA-q8gq-377p-jq3r"
+    },
+    {
+      "id": "GHSA-q8gq-377p-jq3r#sbert-default",
+      "runtime": "vllm",
+      "severity": "high",
+      "title": "vLLM optimized-Python activation function import path",
+      "matcher": {
+        "scheme": "semver_lt",
+        "fixed": "0.22.0"
+      },
+      "reference": "https://github.com/vllm-project/vllm/security/advisories/GHSA-q8gq-377p-jq3r",
+      "cve": [
+        "CVE-2026-41523"
+      ],
+      "cwe": [],
+      "impact": [
+        "code_execution"
+      ],
+      "preconditions": [
+        {
+          "type": "environment_boolean",
+          "name": "PYTHONOPTIMIZE",
+          "value": true
+        },
+        {
+          "type": "config_field_present",
+          "path": "config.sbert_ce_default_activation_function"
+        }
+      ],
+      "remediation": "Upgrade to vLLM 0.22.0 or later and avoid optimized-Python loading of untrusted activation metadata.",
+      "version_matcher": {
+        "type": "semver_lt",
+        "fixed": "0.22.0"
+      },
+      "upstream_id": "GHSA-q8gq-377p-jq3r"
+    }
+  ],
+  "pickle_gadgets": [],
+  "declarative_edges": [
+    {
+      "id": "hf-auto-map",
+      "framework": "huggingface-transformers",
+      "source_path": "config.json",
+      "field_path": "auto_map",
+      "sink_kind": "dynamic_import",
+      "allowed_prefixes": [],
+      "affected_runtime": "transformers",
+      "reference": "https://huggingface.co/docs/transformers/main/en/custom_models"
+    },
+    {
+      "id": "sentence-transformers-activation-fn",
+      "framework": "sentence-transformers",
+      "source_path": "config.json",
+      "field_path": "sentence_transformers.activation_fn",
+      "sink_kind": "activation_function",
+      "allowed_prefixes": [],
+      "affected_runtime": "vllm",
+      "reference": "https://docs.vllm.ai/"
+    },
+    {
+      "id": "sbert-cross-encoder-default-activation",
+      "framework": "sentence-transformers",
+      "source_path": "config.json",
+      "field_path": "sbert_ce_default_activation_function",
+      "sink_kind": "activation_function",
+      "allowed_prefixes": [],
+      "affected_runtime": "vllm",
+      "reference": "https://docs.vllm.ai/"
+    }
+  ],
+  "known_identities": [],
+  "threat_mappings": [
+    {
+      "rule_id": "LF-PICKLE-REDUCE",
+      "cwe": [
+        "CWE-502"
+      ],
+      "cve": [],
+      "ghsa": [],
+      "mitre_atlas": [],
+      "owasp_genai": [],
+      "nist": [],
+      "references": [
+        "https://cwe.mitre.org/data/definitions/502.html"
+      ]
+    },
+    {
+      "rule_id": "LF-CONFIG-DYNAMIC-IMPORT",
+      "cwe": [
+        "CWE-94"
+      ],
+      "cve": [],
+      "ghsa": [],
+      "mitre_atlas": [],
+      "owasp_genai": [],
+      "nist": [],
+      "references": [
+        "https://cwe.mitre.org/data/definitions/94.html"
+      ]
+    }
+  ]
+}

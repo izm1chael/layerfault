@@ -28,6 +28,10 @@ pub struct PackageReport {
     pub merkle_manifest: Vec<PackageMerkleLeaf>,
     pub total_bytes: u64,
     pub findings: Vec<LayerScanResult>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub execution_edges: Vec<crate::model::declarative::ExecutionEdge>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tokenizer_security: Option<crate::model::tokenizer::TokenizerSecurityReport>,
     /// Structural relationships between findings, such as a configuration
     /// reference resolving to a module that carries a code-execution primitive.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]

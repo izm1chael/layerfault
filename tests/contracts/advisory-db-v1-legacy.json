@@ -1,0 +1,14 @@
+{
+  "version": 1,
+  "generated_unix": 1700000000,
+  "advisories": [
+    {
+      "id": "CVE-2024-0001",
+      "runtime": "ollama",
+      "severity": "high",
+      "title": "Compatibility fixture",
+      "matcher": { "scheme": "semver_lt", "fixed": "9.9.9" },
+      "reference": "https://example.invalid/CVE-2024-0001"
+    }
+  ]
+}

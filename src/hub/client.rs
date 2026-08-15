@@ -1,6 +1,8 @@
 use super::types::{
     CrawlPage, DownloadResult, HubFile, HubModel, HubRevision, IntegrityResult, MAX_DOWNLOAD_BYTES,
 };
+mod range;
+
 use anyhow::{anyhow, bail, Context, Result};
 use reqwest::blocking::{Client, Response};
 use reqwest::header::{AUTHORIZATION, LOCATION, RETRY_AFTER, USER_AGENT};

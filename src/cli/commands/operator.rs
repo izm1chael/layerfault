@@ -176,6 +176,32 @@ pub(crate) fn run_sources(args: OutputArgs) -> Result<()> {
 pub(crate) fn run_explain(args: ExplainArgs) -> Result<()> {
     let explanation = explain::risk_lookup(&args.rule_id);
     let metadata = explain::lookup(&args.rule_id);
+    let mapping = if args.mappings {
+        let pack = match args.intelligence_pack.as_deref() {
+            Some(path) => {
+                let signature = args.intelligence_signature.as_deref().ok_or_else(|| {
+                    anyhow!("--intelligence-pack requires --intelligence-signature")
+                })?;
+                let key = args.intelligence_public_key.as_deref().ok_or_else(|| {
+                    anyhow!("--intelligence-pack requires --intelligence-public-key")
+                })?;
+                let verified = layerfault::intelligence::load_verified(path, signature, key)?;
+                layerfault::intelligence::enforce_no_rollback(&verified, false)?;
+                verified.pack
+            }
+            None => {
+                if args.intelligence_signature.is_some() || args.intelligence_public_key.is_some() {
+                    return Err(anyhow!(
+                        "intelligence signature/key options require --intelligence-pack"
+                    ));
+                }
+                layerfault::intelligence::builtin_pack()?
+            }
+        };
+        layerfault::intelligence::mapping_for_rule(&pack, &args.rule_id)
+    } else {
+        None
+    };
     if args.json {
         let mut val = serde_json::to_value(&explanation)?;
         if let Some(m) = metadata {
@@ -200,6 +226,12 @@ pub(crate) fn run_explain(args: ExplainArgs) -> Result<()> {
                 obj.insert("meaning".to_owned(), serde_json::json!(m.meaning));
                 obj.insert("limitations".to_owned(), serde_json::json!(m.limitations));
                 obj.insert("remediation".to_owned(), serde_json::json!(m.remediation));
+                if args.mappings {
+                    obj.insert(
+                        "framework_mappings".to_owned(),
+                        serde_json::to_value(&mapping)?,
+                    );
+                }
             }
         }
         println!("{}", serde_json::to_string_pretty(&val)?);
@@ -213,6 +245,17 @@ pub(crate) fn run_explain(args: ExplainArgs) -> Result<()> {
             explanation.potential_impact.join("\n- "),
             explanation.recommended_actions.join("\n- ")
         );
+        if args.mappings {
+            match mapping {
+                Some(mapping) => println!(
+                    "\nFramework mappings:\n{}",
+                    serde_json::to_string_pretty(&mapping)?
+                ),
+                None => {
+                    println!("\nFramework mappings:\nNo curated mapping is present for this rule.")
+                }
+            }
+        }
     }
     Ok(())
 }

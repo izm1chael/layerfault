@@ -1,9 +1,13 @@
+mod gate;
+mod receipt;
 use crate::formats::artifact::{self, ArtifactReport, ArtifactScanMode};
 use crate::policy::{EffectivePolicy, PolicyAction, PolicyContext, PolicyDecision};
 use crate::provenance::TrustState;
 use crate::scanner::{CheckType, Confidence, FindingClass, LayerScanResult, ScanStatus};
 use crate::sources::SourceKind;
 use anyhow::Result;
+pub use gate::{verify_for_execution, ExecutionGateVerification};
+pub use receipt::{build_receipt, AdmissionReceiptContext, ReceiptExploitability, ReceiptRuntime};
 use std::path::Path;
 
 #[derive(Debug, Clone, serde::Serialize)]
@@ -155,6 +159,8 @@ pub fn inspect_and_evaluate_with_budget(
         trusted_signatures,
         signer_fingerprints: signer_fingerprints.clone(),
         now_unix: crate::paths::now_unix(),
+        runtime_compatibility: None,
+        ..PolicyContext::default()
     };
     let decision = policy.evaluate_with_context(identity, &report.results, trust_state, &context);
 

@@ -215,6 +215,7 @@ mod common;
 mod evidence;
 mod json;
 pub mod jsonl;
+mod mappings;
 mod sarif;
 mod table;
 

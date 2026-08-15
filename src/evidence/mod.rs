@@ -30,6 +30,12 @@ pub struct EvidencePayload {
     pub scanner_revision: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ruleset_sha256: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub intelligence_sha256: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub security_passport_sha256: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub admission_receipt: Option<crate::admission::AdmissionReceiptContext>,
     pub policy_sha256: String,
     pub trust_store_sha256: String,
     pub runtime: Option<Value>,
@@ -66,6 +72,9 @@ pub struct EvidenceContext<'a> {
     pub trust_store: &'a TrustStore,
     pub runtime: Option<&'a RuntimeEvaluation>,
     pub binding: Option<&'a BindingRecord>,
+    pub intelligence_sha256: Option<&'a str>,
+    pub security_passport_sha256: Option<&'a str>,
+    pub admission_receipt: Option<&'a crate::admission::AdmissionReceiptContext>,
     pub decision: &'a str,
     pub details: Value,
 }
@@ -85,6 +94,9 @@ pub fn create_signed(context: EvidenceContext<'_>, private_key: &Path) -> Result
         detector_contract: "layerfault-security-contract".to_owned(),
         scanner_revision: Some(crate::explain::scanner_revision().to_owned()),
         ruleset_sha256: Some(crate::explain::ruleset_sha256().to_owned()),
+        intelligence_sha256: context.intelligence_sha256.map(ToOwned::to_owned),
+        security_passport_sha256: context.security_passport_sha256.map(ToOwned::to_owned),
+        admission_receipt: context.admission_receipt.cloned(),
         policy_sha256: digest(&policy_bytes),
         trust_store_sha256: digest(&trust_bytes),
         runtime: context.runtime.map(serde_json::to_value).transpose()?,

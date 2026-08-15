@@ -93,6 +93,10 @@ pub struct ModelSnapshot {
     pub component_hashes: BTreeMap<String, String>,
     pub package_members: Vec<PackageMemberSummary>,
     pub claims: BTreeMap<String, Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tokenizer_security_digest: Option<String>,
+    #[serde(default)]
+    pub tokenizer_security_finding_count: u64,
 }
 
 pub fn build_snapshot(path: &Path) -> Result<ModelSnapshot> {
@@ -213,6 +217,8 @@ pub fn snapshot_artifact(path: &Path) -> Result<ModelSnapshot> {
         component_hashes: components,
         package_members: Vec::new(),
         claims,
+        tokenizer_security_digest: None,
+        tokenizer_security_finding_count: 0,
     })
 }
 
@@ -384,6 +390,8 @@ fn finish_package_snapshot(
         component_hashes,
         package_members,
         claims,
+        tokenizer_security_digest: None,
+        tokenizer_security_finding_count: 0,
     })
 }
 
@@ -720,6 +728,10 @@ fn extract_claims(value: &Value, prefix: &str, out: &mut BTreeMap<String, Value>
         "target_modules",
         "task_type",
         "modules_to_save",
+        "auto_map",
+        "trust_remote_code",
+        "sentence_transformers",
+        "sbert_ce_default_activation_function",
     ] {
         if let Some(value) = obj.get(key) {
             out.insert(format!("{prefix}.{key}"), value.clone());

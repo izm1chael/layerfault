@@ -4,6 +4,7 @@
 //! disassembles the documented protocol 0-5 opcode stream far enough to resolve
 //! GLOBAL/STACK_GLOBAL references and dangerous construction primitives.
 
+use crate::assurance::AnalysisCompleteness;
 use crate::finding_evidence::{
     byte_range_evidence, serialization_opcode, EvidenceSubject, FindingBuilder,
 };
@@ -99,14 +100,37 @@ pub struct OpcodeSite {
     pub byte_offset: u64,
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct PickleAnalysis {
+    pub completeness: AnalysisCompleteness,
+    pub unresolved_execution: Vec<UnresolvedExecutionPrimitive>,
     pub globals: BTreeSet<String>,
     pub unknown_globals: BTreeSet<String>,
     pub dangerous: BTreeSet<String>,
     pub opcode_count: usize,
     /// Bounded, ordered positions for the entries above.
     pub sites: Vec<OpcodeSite>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct UnresolvedExecutionPrimitive {
+    pub opcode: String,
+    pub byte_offset: u64,
+    pub reason: String,
+}
+
+impl Default for PickleAnalysis {
+    fn default() -> Self {
+        Self {
+            completeness: AnalysisCompleteness::Complete,
+            unresolved_execution: Vec::new(),
+            globals: BTreeSet::new(),
+            unknown_globals: BTreeSet::new(),
+            dangerous: BTreeSet::new(),
+            opcode_count: 0,
+            sites: Vec::new(),
+        }
+    }
 }
 
 impl PickleAnalysis {
@@ -274,6 +298,24 @@ fn finding_from_analysis(
             builder = builder.evidence(opcode_evidence(&subject, &analysis, value));
         }
         return builder.finish();
+    }
+    if !analysis.unresolved_execution.is_empty() {
+        return FindingBuilder::new(
+            "LF-ASSURANCE-PICKLE-UNRESOLVED-EXECUTION",
+            CheckType::ScannerAssurance,
+            ScanStatus::Fail,
+        )
+        .class(FindingClass::Structural)
+        .confidence(Confidence::High)
+        .digest(identity)
+        .media_type(media)
+        .subject(subject)
+        .detail(format!(
+            "{label} contains execution-capable pickle primitives that could not be fully resolved"
+        ))
+        .match_note(analysis.unresolved_execution[0].reason.clone())
+        .started(started)
+        .finish();
     }
     if !unknown.is_empty() {
         let mut builder = FindingBuilder::new(
@@ -683,6 +725,7 @@ pub(crate) fn analyze_reader<R: Read + Seek>(
                     }
                     state.push(StackValue::Constructed(name.to_owned()))?;
                 } else {
+                    state.record_unresolved("REDUCE", "callable could not be resolved statically");
                     state.mark_dangerous("unresolved callable used by REDUCE".to_owned());
                     state.push(StackValue::Other)?;
                 }
@@ -744,10 +787,12 @@ pub(crate) fn analyze_reader<R: Read + Seek>(
                 }
             }
             b'P' => {
+                state.record_unresolved("PERSID", "persistent ID resolution is application-defined and may invoke external object loading");
                 skip_line(&mut reader, &mut pos, len, MAX_TRACKED_STRING_BYTES)?;
                 state.push(StackValue::Other)?;
             }
             b'Q' => {
+                state.record_unresolved("BINPERSID", "persistent ID resolution is application-defined and may invoke external object loading");
                 state.pop();
                 state.push(StackValue::Other)?;
             }
@@ -867,9 +912,25 @@ impl ParserState {
         }
     }
     fn record_extension(&mut self, code: u32) {
+        self.record_unresolved(
+            "EXT",
+            &format!("extension registry code {code} requires environment-dependent resolution"),
+        );
         self.mark_dangerous(format!(
             "unresolved pickle extension code {code}; EXT registry resolution is environment-dependent"
         ));
+    }
+    fn record_unresolved(&mut self, opcode: &str, reason: &str) {
+        self.analysis.completeness = AnalysisCompleteness::Partial;
+        if self.analysis.unresolved_execution.len() < MAX_OPCODE_SITES {
+            self.analysis
+                .unresolved_execution
+                .push(UnresolvedExecutionPrimitive {
+                    opcode: opcode.to_owned(),
+                    byte_offset: self.current_offset,
+                    reason: reason.to_owned(),
+                });
+        }
     }
     fn record_constructor(&mut self, name: Option<&str>, opcode: &str) {
         match name {

@@ -82,6 +82,184 @@ pub(crate) fn run_evidence(args: EvidenceArgs) -> Result<()> {
                 std::process::exit(1);
             }
         }
+        EvidenceCommand::Admit {
+            target,
+            runtime,
+            private_key,
+            output,
+            policy: profile,
+            policy_file,
+            trust_store,
+        } => {
+            if target.is_dir() {
+                return Err(anyhow!("evidence admit currently requires a concrete artifact file; package receipts should bind the final admitted artifact/package workflow"));
+            }
+            let profile = PolicyProfile::parse(&profile)?;
+            let policy_doc = match policy_file.as_deref() {
+                Some(path) => PolicyDocument::load(path)?,
+                None => PolicyDocument::builtin(profile),
+            };
+            let effective = policy_doc.effective();
+            let trust = TrustStore::load(trust_store.as_deref())?;
+            let snapshot = layerfault::modelmeta::build_snapshot(&target)?;
+            let identity = snapshot
+                .identity
+                .artifact_sha256
+                .clone()
+                .unwrap_or_else(|| snapshot.identity.canonical.clone());
+            let admission = admission::inspect_and_evaluate(
+                &target,
+                &identity,
+                SourceKind::File,
+                &effective,
+                snapshot.architecture.architecture.as_deref(),
+                None,
+                None,
+            )?;
+            let layered = layerfault::model::identity::build(
+                &target,
+                None,
+                &snapshot,
+                None,
+                None,
+                None,
+                &Default::default(),
+            )?;
+            let kind = layerfault::runtime_security::RuntimeKind::parse(&runtime)?;
+            let posture = layerfault::runtime_security::audit_kind(kind).into_iter().next()
+                .ok_or_else(|| anyhow!("runtime '{}' was not discovered; receipt creation requires observed runtime identity", kind.as_str()))?;
+            let subject = layerfault::finding_evidence::EvidenceSubject::identity(
+                &identity,
+                "application/vnd.layerfault.model+json",
+            )
+            .with_sha256(snapshot.identity.artifact_sha256.clone());
+            let mut model_context =
+                layerfault::runtime_security::ModelSecurityContext::from_artifact_report(
+                    subject,
+                    Some(snapshot.format.clone()),
+                    snapshot.architecture.architecture.clone(),
+                    &admission.report.results,
+                    layerfault::coverage::Coverage::complete(1, admission.report.size),
+                );
+            model_context.merge_snapshot(&snapshot);
+            let pack = layerfault::intelligence::builtin_pack()?;
+            let exploitability =
+                layerfault::runtime_security::assess_from_pack(&posture, &model_context, &pack);
+            let compatibility = layerfault::runtime_security::assess_compatibility(
+                &posture,
+                &model_context,
+                &exploitability,
+            );
+            let receipt = admission::build_receipt(
+                &admission,
+                Some(&layered),
+                Some(&posture),
+                Some(&compatibility),
+                &exploitability,
+                None,
+                None,
+            )?;
+            let envelope = evidence::create_signed(
+                evidence::EvidenceContext {
+                    subject: &identity,
+                    source: "local-admission",
+                    subject_fingerprint: admission.report.sha256.as_deref(),
+                    merkle_identity: layered.package.as_ref().map(|v| v.value.as_str()),
+                    policy: &effective,
+                    trust_store: &trust,
+                    runtime: None,
+                    binding: None,
+                    intelligence_sha256: None,
+                    security_passport_sha256: None,
+                    admission_receipt: Some(&receipt),
+                    decision: "ALLOW",
+                    details: serde_json::json!({"runtime": posture, "compatibility": compatibility, "exploitability": exploitability}),
+                },
+                &private_key,
+            )?;
+            evidence::write_signed(&output, &envelope)?;
+            println!("{}", output.display());
+        }
+        EvidenceCommand::Gate {
+            receipt,
+            target,
+            runtime,
+            trust_store,
+            accept_stale_receipt,
+            override_reason,
+            json,
+        } => {
+            let trust = TrustStore::load(trust_store.as_deref())?;
+            let mut result = admission::verify_for_execution(
+                &receipt,
+                &trust,
+                &target,
+                runtime.as_deref(),
+                None,
+                None,
+            )?;
+            if accept_stale_receipt && !result.allowed {
+                let reason = override_reason
+                    .as_deref()
+                    .ok_or_else(|| anyhow!("--accept-stale-receipt requires --override-reason"))?;
+                if reason.trim().len() < 8 {
+                    return Err(anyhow!("--override-reason must be at least 8 characters"));
+                }
+                // Staleness may waive ruleset/intelligence/passport freshness only. Artifact/runtime identity,
+                // signature, trust, authorization and ALLOW decision remain mandatory and cannot be bypassed.
+                if result.evidence_valid
+                    && result.evidence_trusted
+                    && result.artifact_match
+                    && result.runtime_match
+                {
+                    let only_stale = result.reasons.iter().all(|r| {
+                        r.contains("ruleset digest")
+                            || r.contains("security intelligence digest")
+                            || r.contains("security passport digest")
+                    });
+                    if only_stale {
+                        result.allowed = true;
+                        layerfault::policy::record_policy_override(
+                            &layerfault::policy::OverrideRecord {
+                                version: 1,
+                                created_unix: layerfault::paths::now_unix(),
+                                model: target.display().to_string(),
+                                reason: reason.to_owned(),
+                                profile: PolicyProfile::Workstation,
+                                trust_state: layerfault::provenance::TrustState::Trusted,
+                                scanner_exit_code: 0,
+                            },
+                            None,
+                        )?;
+                    }
+                }
+            }
+            if json {
+                println!("{}", serde_json::to_string_pretty(&result)?);
+            } else {
+                println!(
+                    "Execution gate: {}",
+                    if result.allowed { "ALLOW" } else { "BLOCK" }
+                );
+                for reason in &result.reasons {
+                    println!("- {reason}");
+                }
+            }
+            if !result.allowed {
+                std::process::exit(3);
+            }
+        }
+        EvidenceCommand::Predicate { receipt, output } => {
+            let envelope = evidence::load(&receipt)?;
+            let statement = serde_json::json!({
+                "_type": "https://in-toto.io/Statement/v1",
+                "subject": [{"name": envelope.payload.subject, "digest": {"sha256": envelope.payload.subject_fingerprint.clone().unwrap_or_default().trim_start_matches("sha256:")}}],
+                "predicateType": "https://layerfault.dev/attestation/admission/v1",
+                "predicate": {"evidence": envelope}
+            });
+            layerfault::paths::write_private(&output, &serde_json::to_vec_pretty(&statement)?)?;
+            println!("{}", output.display());
+        }
     }
     Ok(())
 }
@@ -192,6 +370,9 @@ pub(crate) fn maybe_write_evidence(
             trust_store: &prepared.trust_store,
             runtime,
             binding,
+            intelligence_sha256: None,
+            security_passport_sha256: None,
+            admission_receipt: None,
             decision,
             details,
         },

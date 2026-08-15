@@ -1,4 +1,5 @@
 use super::super::*;
+use anyhow::bail;
 
 pub(crate) fn run_guarded(args: RunArgs) -> Result<()> {
     match SourceKind::parse(&args.source)? {
@@ -13,6 +14,9 @@ pub(crate) fn run_guarded(args: RunArgs) -> Result<()> {
 }
 
 pub(crate) fn run_guarded_ollama(args: RunArgs) -> Result<()> {
+    if args.require_receipt.is_some() {
+        return Err(anyhow!("--require-receipt currently requires a concrete local artifact path; use the file/llama-cpp or LM Studio guarded path rather than an Ollama store identity"));
+    }
     let prepared = prepare(&args.common)?;
     let base_dir = app::resolve_base_dir(args.common.ollama_dir.as_deref())?;
     let options = scan_options(&args.common, &prepared, false);
@@ -99,6 +103,12 @@ pub(crate) fn run_guarded_lmstudio(args: RunArgs) -> Result<()> {
         Some("lms"),
     )?;
     commands::security::enforce_runtime_evaluation(&runtime)?;
+    enforce_required_receipt(
+        &args,
+        &prepared.trust_store,
+        &item.path,
+        Path::new(&runtime.runtime.executable),
+    )?;
     let second = artifact::inspect(&item.path, ArtifactScanMode::Full)?;
     let expected = result
         .report
@@ -158,6 +168,12 @@ pub(crate) fn run_guarded_llama(args: RunArgs, _serve: bool) -> Result<()> {
         Some("llama-cli"),
     )?;
     commands::security::enforce_runtime_evaluation(&runtime)?;
+    enforce_required_receipt(
+        &args,
+        &prepared.trust_store,
+        &path,
+        Path::new(&runtime.runtime.executable),
+    )?;
     let digest = result
         .report
         .sha256
@@ -401,4 +417,61 @@ fn artifact_run_decision(
     } else {
         "ALLOW"
     }
+}
+
+fn enforce_required_receipt(
+    args: &RunArgs,
+    trust: &TrustStore,
+    artifact: &Path,
+    runtime: &Path,
+) -> Result<()> {
+    let Some(receipt) = args.require_receipt.as_deref() else {
+        return Ok(());
+    };
+    let mut verification =
+        admission::verify_for_execution(receipt, trust, artifact, Some(runtime), None, None)?;
+    if verification.allowed {
+        return Ok(());
+    }
+    if args.accept_stale_receipt {
+        let reason = args
+            .override_reason
+            .as_deref()
+            .ok_or_else(|| anyhow!("--accept-stale-receipt requires --override-reason"))?;
+        if reason.trim().len() < 8 {
+            return Err(anyhow!("--override-reason must be at least 8 characters"));
+        }
+        let only_stale = verification.reasons.iter().all(|r| {
+            r.contains("ruleset digest")
+                || r.contains("security intelligence digest")
+                || r.contains("security passport digest")
+        });
+        if verification.evidence_valid
+            && verification.evidence_trusted
+            && verification.artifact_match
+            && verification.runtime_match
+            && only_stale
+        {
+            verification.allowed = true;
+            policy::record_policy_override(
+                &policy::OverrideRecord {
+                    version: 1,
+                    created_unix: layerfault::paths::now_unix(),
+                    model: artifact.display().to_string(),
+                    reason: reason.to_owned(),
+                    profile: PolicyProfile::Workstation,
+                    trust_state: provenance::TrustState::Trusted,
+                    scanner_exit_code: 0,
+                },
+                args.override_log.as_deref(),
+            )?;
+        }
+    }
+    if !verification.allowed {
+        bail!(
+            "signed admission receipt gate blocked execution: {}",
+            verification.reasons.join("; ")
+        );
+    }
+    Ok(())
 }

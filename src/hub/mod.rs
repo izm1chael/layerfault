@@ -4,6 +4,7 @@
 
 pub mod cache;
 mod client;
+pub mod preflight;
 mod types;
 
 pub use client::{token_from_env, verify_webhook_secret, HubClient};

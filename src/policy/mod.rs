@@ -1,165 +1,22 @@
 use crate::provenance::TrustState;
 use crate::scanner::{Confidence, FindingClass, LayerScanResult, ScanStatus};
 use crate::trust::glob_match;
-use anyhow::{anyhow, bail, Context, Result};
+use anyhow::{anyhow, Context, Result};
 use std::path::Path;
 
 const MAX_POLICY_BYTES: u64 = 2 * 1024 * 1024;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum PolicyProfile {
-    Permissive,
-    Workstation,
-    Ci,
-    Strict,
-}
+mod builtin;
+mod evaluate;
+mod load;
+mod override_log;
+mod types;
 
-impl PolicyProfile {
-    pub fn parse(value: &str) -> Result<Self> {
-        match value.to_ascii_lowercase().as_str() {
-            "permissive" => Ok(Self::Permissive),
-            "workstation" => Ok(Self::Workstation),
-            "ci" => Ok(Self::Ci),
-            "strict" => Ok(Self::Strict),
-            other => Err(anyhow!(
-                "Unknown policy profile '{other}'. Use permissive, workstation, ci, or strict"
-            )),
-        }
-    }
-}
-
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct Suppression {
-    pub rule_id: String,
-    #[serde(default = "default_model_pattern")]
-    pub model: String,
-    pub reason: String,
-    #[serde(default)]
-    pub owner: Option<String>,
-    #[serde(default)]
-    pub reference: Option<String>,
-    #[serde(default)]
-    pub expires_unix: Option<u64>,
-}
-
-fn default_model_pattern() -> String {
-    "*".to_owned()
-}
-
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct PolicyDocument {
-    pub version: u32,
-    pub profile: PolicyProfile,
-    #[serde(default)]
-    pub require_trusted_attestation: Option<bool>,
-    #[serde(default)]
-    pub block_unknown_layers: Option<bool>,
-    #[serde(default)]
-    pub block_on_warnings: Option<bool>,
-    #[serde(default)]
-    pub allowed_model_patterns: Vec<String>,
-    #[serde(default)]
-    pub denied_rule_ids: Vec<String>,
-    #[serde(default)]
-    pub suppressions: Vec<Suppression>,
-    #[serde(default)]
-    pub allowed_sources: Vec<String>,
-    #[serde(default)]
-    pub allowed_formats: Vec<String>,
-    #[serde(default)]
-    pub allowed_architectures: Vec<String>,
-    #[serde(default)]
-    pub allowed_quantizations: Vec<String>,
-    #[serde(default)]
-    pub max_model_bytes: Option<u64>,
-    #[serde(default)]
-    pub minimum_trusted_signatures: Option<usize>,
-    #[serde(default)]
-    pub required_signer_fingerprints: Vec<String>,
-    #[serde(default)]
-    pub block_finding_classes: Vec<FindingClass>,
-    #[serde(default)]
-    pub block_confidence_at_or_above: Option<Confidence>,
-}
-
-impl Default for PolicyDocument {
-    fn default() -> Self {
-        Self {
-            version: 1,
-            profile: PolicyProfile::Workstation,
-            require_trusted_attestation: None,
-            block_unknown_layers: None,
-            block_on_warnings: None,
-            allowed_model_patterns: Vec::new(),
-            denied_rule_ids: Vec::new(),
-            suppressions: Vec::new(),
-            allowed_sources: Vec::new(),
-            allowed_formats: Vec::new(),
-            allowed_architectures: Vec::new(),
-            allowed_quantizations: Vec::new(),
-            max_model_bytes: None,
-            minimum_trusted_signatures: None,
-            required_signer_fingerprints: Vec::new(),
-            block_finding_classes: Vec::new(),
-            block_confidence_at_or_above: None,
-        }
-    }
-}
-
-#[derive(Debug, Clone, serde::Serialize)]
-pub struct EffectivePolicy {
-    pub profile: PolicyProfile,
-    pub require_trusted_attestation: bool,
-    pub block_unknown_layers: bool,
-    pub block_on_warnings: bool,
-    pub allowed_model_patterns: Vec<String>,
-    pub denied_rule_ids: Vec<String>,
-    pub suppressions: Vec<Suppression>,
-    pub allowed_sources: Vec<String>,
-    pub allowed_formats: Vec<String>,
-    pub allowed_architectures: Vec<String>,
-    pub allowed_quantizations: Vec<String>,
-    pub max_model_bytes: Option<u64>,
-    pub minimum_trusted_signatures: usize,
-    pub required_signer_fingerprints: Vec<String>,
-    pub block_finding_classes: Vec<FindingClass>,
-    pub block_confidence_at_or_above: Option<Confidence>,
-}
-
-#[derive(Debug, Clone, Default)]
-pub struct PolicyContext {
-    pub source: Option<String>,
-    pub format: Option<String>,
-    pub architecture: Option<String>,
-    pub quantization: Option<String>,
-    pub model_size: Option<u64>,
-    pub trusted_signatures: usize,
-    pub signer_fingerprints: Vec<String>,
-    pub now_unix: u64,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
-#[serde(rename_all = "UPPERCASE")]
-pub enum PolicyAction {
-    Allow,
-    Warn,
-    Block,
-}
-
-#[derive(Debug, Clone, serde::Serialize)]
-pub struct PolicyDecision {
-    pub profile: PolicyProfile,
-    pub action: PolicyAction,
-    pub reasons: Vec<String>,
-    pub suppressed_rule_ids: Vec<String>,
-    /// Evidence that references the underlying scanner findings behind
-    /// finding-derived reasons above, so policy never appears to have
-    /// discovered the technical condition itself. Reasons with no associated
-    /// scanner finding (allowlist/size/signer-count checks) have none here.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub evidence: Vec<crate::finding_evidence::FindingEvidence>,
-}
+pub use override_log::{record_policy_override, OverrideRecord};
+pub use types::{
+    BackdoorSignalAction, EffectivePolicy, PolicyAction, PolicyContext, PolicyDecision,
+    PolicyDocument, PolicyProfile, Suppression,
+};
 
 impl PolicyDocument {
     pub fn builtin(profile: PolicyProfile) -> Self {
@@ -228,11 +85,182 @@ impl PolicyDocument {
     }
 
     pub fn effective(&self) -> EffectivePolicy {
-        let (require_trusted, block_unknown, block_warn) = match self.profile {
-            PolicyProfile::Permissive => (false, false, false),
-            PolicyProfile::Workstation => (false, false, false),
-            PolicyProfile::Ci => (false, true, false),
-            PolicyProfile::Strict => (true, true, true),
+        let (
+            require_trusted,
+            block_unknown,
+            block_warn,
+            complete,
+            current_intel,
+            intel_age,
+            block_exploit,
+            require_compat,
+            allow_custom,
+            pinned_remote,
+            receipt,
+            identity,
+            lineage,
+            backdoor,
+        ) = match self.profile {
+            PolicyProfile::Permissive => (
+                false,
+                false,
+                false,
+                false,
+                false,
+                None,
+                false,
+                false,
+                true,
+                false,
+                false,
+                false,
+                false,
+                BackdoorSignalAction::Ignore,
+            ),
+            PolicyProfile::Workstation => (
+                false,
+                false,
+                false,
+                false,
+                false,
+                None,
+                false,
+                false,
+                true,
+                false,
+                false,
+                false,
+                false,
+                BackdoorSignalAction::Ignore,
+            ),
+            PolicyProfile::Ci => (
+                false,
+                true,
+                false,
+                false,
+                false,
+                None,
+                false,
+                false,
+                true,
+                false,
+                false,
+                false,
+                false,
+                BackdoorSignalAction::Ignore,
+            ),
+            PolicyProfile::Strict => (
+                true,
+                true,
+                true,
+                false,
+                false,
+                None,
+                false,
+                false,
+                true,
+                false,
+                false,
+                false,
+                false,
+                BackdoorSignalAction::Ignore,
+            ),
+            PolicyProfile::PersonalLocal => (
+                false,
+                false,
+                false,
+                false,
+                false,
+                None,
+                true,
+                false,
+                false,
+                false,
+                false,
+                false,
+                false,
+                BackdoorSignalAction::Warn,
+            ),
+            PolicyProfile::Research => (
+                false,
+                false,
+                false,
+                false,
+                false,
+                None,
+                true,
+                false,
+                true,
+                false,
+                false,
+                false,
+                false,
+                BackdoorSignalAction::Warn,
+            ),
+            PolicyProfile::Enterprise => (
+                false,
+                true,
+                false,
+                true,
+                true,
+                Some(30),
+                true,
+                true,
+                false,
+                true,
+                false,
+                true,
+                false,
+                BackdoorSignalAction::Warn,
+            ),
+            PolicyProfile::Production => (
+                false,
+                true,
+                false,
+                true,
+                true,
+                Some(30),
+                true,
+                true,
+                false,
+                true,
+                true,
+                true,
+                true,
+                BackdoorSignalAction::BlockMultiSignal,
+            ),
+            PolicyProfile::AirGapped => (
+                false,
+                true,
+                false,
+                true,
+                false,
+                None,
+                true,
+                true,
+                false,
+                true,
+                true,
+                true,
+                true,
+                BackdoorSignalAction::BlockMultiSignal,
+            ),
+            PolicyProfile::HighAssurance => (
+                true,
+                true,
+                true,
+                true,
+                true,
+                Some(14),
+                true,
+                true,
+                false,
+                true,
+                true,
+                true,
+                true,
+                BackdoorSignalAction::BlockAnyReproducibleTrigger,
+            ),
         };
         EffectivePolicy {
             profile: self.profile,
@@ -255,6 +283,27 @@ impl PolicyDocument {
             required_signer_fingerprints: self.required_signer_fingerprints.clone(),
             block_finding_classes: self.block_finding_classes.clone(),
             block_confidence_at_or_above: self.block_confidence_at_or_above,
+            require_complete_coverage: self.require_complete_coverage.unwrap_or(complete),
+            require_current_intelligence: self
+                .require_current_intelligence
+                .unwrap_or(current_intel),
+            max_intelligence_age_days: self.max_intelligence_age_days.or(intel_age),
+            block_known_runtime_exploitability: self
+                .block_known_runtime_exploitability
+                .unwrap_or(block_exploit),
+            require_runtime_compatibility: self
+                .require_runtime_compatibility
+                .unwrap_or(require_compat),
+            allow_custom_code: self.allow_custom_code.unwrap_or(allow_custom),
+            require_pinned_remote_revision: self
+                .require_pinned_remote_revision
+                .unwrap_or(pinned_remote),
+            require_admission_receipt: self.require_admission_receipt.unwrap_or(receipt),
+            require_layered_identity: self.require_layered_identity.unwrap_or(identity),
+            require_lineage_for_derived_models: self
+                .require_lineage_for_derived_models
+                .unwrap_or(lineage),
+            backdoor_signal_action: self.backdoor_signal_action.unwrap_or(backdoor),
         }
     }
 }
@@ -451,6 +500,121 @@ impl EffectivePolicy {
                 ScanStatus::Pass => {}
             }
         }
+        if self.require_complete_coverage && context.coverage_complete != Some(true) {
+            block_reasons.push("Policy requires complete scanner coverage".to_owned());
+        }
+        if self.require_current_intelligence {
+            if context.intelligence_verified != Some(true) {
+                block_reasons
+                    .push("Policy requires verified current security intelligence".to_owned());
+            }
+            if let Some(max_days) = self.max_intelligence_age_days {
+                match context.intelligence_age_days {
+                    Some(age) if age <= max_days => {}
+                    Some(age) => block_reasons.push(format!("Security intelligence age {age} days exceeds policy maximum {max_days} days")),
+                    None => block_reasons.push("Policy requires a known security intelligence age".to_owned()),
+                }
+            }
+        }
+        if self.block_known_runtime_exploitability
+            && context.runtime_exploitability_blocking == Some(true)
+        {
+            block_reasons.push(
+                "Selected runtime has known blocking exploitability for this model/context"
+                    .to_owned(),
+            );
+        }
+        if self.require_runtime_compatibility
+            && !matches!(
+                context.runtime_compatibility,
+                Some(crate::runtime_security::CompatibilityState::Compatible)
+            )
+        {
+            block_reasons
+                .push("Policy requires positively established runtime compatibility".to_owned());
+        }
+        let finding_custom_code = results.iter().any(|result| {
+            matches!(
+                rule_id(result).as_str(),
+                "LF-PACKAGE-CODE" | "LF-CODE-AUTO-MAP" | "LF-CONFIG-DYNAMIC-IMPORT"
+            )
+        });
+        if !self.allow_custom_code
+            && (context.custom_code_present == Some(true) || finding_custom_code)
+        {
+            block_reasons.push("Custom executable model code is forbidden by policy".to_owned());
+        }
+        let remote_source = context.source.as_deref().is_some_and(|source| {
+            matches!(
+                source.to_ascii_lowercase().as_str(),
+                "huggingface" | "hugging-face" | "hf" | "hub" | "remote" | "import"
+            )
+        });
+        if self.require_pinned_remote_revision
+            && remote_source
+            && context.remote_revision_pinned != Some(true)
+        {
+            block_reasons.push(
+                "Policy requires immutable revision pinning for remote/imported artifacts"
+                    .to_owned(),
+            );
+        }
+        if self.require_admission_receipt && context.admission_receipt_present != Some(true) {
+            block_reasons.push("Policy requires a valid admission receipt".to_owned());
+        }
+        if self.require_layered_identity && context.layered_identity_complete != Some(true) {
+            block_reasons.push("Policy requires complete layered model identity".to_owned());
+        }
+        if self.require_lineage_for_derived_models
+            && context.derived_model == Some(true)
+            && !matches!(
+                context.lineage_consistency,
+                Some(crate::model::lineage::LineageConsistency::Consistent)
+            )
+        {
+            block_reasons
+                .push("Policy requires consistent verified lineage for derived models".to_owned());
+        }
+        match self.backdoor_signal_action {
+            BackdoorSignalAction::Ignore => {}
+            BackdoorSignalAction::Warn => {
+                if context.backdoor_static_signals > 0
+                    || context.reproducible_trigger_signals > 0
+                    || context.backdoor_multi_signal
+                {
+                    warn_reasons.push(
+                        "Backdoor forensic signals are present; empirical review is required"
+                            .to_owned(),
+                    );
+                }
+            }
+            BackdoorSignalAction::BlockMultiSignal => {
+                if context.backdoor_multi_signal
+                    || results
+                        .iter()
+                        .any(|r| rule_id(r) == "LF-CORR-BACKDOOR-MULTI-SIGNAL")
+                {
+                    block_reasons.push(
+                        "Multi-signal backdoor correlation is blocking under this profile"
+                            .to_owned(),
+                    );
+                }
+            }
+            BackdoorSignalAction::BlockAnyReproducibleTrigger => {
+                if context.backdoor_multi_signal
+                    || context.reproducible_trigger_signals > 0
+                    || results.iter().any(|r| {
+                        matches!(
+                            rule_id(r).as_str(),
+                            "LF-CORR-BACKDOOR-MULTI-SIGNAL" | "LF-BACKDOOR-TRIGGER-REPRODUCIBLE"
+                        )
+                    })
+                {
+                    block_reasons.push("Reproducible trigger or multi-signal backdoor evidence is blocking under this profile".to_owned());
+                }
+            }
+        }
+
         suppressed.sort();
         suppressed.dedup();
         block_reasons.sort();
@@ -561,76 +725,6 @@ fn suppression_allowed(result: &LayerScanResult) -> bool {
             | FindingClass::Operational
             | FindingClass::Attestation
     )
-}
-
-#[derive(Debug, Clone, serde::Serialize)]
-pub struct OverrideRecord {
-    pub version: u32,
-    pub created_unix: u64,
-    pub model: String,
-    pub reason: String,
-    pub profile: PolicyProfile,
-    pub trust_state: crate::provenance::TrustState,
-    pub scanner_exit_code: i32,
-}
-
-pub fn record_policy_override(
-    record: &OverrideRecord,
-    path: Option<&Path>,
-) -> Result<std::path::PathBuf> {
-    use std::fs::OpenOptions;
-    use std::io::Write;
-    if record.reason.trim().len() < 8 {
-        return Err(anyhow!(
-            "Policy override reason must be at least 8 characters"
-        ));
-    }
-    let path = match path {
-        Some(path) => path.to_path_buf(),
-        None => crate::paths::config_dir()?.join("override-audit.jsonl"),
-    };
-    // `Path::parent()` returns `Some("")` for a bare relative filename (not
-    // `None`), so the empty-parent case must be folded into "." explicitly.
-    let parent = match path.parent() {
-        None => bail!("Override log path has no parent"),
-        Some(parent) if parent.as_os_str().is_empty() => Path::new("."),
-        Some(parent) => parent,
-    };
-    crate::paths::ensure_private_dir(parent)?;
-    match std::fs::symlink_metadata(&path) {
-        Ok(metadata) if metadata.file_type().is_symlink() => {
-            return Err(anyhow!(
-                "Refusing to append to symlinked override log '{}'",
-                path.display()
-            ))
-        }
-        Ok(metadata) if !metadata.is_file() => {
-            return Err(anyhow!(
-                "Override log '{}' is not a regular file",
-                path.display()
-            ))
-        }
-        Ok(_) => {}
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-        Err(error) => return Err(error.into()),
-    }
-    let mut options = OpenOptions::new();
-    options.create(true).append(true);
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::OpenOptionsExt;
-        options
-            .mode(0o600)
-            .custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC);
-    }
-    let mut file = options
-        .open(&path)
-        .with_context(|| format!("Unable to open override audit log '{}'", path.display()))?;
-    let mut line = serde_json::to_vec(record)?;
-    line.push(b'\n');
-    file.write_all(&line)?;
-    file.sync_data()?;
-    Ok(path)
 }
 
 #[cfg(test)]
