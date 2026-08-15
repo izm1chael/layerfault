@@ -67,6 +67,27 @@ pub fn validated_relative_path(value: &str, allow_curdir: bool) -> Result<PathBu
     Ok(output)
 }
 
+/// Return the final slash-delimited name from a portable logical path.
+/// This is string parsing only and never resolves or opens a filesystem path.
+pub fn portable_file_name(value: &str) -> &str {
+    value.rsplit(['/', '\\']).next().unwrap_or("")
+}
+
+/// Return the final extension from a portable logical path without constructing
+/// a filesystem path from untrusted archive or package metadata.
+pub fn portable_extension(value: &str) -> &str {
+    portable_file_name(value)
+        .rsplit_once('.')
+        .map(|(_, extension)| extension)
+        .unwrap_or("")
+}
+
+/// Return the final file stem from a portable logical path without filesystem access.
+pub fn portable_file_stem(value: &str) -> &str {
+    let name = portable_file_name(value);
+    name.rsplit_once('.').map(|(stem, _)| stem).unwrap_or(name)
+}
+
 pub fn canonical_regular_file_within(
     root: &Path,
     relative: &str,

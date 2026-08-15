@@ -301,13 +301,13 @@ pub fn detect_runtime_executable(kind: RuntimeKind, executable: &Path) -> Result
     })
 }
 
-pub fn revalidate_runtime_identity(info: &RuntimeInfo) -> Result<()> {
-    let path = Path::new(&info.executable);
-    let current = runtime_executable_sha256(path)?;
+pub fn revalidate_runtime_identity(info: &RuntimeInfo, execution_target: &Path) -> Result<()> {
+    let canonical = crate::safeio::canonical_executable(execution_target)?;
+    let current = runtime_executable_sha256(&canonical)?;
     if current != info.executable_sha256 {
         bail!(
             "runtime executable '{}' changed after advisory/version admission (expected {}, got {})",
-            info.executable,
+            canonical.display(),
             info.executable_sha256,
             current
         );

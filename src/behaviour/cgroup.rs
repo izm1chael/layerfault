@@ -403,6 +403,12 @@ impl CgroupGuard {
             .as_deref()
             .unwrap_or("")
             .trim_start_matches('/');
+        let parent_rel = if parent_rel.is_empty() {
+            PathBuf::new()
+        } else {
+            crate::safeio::validated_relative_path(parent_rel, true)
+                .context("kernel cgroup path contains unsafe components")?
+        };
         let safe_nonce = sanitize_cgroup_nonce(nonce);
         let folder_name = format!(
             "layerfault-bwrap-{}-{}-{}",
@@ -410,7 +416,7 @@ impl CgroupGuard {
             CGROUP_SEQUENCE.fetch_add(1, Ordering::Relaxed),
             safe_nonce
         );
-        let rel_path = PathBuf::from(parent_rel).join(folder_name);
+        let rel_path = parent_rel.join(folder_name);
 
         fs.create_dir(&rel_path)
             .with_context(|| format!("unable to create child cgroup '{}'", rel_path.display()))?;

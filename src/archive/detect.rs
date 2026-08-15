@@ -29,11 +29,13 @@ pub struct DetectionResult {
 }
 
 pub fn detect_archive_format(path: &Path, prefix: &[u8]) -> DetectionResult {
-    let filename = path
-        .file_name()
-        .and_then(|v| v.to_str())
-        .unwrap_or("")
-        .to_ascii_lowercase();
+    detect_archive_format_name(&path.to_string_lossy(), prefix)
+}
+
+/// Detect an archive using a logical member name and in-memory prefix. This
+/// variant performs no filesystem access.
+pub fn detect_archive_format_name(name: &str, prefix: &[u8]) -> DetectionResult {
+    let filename = crate::safeio::portable_file_name(name).to_ascii_lowercase();
 
     let claimed = if filename.ends_with(".whl") {
         ArchiveFormat::Wheel

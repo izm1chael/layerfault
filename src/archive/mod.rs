@@ -4,7 +4,7 @@ pub mod member;
 pub mod tar;
 pub mod zip;
 
-pub use detect::{detect_archive_format, ArchiveFormat};
+pub use detect::{detect_archive_format, detect_archive_format_name, ArchiveFormat};
 pub use limits::{ArchiveBudgetTracker, ArchiveLimits};
 pub use member::{normalize_member_path, NormalizedMemberPath};
 

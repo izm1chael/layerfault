@@ -13,7 +13,7 @@ use anyhow::{anyhow, bail, Context, Result};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs::File;
 use std::io::{Cursor, Read, Seek, SeekFrom};
-use std::path::{Component, Path};
+use std::path::Path;
 use std::time::Instant;
 
 const MAX_PICKLE_MEMBERS: usize = 256;
@@ -493,18 +493,8 @@ fn scan_zip(
 }
 
 fn validate_zip_member_name(name: &str) -> Result<()> {
-    let path = Path::new(name);
-    if name.is_empty()
-        || path.is_absolute()
-        || path.components().any(|component| {
-            matches!(
-                component,
-                Component::ParentDir | Component::RootDir | Component::Prefix(_)
-            )
-        })
-    {
-        bail!("unsafe pickle ZIP member path '{name}'");
-    }
+    crate::safeio::validated_relative_path(name, false)
+        .map_err(|_| anyhow::anyhow!("unsafe pickle ZIP member path '{name}'"))?;
     Ok(())
 }
 

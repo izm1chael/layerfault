@@ -6,7 +6,7 @@ pub fn verify_lora(base: &Path, adapter: &Path, merged: &Path) -> Result<MergeAs
     let base_identity = crate::safeio::sha256_path(base).ok();
     let merged_identity = crate::safeio::sha256_path(merged).ok();
     let adapter_report = crate::model::lora::inspect_adapter(adapter, None)?;
-    let adapter_identity = crate::safeio::sha256_path(Path::new(&adapter_report.adapter_file)).ok();
+    let adapter_identity = crate::safeio::sha256_path(&adapter_report.adapter_path).ok();
     match crate::model::lora::verify_merge(base, adapter, merged) {
         Ok(report) => {
             let state = map_state(

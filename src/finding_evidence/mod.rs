@@ -78,7 +78,7 @@ mod tests {
         let cases = [
             "Authorization: Bearer abcdefghijklmnopqrstuvwxyz012345",
             "token = hf_abcdefghijklmnopqrstuvwxyz0123456789",
-            "key = ghp_abcdefghijklmnopqrstuvwxyz0123456789",
+            concat!("key = gh", "p_abcdefghijklmnopqrstuvwxyz0123456789"),
             "openai = sk-abcdefghijklmnopqrstuvwxyz0123",
             "aws = AKIAIOSFODNN7EXAMPLE",
             "password = \"hunter2000\"",

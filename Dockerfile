@@ -3,6 +3,7 @@ FROM rust:1.97.1-trixie AS build
 WORKDIR /src
 COPY Cargo.toml Cargo.lock build.rs ./
 COPY src ./src
+COPY helpers ./helpers
 COPY advisories ./advisories
 COPY schemas ./schemas
 COPY policies ./policies

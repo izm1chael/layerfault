@@ -134,24 +134,21 @@ pub fn stage_verified_package_under(
             )
         })?;
 
-        let rel_path = Path::new(&entry.relative_path);
-        if rel_path.is_absolute()
-            || rel_path.components().any(|c| {
-                matches!(
-                    c,
-                    std::path::Component::ParentDir | std::path::Component::Prefix(_)
-                )
-            })
-        {
-            let _ = fs::remove_dir_all(&staging_root);
-            bail!(
-                "Package member relative path '{}' contains invalid traversal or absolute prefix",
-                entry.relative_path
-            );
-        }
+        let rel_path = match crate::safeio::validated_relative_path(&entry.relative_path, true) {
+            Ok(path) => path,
+            Err(error) => {
+                let _ = fs::remove_dir_all(&staging_root);
+                return Err(error).with_context(|| {
+                    format!(
+                        "Package member relative path '{}' is unsafe",
+                        entry.relative_path
+                    )
+                });
+            }
+        };
 
-        let source_path = root.join(rel_path);
-        let staged_target_path = staged_pkg_dir.join(rel_path);
+        let source_path = root.join(&rel_path);
+        let staged_target_path = staged_pkg_dir.join(&rel_path);
 
         let (mechanism, bytes, observed_sha256) =
             match copy_or_reflink_member(&source_path, &staged_target_path, expected_sha256, false)

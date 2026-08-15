@@ -30,7 +30,7 @@ pub fn scan_package(path: &Path, identity: &str, media: &str) -> Result<Vec<Laye
         has_weights = true;
     }
 
-    if let Ok(entries) = std::fs::read_dir(path) {
+    if let Ok(entries) = crate::safeio::read_dir_nofollow(path) {
         for entry in entries.flatten() {
             let name = entry.file_name().to_string_lossy().to_string();
             if name.starts_with("modeling_") && name.ends_with(".py") {

@@ -45,6 +45,8 @@ pub struct LoraReport {
     pub root: String,
     pub config: LoraConfig,
     pub adapter_file: String,
+    #[serde(skip)]
+    pub(crate) adapter_path: PathBuf,
     pub base_compatible: Option<bool>,
     pub missing_target_modules: Vec<String>,
     pub tensors: Vec<LoraTensorAnalysis>,
@@ -210,6 +212,7 @@ pub fn inspect_adapter(
         root: root.display().to_string(),
         config,
         adapter_file: adapter_path.display().to_string(),
+        adapter_path,
         base_compatible,
         missing_target_modules: missing,
         tensors,

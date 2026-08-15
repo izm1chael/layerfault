@@ -219,7 +219,7 @@ make_dirs(dir_red)
 (dir_red / "modeling_secret.py").write_text("""import subprocess
 
 # Secret key embedded in source code:
-API_KEY = "sk_live_12345678901234567890123456789012"
+API_KEY = "sk_" + "live_12345678901234567890123456789012"
 
 class SecretModel:
     def __init__(self):

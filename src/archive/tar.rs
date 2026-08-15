@@ -446,11 +446,7 @@ fn dispatch_tar_member_scan(
 ) -> Result<Vec<LayerScanResult>> {
     let mut out = Vec::new();
     let file = open_readonly_nofollow(content_path)?;
-    let ext = Path::new(rel_path)
-        .extension()
-        .and_then(|v| v.to_str())
-        .unwrap_or("")
-        .to_ascii_lowercase();
+    let ext = crate::safeio::portable_extension(rel_path).to_ascii_lowercase();
 
     // Check if member is a nested archive
     let mut prefix_buf = [0_u8; 512];
@@ -459,7 +455,7 @@ fn dispatch_tar_member_scan(
     let n = cloned.read(&mut prefix_buf)?;
     let prefix = &prefix_buf[..n];
 
-    let detection = super::detect::detect_archive_format(Path::new(rel_path), prefix);
+    let detection = super::detect::detect_archive_format_name(rel_path, prefix);
     if detection.format != ArchiveFormat::Unknown {
         if budget.current_depth + 1 > budget.limits.max_depth
             || budget.total_nested_archives_seen + 1 > budget.limits.max_nested_archives
@@ -524,8 +520,7 @@ fn dispatch_tar_member_scan(
     }
 
     // Model artifact check
-    let identification =
-        crate::formats::ArtifactIdentification::identify(Path::new(rel_path), prefix);
+    let identification = crate::formats::ArtifactIdentification::identify_name(rel_path, prefix);
     if identification.selected != crate::formats::ArtifactFormat::Unknown
         || !identification.contradictions.is_empty()
     {

@@ -25,7 +25,7 @@ pub enum BaseRelation {
 
 pub fn inspect(root: &Path, expected_base: Option<&str>) -> Result<AdapterAssessment> {
     let report = crate::model::lora::inspect_adapter(root, None)?;
-    let digest = crate::safeio::sha256_path(Path::new(&report.adapter_file))?;
+    let digest = crate::safeio::sha256_path(&report.adapter_path)?;
     let mut observed_modules = report
         .tensors
         .iter()

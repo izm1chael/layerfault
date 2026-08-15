@@ -162,10 +162,7 @@ pub fn analyze_and_convert_findings(
 ) -> Result<Vec<crate::scanner::LayerScanResult>> {
     let analysis = analyze(relative_path, source, digest, auto_map_modules, limits)?;
 
-    let file_stem = std::path::Path::new(relative_path)
-        .file_stem()
-        .and_then(|s| s.to_str())
-        .unwrap_or("");
+    let file_stem = crate::safeio::portable_file_stem(relative_path);
     let is_auto_mapped = auto_map_modules.contains(file_stem);
 
     let reach_graph = ReachabilityGraph::compute(

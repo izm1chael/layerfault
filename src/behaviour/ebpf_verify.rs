@@ -218,7 +218,7 @@ fn helper_version(path: &Path) -> Option<String> {
         .map(|value| value.chars().take(64).collect())
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod tests {
     use super::*;
     use std::io::Write as _;

@@ -31,7 +31,13 @@ pub enum ContradictionKind {
 
 impl ArtifactIdentification {
     pub fn identify(path: &Path, prefix: &[u8]) -> Self {
-        let extension_claim = map_extension_claim(path);
+        Self::identify_name(&path.to_string_lossy(), prefix)
+    }
+
+    /// Identify content using a logical package or archive member name. This
+    /// avoids treating untrusted metadata as an operating-system path.
+    pub fn identify_name(name: &str, prefix: &[u8]) -> Self {
+        let extension_claim = map_extension_claim_name(name);
         let magic_candidates = probe_magic(prefix);
         let container_candidates = probe_container(prefix);
 
@@ -55,16 +61,12 @@ impl ArtifactIdentification {
 
 /// Map extension/filename role independently without reading file content.
 pub fn map_extension_claim(path: &Path) -> Option<ArtifactFormat> {
-    let name = path
-        .file_name()
-        .and_then(|v| v.to_str())
-        .unwrap_or("")
-        .to_ascii_lowercase();
-    let ext = path
-        .extension()
-        .and_then(|v| v.to_str())
-        .unwrap_or("")
-        .to_ascii_lowercase();
+    map_extension_claim_name(&path.to_string_lossy())
+}
+
+pub fn map_extension_claim_name(value: &str) -> Option<ArtifactFormat> {
+    let name = crate::safeio::portable_file_name(value).to_ascii_lowercase();
+    let ext = crate::safeio::portable_extension(value).to_ascii_lowercase();
 
     if name.ends_with(".safetensors.index.json") {
         Some(ArtifactFormat::SafetensorsIndex)

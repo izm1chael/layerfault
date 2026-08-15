@@ -64,7 +64,7 @@ pub fn write(dir: &Path, input: &BundleInput<'_>) -> Result<PathBuf> {
                 dir.display()
             );
         }
-        let mut entries = fs::read_dir(dir)
+        let mut entries = crate::safeio::read_dir_nofollow(dir)
             .with_context(|| format!("Reading evidence bundle directory '{}'", dir.display()))?;
         if entries.next().is_some() {
             bail!(
@@ -199,7 +199,7 @@ fn publish_bundle(temp_dir: &Path, dir: &Path) -> Result<()> {
 fn copy_dir_recursive(src: &Path, dst: &Path) -> Result<()> {
     fs::create_dir_all(dst)
         .with_context(|| format!("Creating evidence bundle directory '{}'", dst.display()))?;
-    for entry in fs::read_dir(src)
+    for entry in crate::safeio::read_dir_nofollow(src)
         .with_context(|| format!("Reading temporary bundle directory '{}'", src.display()))?
     {
         let entry = entry?;
@@ -236,36 +236,69 @@ impl<W: std::io::Write> std::io::Write for HashingWriter<W> {
 }
 
 fn write_hashed_bytes(dir: &Path, relative_name: &str, bytes: &[u8]) -> Result<String> {
-    let path = dir.join(relative_name);
-    let file = fs::File::create(&path)
-        .with_context(|| format!("Writing evidence bundle file '{}'", path.display()))?;
-    let mut writer = HashingWriter {
-        inner: file,
-        hasher: Sha256::new(),
+    let (path, mut temporary) = private_bundle_tempfile(dir, relative_name)?;
+    let digest = {
+        let mut writer = HashingWriter {
+            inner: temporary.as_file_mut(),
+            hasher: Sha256::new(),
+        };
+        writer
+            .write_all(bytes)
+            .with_context(|| format!("Writing evidence bundle file '{}'", path.display()))?;
+        writer
+            .flush()
+            .with_context(|| format!("Flushing evidence bundle file '{}'", path.display()))?;
+        hex::encode(writer.hasher.finalize())
     };
-    writer
-        .write_all(bytes)
-        .with_context(|| format!("Writing evidence bundle file '{}'", path.display()))?;
-    writer
-        .flush()
-        .with_context(|| format!("Flushing evidence bundle file '{}'", path.display()))?;
-    Ok(hex::encode(writer.hasher.finalize()))
+    persist_bundle_tempfile(temporary, &path)?;
+    Ok(digest)
 }
 
 fn write_hashed_json<T: Serialize>(dir: &Path, relative_name: &str, value: &T) -> Result<String> {
-    let path = dir.join(relative_name);
-    let file = fs::File::create(&path)
-        .with_context(|| format!("Writing evidence bundle file '{}'", path.display()))?;
-    let mut writer = HashingWriter {
-        inner: file,
-        hasher: Sha256::new(),
+    let (path, mut temporary) = private_bundle_tempfile(dir, relative_name)?;
+    let digest = {
+        let mut writer = HashingWriter {
+            inner: temporary.as_file_mut(),
+            hasher: Sha256::new(),
+        };
+        serde_json::to_writer_pretty(&mut writer, value)
+            .with_context(|| format!("Writing evidence bundle file '{}'", path.display()))?;
+        writer
+            .flush()
+            .with_context(|| format!("Flushing evidence bundle file '{}'", path.display()))?;
+        hex::encode(writer.hasher.finalize())
     };
-    serde_json::to_writer_pretty(&mut writer, value)
-        .with_context(|| format!("Writing evidence bundle file '{}'", path.display()))?;
-    writer
-        .flush()
-        .with_context(|| format!("Flushing evidence bundle file '{}'", path.display()))?;
-    Ok(hex::encode(writer.hasher.finalize()))
+    persist_bundle_tempfile(temporary, &path)?;
+    Ok(digest)
+}
+
+fn private_bundle_tempfile(
+    dir: &Path,
+    relative_name: &str,
+) -> Result<(PathBuf, tempfile::NamedTempFile)> {
+    let relative = crate::safeio::validated_relative_path(relative_name, false)?;
+    let path = dir.join(relative);
+    let parent = path
+        .parent()
+        .ok_or_else(|| anyhow!("evidence bundle member has no parent"))?;
+    crate::paths::ensure_private_dir(parent)?;
+    let temporary = tempfile::Builder::new()
+        .prefix(".bundle-member-")
+        .tempfile_in(parent)
+        .with_context(|| format!("Reserving evidence bundle file '{}'", path.display()))?;
+    Ok((path, temporary))
+}
+
+fn persist_bundle_tempfile(temporary: tempfile::NamedTempFile, path: &Path) -> Result<()> {
+    temporary
+        .as_file()
+        .sync_all()
+        .with_context(|| format!("Syncing evidence bundle file '{}'", path.display()))?;
+    temporary
+        .persist_noclobber(path)
+        .map_err(|error| error.error)
+        .with_context(|| format!("Publishing evidence bundle file '{}'", path.display()))?;
+    Ok(())
 }
 
 /// Sign a written bundle's manifest using the existing signed-evidence system.
