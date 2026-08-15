@@ -531,3 +531,7 @@ bash scripts/lab/prepare-active-fixtures.sh \
 ```
 
 Active corpus automation can set `LAYERFAULT_ACTIVE_PROBE_SUITE=/path/to/suite.json` to run a lab-specific deterministic trigger suite without modifying the manifest. Telemetry includes denied write/mutation attempts against protected read-only mounts as well as successful mutations inside the synthetic workspace.
+
+## Model security capabilities
+
+Layerfault supports signed data-only security intelligence, runtime posture assessment, model/runtime compatibility checks, layered identity and lineage verification, bounded model forensics, Hugging Face preflight, security passports, signed admission receipts, and inventory drift monitoring. See the focused documents in `docs/` for each capability.

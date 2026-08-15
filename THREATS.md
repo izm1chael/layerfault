@@ -372,3 +372,9 @@ Remote PostgreSQL URLs are upgraded to `sslmode=require` and use Rustls certific
 Model/revision and review/finding/advisory writes are database transactions. Schema migration version 2 adds cascading foreign keys for relational platform records on both SQLite and PostgreSQL. Existing orphaned data causes migration failure with a repair-required error rather than being silently discarded. Worker leases use renewable owner/token fencing, and stale workers cannot complete a reclaimed job.
 
 Hub crawling performs network retrieval before acquiring the shared web database lock, then holds the lock only while enqueueing the fetched page. Public HTTP quotas are maintained per source address with bounded bucket storage; health checks remain independent from client quotas.
+
+## Model and runtime security
+
+The threat model covers signed rollback-aware intelligence, runtime exploitability, model-controlled loading paths, tokenizer and chat-template manipulation, identity substitution, false lineage claims, hidden container payloads, probabilistic backdoor indicators, bounded trigger research, immutable-revision Hub preflight, signed admission receipts, and inventory approval drift.
+
+Unknown runtime/configuration state remains unknown. External intelligence never becomes executable logic. Static scanners do not execute model-controlled code. Remote preflight is deliberately incomplete until the exact pinned content is downloaded and admitted locally. Forensic carving reports evidence without extracting embedded payloads. Active trigger research remains behind existing sandbox/admission controls and always carries an empirical limitation boundary. Framework mappings are attached after detection and cannot create detector matches.

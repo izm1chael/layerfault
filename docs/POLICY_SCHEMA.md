@@ -1,6 +1,6 @@
 # Layerfault policy schema
 
-Policies are local JSON admission documents. The schema version remains `1` while compatible fields are added during development; automation should validate `version` and ignore no unknown fields because the Rust parser intentionally rejects malformed/unsupported documents.
+Policies are local JSON admission documents. The schema version remains `1` while compatible fields are added during development; automation should validate `version`. The Rust parser rejects malformed or unsupported documents.
 
 ```json
 {
@@ -33,6 +33,8 @@ Policies are local JSON admission documents. The schema version remains `1` whil
 
 ## Built-in profiles
 
+Legacy profiles retain their existing semantics. Additional profiles provide explicit defaults for personal, research, enterprise, production, air-gapped, and high-assurance environments.
+
 | Profile | Trusted attestation required | Unknown layers block | Warnings block |
 |---|---:|---:|---:|
 | permissive | no | no | no |
@@ -40,21 +42,23 @@ Policies are local JSON admission documents. The schema version remains `1` whil
 | ci | no | yes | no |
 | strict | yes | yes | yes |
 
-Explicit fields override profile defaults.
+Explicit fields override profile defaults. An omitted optional field uses the selected profile's default.
 
 ## Context controls
 
-The policy evaluator receives admission context separately from scanner evidence. Depending on source, available context includes source/runtime, artifact format, architecture, quantization, artifact/model size, trusted-signature count and signer fingerprints. A source adapter cannot manufacture missing cryptographic trust merely by identifying a runtime.
+The policy evaluator receives admission context separately from scanner evidence. Depending on source, available context includes runtime, artifact format, architecture, quantization, size, trusted-signature count, signer fingerprints, intelligence freshness, runtime exploitability, compatibility, remote revision identity, lineage, and backdoor indicators. Missing context remains unknown.
+
+The `research` profile may permit custom model code for static handling, but it never bypasses active-execution sandbox or advisory gates. High-assurance backdoor controls act on reproducible or correlated evidence; they do not prove that a model is safe or malicious.
 
 ## Signature threshold and pinning
 
-`minimum_trusted_signatures` is bounded to 32. `required_signer_fingerprints` contains full `sha256:<64 hex>` key fingerprints. Both requirements are independently enforced when configured. Signer fingerprints presented to the policy engine are trusted, active, namespace-authorized signers only; untrusted attestations remain visible as provenance findings but cannot satisfy signer-pinning requirements.
+`minimum_trusted_signatures` is bounded to 32. `required_signer_fingerprints` contains full `sha256:<64 hex>` key fingerprints. Both requirements are independently enforced when configured. Only trusted, active, namespace-authorized signers can satisfy signer requirements.
 
 ## Suppression safety
 
-Suppressions require a stable rule ID and a meaningful reason. `model` defaults to `*`; optional `owner`, `reference` and `expires_unix` support temporary, reviewable exceptions. Expired suppressions stop applying automatically.
+Suppressions require a stable rule ID and meaningful reason. `model` defaults to `*`; optional `owner`, `reference`, and `expires_unix` fields support reviewable exceptions. Expired suppressions stop applying automatically.
 
-Suppressions cannot hide integrity, structural, operational or attestation failures. Blocking evidence remains present in reports even where a suppressible policy/content finding is locally accepted.
+Suppressions cannot hide integrity, structural, operational, or attestation failures. Blocking evidence remains present in reports even where a suppressible policy finding is locally accepted.
 
 ## Policy tooling
 
