@@ -114,7 +114,40 @@ PY
 
 if command -v osv-scanner >/dev/null 2>&1; then
   log "OSV-Scanner"
-  osv-scanner scan source .
+  OSV_REPORT="$(mktemp)"
+  if ! osv-scanner scan source --format json --output-file "$OSV_REPORT" .; then
+    python3 - "$OSV_REPORT" <<'PY'
+import json
+from pathlib import Path
+import sys
+
+approved_unmaintained = {
+    'RUSTSEC-2024-0436',
+    'RUSTSEC-2025-0075',
+    'RUSTSEC-2025-0080',
+    'RUSTSEC-2025-0081',
+    'RUSTSEC-2025-0090',
+    'RUSTSEC-2025-0098',
+    'RUSTSEC-2025-0100',
+    'RUSTSEC-2025-0119',
+}
+report = json.loads(Path(sys.argv[1]).read_text())
+observed = {
+    vulnerability['id']
+    for result in report.get('results', [])
+    for package in result.get('packages', [])
+    for vulnerability in package.get('vulnerabilities', [])
+}
+for advisory in sorted(observed & approved_unmaintained):
+    print(f'WARN: OSV reports approved unmaintained transitive advisory {advisory}')
+blocking = observed - approved_unmaintained
+if blocking:
+    raise SystemExit(
+        'OSV reports unreviewed advisories: ' + ', '.join(sorted(blocking))
+    )
+PY
+  fi
+  rm -f "$OSV_REPORT"
 else
   echo "WARN: osv-scanner is not installed; skipping local OSV gate" >&2
 fi
