@@ -118,8 +118,7 @@ impl JournalLock {
                 }
                 Err(error)
                     if error.kind() == std::io::ErrorKind::AlreadyExists
-                        || (error.kind() == std::io::ErrorKind::PermissionDenied
-                            && path.exists()) =>
+                        || error.kind() == std::io::ErrorKind::PermissionDenied =>
                 {
                     if lock_is_stale(&path) {
                         match std::fs::remove_file(&path) {
