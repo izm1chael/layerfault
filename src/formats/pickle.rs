@@ -4,7 +4,7 @@
 //! disassembles the documented protocol 0-5 opcode stream far enough to resolve
 //! GLOBAL/STACK_GLOBAL references and dangerous construction primitives.
 
-use crate::assurance::AnalysisCompleteness;
+use crate::assurance::{parser_differential, AnalysisCompleteness};
 use crate::finding_evidence::{
     byte_range_evidence, serialization_opcode, EvidenceSubject, FindingBuilder,
 };
@@ -19,6 +19,8 @@ use std::time::Instant;
 const MAX_PICKLE_MEMBERS: usize = 256;
 const MAX_PICKLE_MEMBER_BYTES: u64 = 64 * 1024 * 1024;
 const MAX_TOTAL_PICKLE_BYTES: u64 = 256 * 1024 * 1024;
+const MAX_DIFFERENTIAL_BYTES: u64 = 32 * 1024 * 1024;
+const MAX_PRIMARY_TRANSCRIPT_OPCODES: usize = 262_144;
 const MAX_ARGUMENT_BYTES: u64 = 256 * 1024 * 1024;
 const MAX_TRACKED_STRING_BYTES: u64 = 1024 * 1024;
 const MAX_OPCODES: usize = 2_000_000;
@@ -182,14 +184,70 @@ pub fn scan(
             .finish()],
         });
     }
-    Ok(vec![scan_stream(
+    let mut results = vec![scan_stream(
         file.try_clone()?,
         size,
         identity,
         media,
         None,
         budget,
-    )])
+    )];
+    results.extend(parser_differential_scan(
+        file, size, identity, media, budget,
+    ));
+    Ok(results)
+}
+
+/// Run the parser differential over a plain (non-ZIP) pickle stream and
+/// return a finding if the outcome is security-relevant. Bounded by the same
+/// total-size cap as the rest of this module; streams beyond that cap are
+/// reported as assurance-incomplete rather than silently skipped, so a
+/// coverage gap remains visible rather than disappearing.
+fn parser_differential_scan(
+    file: &File,
+    size: u64,
+    identity: &str,
+    media: &str,
+    budget: &crate::budget::ScanBudget,
+) -> Option<LayerScanResult> {
+    let subject = pickle_subject(identity, media, None);
+    if size > MAX_DIFFERENTIAL_BYTES {
+        return Some(assurance_incomplete_finding(
+            subject,
+            None,
+            "stream exceeds the parser differential's bounded analysis size".to_owned(),
+        ));
+    }
+    let bytes = match crate::safeio::read_all_from_file(file, MAX_DIFFERENTIAL_BYTES) {
+        Ok(bytes) => bytes,
+        Err(error) => {
+            return Some(assurance_incomplete_finding(
+                subject,
+                None,
+                format!("the stream could not be read for differential analysis: {error}"),
+            ))
+        }
+    };
+    parser_differential_bytes(&bytes, identity, media, None, budget)
+}
+
+fn parser_differential_bytes(
+    bytes: &[u8],
+    identity: &str,
+    media: &str,
+    member: Option<&str>,
+    budget: &crate::budget::ScanBudget,
+) -> Option<LayerScanResult> {
+    let subject = pickle_subject(identity, media, member);
+    if bytes.len() as u64 > MAX_DIFFERENTIAL_BYTES {
+        return Some(assurance_incomplete_finding(
+            subject,
+            None,
+            "stream exceeds the parser differential's bounded analysis size".to_owned(),
+        ));
+    }
+    let outcome = parser_differential_outcome(bytes, Some(budget));
+    parser_differential_finding(outcome, subject)
 }
 
 pub fn analyze_bytes(bytes: &[u8]) -> Result<PickleAnalysis> {
@@ -453,8 +511,15 @@ fn scan_zip(
             bail!("pickle ZIP member '{name}' changed/truncated while reading");
         }
         results.push(scan_stream(
-            Cursor::new(bytes),
+            Cursor::new(bytes.as_slice()),
             len,
+            identity,
+            media,
+            Some(&name),
+            budget,
+        ));
+        results.extend(parser_differential_bytes(
+            &bytes,
             identity,
             media,
             Some(&name),
@@ -516,9 +581,24 @@ fn opcode_mnemonic(opcode: u8) -> &'static str {
 }
 
 pub(crate) fn analyze_reader<R: Read + Seek>(
+    reader: R,
+    len: u64,
+    budget: Option<&crate::budget::ScanBudget>,
+) -> Result<PickleAnalysis> {
+    analyze_reader_inner(reader, len, budget, None)
+}
+
+/// Core decode loop shared by every caller of `analyze_reader`. `transcript`,
+/// when `Some`, additionally captures a canonical structural transcript
+/// entry for every opcode processed (including STOP), for parser-
+/// differential comparison in `crate::assurance::parser_differential`. This
+/// is a localized addition to the existing loop: normal scan callers pass
+/// `None` and see no behavior change.
+fn analyze_reader_inner<R: Read + Seek>(
     mut reader: R,
     len: u64,
     budget: Option<&crate::budget::ScanBudget>,
+    mut transcript: Option<&mut Vec<parser_differential::TranscriptEntry>>,
 ) -> Result<PickleAnalysis> {
     if len == 0 {
         bail!("empty pickle stream");
@@ -788,18 +868,194 @@ pub(crate) fn analyze_reader<R: Read + Seek>(
             }
             b'.' => {
                 saw_stop = true;
-                break;
             }
             other => bail!(
                 "unknown pickle opcode 0x{other:02x} at offset {}",
                 pos.saturating_sub(1)
             ),
         }
+        if let Some(transcript) = transcript.as_deref_mut() {
+            if transcript.len() >= MAX_PRIMARY_TRANSCRIPT_OPCODES {
+                bail!("primary parser differential transcript opcode cap exceeded");
+            }
+            let argument_start = state.current_offset + 1;
+            transcript.push(parser_differential::TranscriptEntry {
+                offset: state.current_offset,
+                opcode,
+                opcode_class: parser_differential::opcode_class(opcode),
+                argument_start,
+                declared_argument_length: pos.saturating_sub(argument_start),
+                frame_boundary: opcode == 0x95,
+                memo_operation: parser_differential::memo_operation(opcode),
+                stack_effect_class: parser_differential::stack_effect_class(opcode),
+                execution_capable: parser_differential::execution_capable(opcode),
+            });
+        }
+        if saw_stop {
+            break;
+        }
     }
     if !saw_stop {
         bail!("pickle stream ended without STOP opcode");
     }
     Ok(state.analysis)
+}
+
+/// Message substrings that indicate the primary parser fully understood the
+/// construct it encountered and determined the byte stream is structurally
+/// invalid. Anything else is a coverage/budget/implementation limitation of
+/// this parser, not evidence about the artifact, and is classified as
+/// `Incomplete` rather than `Rejected`. See the module-level rationale in
+/// `crate::assurance::parser_differential`.
+const PRIMARY_REJECTED_MESSAGE_PATTERNS: &[&str] = &[
+    "unknown pickle opcode",
+    "pickle stream ended without STOP opcode",
+    "truncated pickle opcode argument",
+    "pickle line argument is not UTF-8",
+    "invalid pickle memo index",
+    "pickle FRAME extends beyond end of stream",
+    "empty pickle stream",
+    "pickle stack operation requires missing MARK",
+];
+
+fn classify_primary_error(
+    error: &anyhow::Error,
+    last_transcript_offset: Option<u64>,
+) -> parser_differential::ReaderOutcome {
+    let text = error.to_string();
+    let at_offset = pickle_error_offset(error).or(last_transcript_offset);
+    if PRIMARY_REJECTED_MESSAGE_PATTERNS
+        .iter()
+        .any(|pattern| text.contains(pattern))
+    {
+        parser_differential::ReaderOutcome::Rejected {
+            at_offset,
+            reason: text,
+        }
+    } else {
+        parser_differential::ReaderOutcome::Incomplete {
+            at_offset,
+            reason: text,
+        }
+    }
+}
+
+/// Run the primary parser's real decode loop to produce a `ReaderOutcome`
+/// for differential comparison. This drives `analyze_reader_inner` with
+/// transcript capture enabled, so the differential's primary side is
+/// byte-for-byte the same decode path used by real scans; only the terminal
+/// classification (accepted / structurally rejected / assurance-incomplete)
+/// differs from `analyze_reader`'s plain `anyhow::Result`.
+pub(crate) fn primary_reader_outcome(
+    bytes: &[u8],
+    budget: Option<&crate::budget::ScanBudget>,
+) -> parser_differential::ReaderOutcome {
+    let mut transcript = Vec::new();
+    let cursor = Cursor::new(bytes);
+    match analyze_reader_inner(cursor, bytes.len() as u64, budget, Some(&mut transcript)) {
+        Ok(_) => parser_differential::ReaderOutcome::Accepted(transcript),
+        Err(error) => classify_primary_error(&error, transcript.last().map(|entry| entry.offset)),
+    }
+}
+
+/// Run the primary parser and the independent structural reader as two
+/// separate bounded analyses over the same bytes, and compare their
+/// outcomes. See `crate::assurance::parser_differential` for the comparison
+/// semantics.
+pub(crate) fn parser_differential_outcome(
+    bytes: &[u8],
+    budget: Option<&crate::budget::ScanBudget>,
+) -> parser_differential::ParserDifferentialOutcome {
+    let primary = primary_reader_outcome(bytes, budget);
+    let secondary = parser_differential::secondary_reader_outcome(bytes, budget);
+    parser_differential::compare(primary, secondary)
+}
+
+/// Build a finding for a parser-differential outcome, if the outcome is
+/// security-relevant. `Agreement` produces no finding (a clean pass needs no
+/// extra evidence). `BothRejected` also produces no finding here: the
+/// primary's own independent re-parse in `scan_stream` already reports
+/// `LF-PICKLE-MALFORMED` for the same rejection, so a second finding would
+/// be redundant rather than additive.
+fn parser_differential_finding(
+    outcome: parser_differential::ParserDifferentialOutcome,
+    subject: EvidenceSubject,
+) -> Option<LayerScanResult> {
+    use parser_differential::ParserDifferentialOutcome as Outcome;
+    match outcome {
+        Outcome::Agreement | Outcome::BothRejected { .. } => None,
+        Outcome::Disagreement {
+            first_divergence, ..
+        } => Some(
+            FindingBuilder::new(
+                "LF-PICKLE-PARSER-DISAGREEMENT",
+                CheckType::PickleStructure,
+                ScanStatus::Warn,
+            )
+            .class(FindingClass::Structural)
+            .confidence(Confidence::Medium)
+            .subject(subject.clone())
+            .detail(format!(
+                "The primary pickle parser and an independent structural reader produced different results for the same byte stream, first diverging at offset {first_divergence}"
+            ))
+            .evidence(byte_range_evidence(
+                subject,
+                first_divergence,
+                1,
+                "The two independent readers first diverge at this byte offset",
+            ))
+            .finish(),
+        ),
+        Outcome::SecondaryAssuranceIncomplete { at_offset, reason }
+        | Outcome::PrimaryAssuranceIncomplete { at_offset, reason } => {
+            Some(assurance_incomplete_finding(subject, at_offset, reason))
+        }
+        Outcome::AssuranceIncomplete {
+            primary_reason,
+            secondary_reason,
+        } => Some(assurance_incomplete_finding(
+            subject,
+            None,
+            format!("primary: {primary_reason}; secondary: {secondary_reason}"),
+        )),
+    }
+}
+
+/// Build the assurance-incomplete finding. This describes a limitation of
+/// Layerfault's own parser-differential coverage, not a property of the
+/// artifact: it uses `ScanStatus::Pass` so it does not by itself escalate
+/// the security verdict, and its wording must never suggest the artifact is
+/// malformed, evasive, or unsafe. Policy may separately require complete
+/// differential assurance and act on incomplete coverage.
+fn assurance_incomplete_finding(
+    subject: EvidenceSubject,
+    at_offset: Option<u64>,
+    reason: String,
+) -> LayerScanResult {
+    let builder = FindingBuilder::new(
+        "LF-PICKLE-PARSER-ASSURANCE-INCOMPLETE",
+        CheckType::PickleStructure,
+        ScanStatus::Pass,
+    )
+    .class(FindingClass::Informational)
+    .confidence(Confidence::High)
+    .subject(subject.clone())
+    .detail(format!(
+        "Parser-differential assurance for this pickle stream is incomplete: {reason}"
+    ));
+    match at_offset {
+        Some(offset) => builder
+            .evidence(byte_range_evidence(
+                subject,
+                offset,
+                1,
+                "Assurance coverage ended at this byte offset",
+            ))
+            .finish(),
+        None => builder
+            .evidence_unavailable("the assurance gap is not attributable to a specific byte offset")
+            .finish(),
+    }
 }
 
 #[derive(Default)]
@@ -1230,5 +1486,234 @@ mod tests {
             .iter()
             .any(|value| value.contains("unresolved callable used by NEWOBJ")));
         Ok(())
+    }
+
+    // --- Parser differential wiring ---
+    //
+    // These tests exercise the real primary decode path
+    // (`primary_reader_outcome`) and the full orchestration
+    // (`parser_differential_outcome`) together, complementing the
+    // hand-constructed `ReaderOutcome` unit tests in
+    // `crate::assurance::parser_differential`.
+
+    #[test]
+    fn primary_accepts_and_agrees_with_secondary_on_a_valid_stream() {
+        let bytes = b"\x80\x02N.";
+        let outcome = parser_differential_outcome(bytes, None);
+        matches!(
+            outcome,
+            parser_differential::ParserDifferentialOutcome::Agreement
+        )
+        .then_some(())
+        .unwrap_or_else(|| panic!("expected Agreement, got {outcome:?}"));
+    }
+
+    #[test]
+    fn primary_rejects_unknown_opcode() {
+        // 0xFF is not a documented pickle opcode.
+        match primary_reader_outcome(b"\x80\x02\xffN.", None) {
+            parser_differential::ReaderOutcome::Rejected { reason, .. } => {
+                assert!(reason.contains("unknown pickle opcode"));
+            }
+            other => panic!("expected Rejected, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn primary_reports_unsupported_protocol_as_incomplete_not_rejected() {
+        // Protocol byte 6 is beyond the 0-5 range this parser implements.
+        match primary_reader_outcome(b"\x80\x06N.", None) {
+            parser_differential::ReaderOutcome::Incomplete { reason, .. } => {
+                assert!(reason.contains("unsupported pickle protocol"));
+            }
+            other => panic!("expected Incomplete, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn unknown_opcode_yields_assurance_incomplete_not_disagreement() {
+        // Fixture required by the parser-differential correctness work: an
+        // opcode the primary rejects outright must not be reported as a
+        // structural disagreement when the independent reader's honest
+        // response is "I don't understand this construct either."
+        let outcome = parser_differential_outcome(b"\x80\x02\xffN.", None);
+        matches!(
+            outcome,
+            parser_differential::ParserDifferentialOutcome::AssuranceIncomplete { .. }
+        )
+        .then_some(())
+        .unwrap_or_else(|| panic!("expected AssuranceIncomplete, got {outcome:?}"));
+    }
+
+    #[test]
+    fn truncated_stream_is_rejected_by_both_readers() {
+        let outcome = parser_differential_outcome(b"\x80", None);
+        matches!(
+            outcome,
+            parser_differential::ParserDifferentialOutcome::BothRejected { .. }
+        )
+        .then_some(())
+        .unwrap_or_else(|| panic!("expected BothRejected, got {outcome:?}"));
+    }
+
+    #[test]
+    fn empty_stream_is_genuinely_both_rejected() {
+        let outcome = parser_differential_outcome(b"", None);
+        matches!(
+            outcome,
+            parser_differential::ParserDifferentialOutcome::BothRejected { .. }
+        )
+        .then_some(())
+        .unwrap_or_else(|| panic!("expected BothRejected, got {outcome:?}"));
+    }
+
+    #[test]
+    fn scan_reaches_disagreement_finding() {
+        // Hand-construct a Disagreement outcome (equal-length, divergent
+        // transcripts) to verify the finding built from it carries the
+        // registered rule id, a Warn status, and byte-offset evidence —
+        // without depending on being able to provoke an actual primary/
+        // secondary bug from real bytes.
+        use parser_differential::{MemoOperation, OpcodeClass, StackEffectClass, TranscriptEntry};
+        let entry = |offset: u64, opcode: u8| TranscriptEntry {
+            offset,
+            opcode,
+            opcode_class: OpcodeClass::Other,
+            argument_start: offset + 1,
+            declared_argument_length: 0,
+            frame_boundary: false,
+            memo_operation: MemoOperation::None,
+            stack_effect_class: StackEffectClass::Push,
+            execution_capable: false,
+        };
+        let outcome = parser_differential::compare(
+            parser_differential::ReaderOutcome::Accepted(vec![entry(0, b'N')]),
+            parser_differential::ReaderOutcome::Accepted(vec![entry(0, b'S')]),
+        );
+        let subject = EvidenceSubject::identity("sha256:abcd", "application/octet-stream");
+        let finding = parser_differential_finding(outcome, subject).expect("finding expected");
+        assert_eq!(
+            crate::policy::rule_id(&finding),
+            "LF-PICKLE-PARSER-DISAGREEMENT"
+        );
+        assert_eq!(finding.status, ScanStatus::Warn);
+    }
+
+    #[test]
+    fn scan_reaches_assurance_incomplete_finding_without_escalating_verdict() {
+        let subject = EvidenceSubject::identity("sha256:abcd", "application/octet-stream");
+        let outcome =
+            parser_differential::ParserDifferentialOutcome::SecondaryAssuranceIncomplete {
+                at_offset: Some(3),
+                reason: "opcode not understood".to_owned(),
+            };
+        let finding = parser_differential_finding(outcome, subject).expect("finding expected");
+        assert_eq!(
+            crate::policy::rule_id(&finding),
+            "LF-PICKLE-PARSER-ASSURANCE-INCOMPLETE"
+        );
+        assert_eq!(
+            finding.status,
+            ScanStatus::Pass,
+            "assurance-incomplete must not escalate the verdict by itself"
+        );
+        assert!(!finding
+            .detail
+            .as_deref()
+            .unwrap_or_default()
+            .to_ascii_lowercase()
+            .contains("malicious"));
+    }
+
+    #[test]
+    fn agreement_and_both_rejected_produce_no_finding() {
+        let subject = EvidenceSubject::identity("sha256:abcd", "application/octet-stream");
+        assert!(parser_differential_finding(
+            parser_differential::ParserDifferentialOutcome::Agreement,
+            subject.clone(),
+        )
+        .is_none());
+        assert!(parser_differential_finding(
+            parser_differential::ParserDifferentialOutcome::BothRejected {
+                primary_reason: "unknown pickle opcode".to_owned(),
+                secondary_reason: "unknown pickle opcode".to_owned(),
+            },
+            subject,
+        )
+        .is_none());
+    }
+
+    #[test]
+    fn scan_wires_differential_findings_into_the_pickle_scan_path() -> Result<()> {
+        use std::io::Write;
+        let mut file = tempfile::NamedTempFile::new().expect("temp file");
+        file.write_all(b"\x80\x02N.").expect("write pickle bytes");
+        let budget =
+            crate::budget::ScanBudget::new(crate::budget::ScanBudgetProfile::Default.limits())?;
+        let results = scan(
+            file.path(),
+            file.as_file(),
+            file.as_file().metadata()?.len(),
+            "sha256:test",
+            "application/octet-stream",
+            &budget,
+        )?;
+        // A clean, agreeing stream must not carry a parser-differential
+        // finding at all (Agreement produces no finding).
+        assert!(!results
+            .iter()
+            .any(|finding| crate::policy::rule_id(finding) == "LF-PICKLE-PARSER-DISAGREEMENT"));
+        Ok(())
+    }
+
+    #[test]
+    fn zip_members_receive_parser_differential_assurance() -> Result<()> {
+        use std::io::Write;
+
+        let dir = tempfile::tempdir()?;
+        let path = dir.path().join("model.pt");
+        let file = File::create(&path)?;
+        let mut archive = zip::ZipWriter::new(file);
+        archive.start_file("archive/data.pkl", zip::write::SimpleFileOptions::default())?;
+        archive.write_all(b"\x80\x02\xffN.")?;
+        archive.finish()?;
+
+        let file = File::open(&path)?;
+        let budget =
+            crate::budget::ScanBudget::new(crate::budget::ScanBudgetProfile::Default.limits())?;
+        let results = scan(
+            &path,
+            &file,
+            file.metadata()?.len(),
+            "sha256:test",
+            "application/zip",
+            &budget,
+        )?;
+        let finding = results
+            .iter()
+            .find(|finding| {
+                crate::policy::rule_id(finding) == "LF-PICKLE-PARSER-ASSURANCE-INCOMPLETE"
+            })
+            .expect("ZIP pickle member must receive differential assurance");
+        assert_eq!(
+            finding
+                .subject
+                .as_ref()
+                .and_then(|subject| subject.package_relative_path.as_deref()),
+            Some("archive/data.pkl")
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn primary_differential_transcript_has_an_independent_memory_cap() {
+        let mut bytes = vec![0x98; MAX_PRIMARY_TRANSCRIPT_OPCODES + 1];
+        bytes.push(b'.');
+        match primary_reader_outcome(&bytes, None) {
+            parser_differential::ReaderOutcome::Incomplete { reason, .. } => {
+                assert!(reason.contains("transcript opcode cap exceeded"));
+            }
+            other => panic!("expected transcript-cap incompleteness, got {other:?}"),
+        }
     }
 }
