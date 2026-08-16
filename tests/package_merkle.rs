@@ -174,7 +174,9 @@ fn test_mtime_only_change_does_not_change_identity() -> Result<()> {
 
     // Touch mtime without altering content or size
     let now = std::time::SystemTime::now();
-    let file = fs::File::open(&file_path)?;
+    // Windows requires a write-capable handle for FILE_WRITE_ATTRIBUTES even
+    // though changing timestamps does not modify the file contents.
+    let file = fs::File::options().write(true).open(&file_path)?;
     file.set_modified(now)?;
     drop(file);
 
