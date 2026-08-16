@@ -11,7 +11,7 @@ import unittest
 
 # Import harness module functions
 sys.path.insert(0, str(pathlib.Path(__file__).parent))
-from benchmark_harness import evaluate_baseline_comparison, get_host_profile
+from benchmark_harness import baseline_for_profile, evaluate_baseline_comparison, get_host_profile
 
 
 class TestPerformanceGateLogic(unittest.TestCase):
@@ -110,6 +110,22 @@ class TestPerformanceGateLogic(unittest.TestCase):
         self.assertIn("os", profile)
         self.assertIn("cpu_count", profile)
         self.assertGreaterEqual(profile["cpu_count"], 1)
+
+    def test_reviewed_host_profile_overrides_only_named_metrics(self):
+        baseline = {
+            "metrics": {"wall_time_ms": 100.0, "peak_rss_kib": 10000},
+            "metric_profiles": {"github-linux-4core": {"wall_time_ms": 110.0}},
+        }
+
+        selected = baseline_for_profile(baseline, "github-linux-4core")
+
+        self.assertEqual(selected["metrics"]["wall_time_ms"], 110.0)
+        self.assertEqual(selected["metrics"]["peak_rss_kib"], 10000)
+        self.assertEqual(baseline["metrics"]["wall_time_ms"], 100.0)
+
+    def test_unknown_host_profile_uses_default_baseline(self):
+        baseline = {"metrics": {"wall_time_ms": 100.0}}
+        self.assertIs(baseline_for_profile(baseline, "unknown"), baseline)
 
 
 if __name__ == "__main__":

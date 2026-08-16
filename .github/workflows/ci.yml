@@ -45,6 +45,8 @@ jobs:
           python3 scripts/release/sbom.py /tmp/layerfault-sbom.cdx.json
           python3 -m json.tool /tmp/layerfault-sbom.cdx.json >/dev/null
       - name: Synthetic admission/security gate
+        env:
+          LAYERFAULT_PERFORMANCE_PROFILE: github-linux-4core
         run: bash scripts/security/gates.sh
 
   dependency-advisories:

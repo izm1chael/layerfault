@@ -584,21 +584,12 @@ fn get_last_accessed(obj_p: &Path, meta_p: &Path) -> u64 {
         .and_then(|t| t.duration_since(SystemTime::UNIX_EPOCH).ok())
         .map(|d| d.as_millis() as u64)
         .unwrap_or(0);
-    let obs_time = if let Ok(meta_bytes) = fs::read(meta_p) {
-        if let Ok(metadata) = serde_json::from_slice::<ObjectMetadata>(&meta_bytes) {
-            metadata
-                .source_observations
-                .iter()
-                .map(|o| o.observed_unix * 1000)
-                .max()
-        } else {
-            None
-        }
-    } else {
-        None
-    };
-
-    m1.max(m2).max(obs_time.unwrap_or(0))
+    // Metadata is rewritten whenever a new source observation is recorded, so
+    // its mtime already captures that activity with filesystem precision. The
+    // embedded observation timestamp is only second-resolution; mixing it into
+    // this value makes rapid inserts tie and leaves eviction order dependent on
+    // directory traversal order.
+    m1.max(m2)
 }
 
 pub fn free_disk_space(path: &Path) -> Result<u64> {

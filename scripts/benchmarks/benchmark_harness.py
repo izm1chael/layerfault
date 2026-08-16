@@ -447,11 +447,27 @@ def evaluate_baseline_comparison(
     }
 
 
+def baseline_for_profile(baseline: Dict[str, Any], profile: str) -> Dict[str, Any]:
+    """Return a baseline with reviewed metric overrides for a named host profile."""
+    profile_metrics = baseline.get("metric_profiles", {}).get(profile)
+    if not isinstance(profile_metrics, dict):
+        return baseline
+
+    selected = dict(baseline)
+    selected["metrics"] = {**baseline.get("metrics", {}), **profile_metrics}
+    return selected
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Layerfault Performance Benchmark Harness")
     parser.add_argument("--binary", type=pathlib.Path, default=pathlib.Path("target/debug/layerfault"))
     parser.add_argument("--baselines", type=pathlib.Path, default=DEFAULT_BASELINES_PATH)
     parser.add_argument("--tier", choices=["pr", "release"], default="pr")
+    parser.add_argument(
+        "--profile",
+        default=os.environ.get("LAYERFAULT_PERFORMANCE_PROFILE", "workstation"),
+        help="Reviewed host profile used to select metric overrides",
+    )
     parser.add_argument("--allow-regression", type=str, default=None, help="Justification for intentional regression")
     parser.add_argument("--json", action="store_true", help="Print machine-readable JSON report")
     parser.add_argument("--output", type=pathlib.Path, default=None, help="Save JSON report to file")
@@ -498,14 +514,15 @@ def main() -> int:
             
             base = baselines_data.get(sc, {})
             if base:
-                comp = evaluate_baseline_comparison(sc, m, base, args.allow_regression)
+                selected_base = baseline_for_profile(base, args.profile)
+                comp = evaluate_baseline_comparison(sc, m, selected_base, args.allow_regression)
                 comparisons.append(comp)
                 if comp["status"] == "FAIL":
                     has_failed = True
 
     report = {
         "build_revision": get_git_revision(root_dir),
-        "host_profile": get_host_profile("workstation" if args.tier == "pr" else "release"),
+        "host_profile": get_host_profile(args.profile),
         "scenarios": scenario_metrics,
         "comparisons": comparisons,
     }

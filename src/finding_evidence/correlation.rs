@@ -586,8 +586,8 @@ fn symbol_strings(value: &serde_json::Value) -> Vec<String> {
 /// (the module lives in a subdirectory, or the config sits beside it) is real
 /// but weaker, and is reported as such rather than overstated.
 fn module_match(reference: &ModuleReference, member: &str) -> Option<Confidence> {
-    let member_lower = member.to_ascii_lowercase();
-    let module_lower = reference.module_path.to_ascii_lowercase();
+    let member_lower = correlation_path(member);
+    let module_lower = correlation_path(&reference.module_path);
     if member_lower == module_lower || member_lower.ends_with(&format!("/{module_lower}")) {
         return Some(Confidence::High);
     }
@@ -605,8 +605,8 @@ fn module_match(reference: &ModuleReference, member: &str) -> Option<Confidence>
 /// `ModuleReference` wrapper (there is no dotted-module-path resolution step
 /// for a literal filename reference).
 fn module_match_str(reference: &str, member: &str) -> Option<Confidence> {
-    let member_lower = member.to_ascii_lowercase();
-    let reference_lower = reference.to_ascii_lowercase();
+    let member_lower = correlation_path(member);
+    let reference_lower = correlation_path(reference);
     if member_lower == reference_lower || member_lower.ends_with(&format!("/{reference_lower}")) {
         return Some(Confidence::High);
     }
@@ -619,6 +619,10 @@ fn module_match_str(reference: &str, member: &str) -> Option<Confidence> {
         return Some(Confidence::Medium);
     }
     None
+}
+
+fn correlation_path(path: &str) -> String {
+    path.replace('\\', "/").to_ascii_lowercase()
 }
 
 fn is_native_member(path: &str) -> bool {
@@ -824,6 +828,23 @@ mod tests {
         let correlations = correlate(&findings);
         assert_eq!(correlations.len(), 1);
         assert_eq!(correlations[0].confidence, Confidence::High);
+    }
+
+    #[test]
+    fn windows_member_separators_match_package_references() {
+        let module = ModuleReference {
+            key: "auto_map.AutoModel".to_owned(),
+            symbol: "custom_pkg.modeling.CustomModel".to_owned(),
+            module_path: "custom_pkg/modeling.py".to_owned(),
+        };
+        assert_eq!(
+            module_match(&module, "custom_pkg\\modeling.py"),
+            Some(Confidence::High)
+        );
+        assert_eq!(
+            module_match_str("weights.npy", "arrays\\weights.npy"),
+            Some(Confidence::High)
+        );
     }
 
     #[test]
