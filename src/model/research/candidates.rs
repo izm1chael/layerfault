@@ -4,12 +4,27 @@ use std::collections::BTreeMap;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum CandidateSource {
+    ExhaustiveEnumeration,
     BeamExpansion,
     RareTokenizerToken,
     AddedSpecialToken,
     UnicodeControlToken,
     SecurityDeltaToken,
     Operator,
+}
+
+impl CandidateSource {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::ExhaustiveEnumeration => "exhaustive_enumeration",
+            Self::BeamExpansion => "beam_expansion",
+            Self::RareTokenizerToken => "rare_tokenizer_token",
+            Self::AddedSpecialToken => "added_special_token",
+            Self::UnicodeControlToken => "unicode_control_token",
+            Self::SecurityDeltaToken => "security_delta_token",
+            Self::Operator => "operator",
+        }
+    }
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TriggerCandidate {

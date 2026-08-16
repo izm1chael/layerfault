@@ -1,6 +1,22 @@
 use super::super::{ResearchArgs, ResearchCommand};
 use anyhow::{anyhow, bail, Result};
 use layerfault::json_stream::write_stdout_json;
+use layerfault::research::{CandidateSource, TriggerCandidate};
+
+fn tag(text: String, source: CandidateSource, rationale: &str) -> TriggerCandidate {
+    TriggerCandidate {
+        text,
+        source,
+        rationale: rationale.to_owned(),
+    }
+}
+
+fn tag_all(values: Vec<String>, source: CandidateSource, rationale: &str) -> Vec<TriggerCandidate> {
+    values
+        .into_iter()
+        .map(|value| tag(value, source, rationale))
+        .collect()
+}
 pub(crate) fn run_research(args: ResearchArgs) -> Result<()> {
     match args.command {
         ResearchCommand::TriggerSearch {
@@ -28,7 +44,11 @@ pub(crate) fn run_research(args: ResearchArgs) -> Result<()> {
                 suffix,
                 true,
             )?;
-            let candidates = layerfault::research::enumerate(&space)?;
+            let candidates = tag_all(
+                layerfault::research::enumerate(&space)?,
+                CandidateSource::ExhaustiveEnumeration,
+                "exhaustive enumeration over the configured alphabet",
+            );
             let report = match runtime.as_str() {
                 "llama-cpp" => layerfault::research::search_external(
                     &model,
@@ -64,7 +84,7 @@ pub(crate) fn run_research(args: ResearchArgs) -> Result<()> {
             seed,
             json: emit_json,
         } => {
-            let mut candidates = vec![
+            let seed_literals = vec![
                 "RFC-79".to_owned(),
                 "CWE-79".to_owned(),
                 "NIST-79".to_owned(),
@@ -73,14 +93,21 @@ pub(crate) fn run_research(args: ResearchArgs) -> Result<()> {
                 "\u{200b}LF_TRIGGER_ALPHA".to_owned(),
                 "TEZfVFJJR0dFUl9BTFBIQQ==".to_owned(),
             ];
+            let mut rare = Vec::new();
             if let Some(path) = tokenizer.as_deref() {
-                if let Ok(mut rare) = layerfault::research::rare_token_candidates(path) {
-                    rare.truncate(512);
-                    candidates.extend(rare);
+                if let Ok(mut r) = layerfault::research::tail_vocab_candidates(path) {
+                    r.truncate(512);
+                    rare = r;
                 }
             }
+            let beam_seeds: Vec<String> = seed_literals
+                .iter()
+                .chain(rare.iter())
+                .take(16)
+                .cloned()
+                .collect();
             let beam = layerfault::research::beam_candidates(
-                &candidates.iter().take(16).cloned().collect::<Vec<_>>(),
+                &beam_seeds,
                 &[
                     "-".into(),
                     "_".into(),
@@ -92,9 +119,13 @@ pub(crate) fn run_research(args: ResearchArgs) -> Result<()> {
                 2,
                 2048,
             )?;
-            candidates.extend(beam);
-            candidates.sort();
-            candidates.dedup();
+            let mut candidates = layerfault::research::build_candidates(
+                &seed_literals,
+                None,
+                None,
+                &rare,
+                Some(&layerfault::research::BeamOptions { candidates: beam }),
+            )?;
             candidates.truncate(4096);
             let report = match runtime.as_str() {
                 "llama-cpp" => layerfault::research::search_external(
@@ -274,7 +305,7 @@ pub(crate) fn run_research(args: ResearchArgs) -> Result<()> {
             model,
             parent,
             runtime,
-            mut candidates,
+            candidates: operator_candidates,
             from_tokenizer,
             beam_width,
             beam_rounds,
@@ -295,14 +326,20 @@ pub(crate) fn run_research(args: ResearchArgs) -> Result<()> {
             } else {
                 None
             };
+            let mut rare = Vec::new();
             if from_tokenizer {
                 let tokenizer = tokenizer_path.as_deref().ok_or_else(|| anyhow!("--from-tokenizer requires a discoverable tokenizer.json/tokenizer.model in the model package"))?;
-                let mut rare = layerfault::research::rare_token_candidates(tokenizer)?;
-                rare.truncate(if profile == "research" { 4096 } else { 512 });
-                candidates.extend(rare);
+                let mut r = layerfault::research::tail_vocab_candidates(tokenizer)?;
+                r.truncate(if profile == "research" { 4096 } else { 512 });
+                rare = r;
             }
-            if beam_rounds > 0 && !candidates.is_empty() {
-                let seeds = candidates.iter().take(16).cloned().collect::<Vec<_>>();
+            let beam = if beam_rounds > 0 && !(operator_candidates.is_empty() && rare.is_empty()) {
+                let seeds: Vec<String> = operator_candidates
+                    .iter()
+                    .chain(rare.iter())
+                    .take(16)
+                    .cloned()
+                    .collect();
                 let additions = [
                     "-".into(),
                     "_".into(),
@@ -310,16 +347,25 @@ pub(crate) fn run_research(args: ResearchArgs) -> Result<()> {
                     "CVE".into(),
                     "79".into(),
                 ];
-                candidates.extend(layerfault::research::beam_candidates(
+                layerfault::research::beam_candidates(
                     &seeds,
                     &additions,
                     beam_width.max(1),
                     beam_rounds,
                     if profile == "research" { 8192 } else { 2048 },
-                )?);
-            }
-            candidates.sort();
-            candidates.dedup();
+                )?
+            } else {
+                Vec::new()
+            };
+            let candidates = layerfault::research::build_candidates(
+                &operator_candidates,
+                None,
+                None,
+                &rare,
+                (!beam.is_empty())
+                    .then_some(layerfault::research::BeamOptions { candidates: beam })
+                    .as_ref(),
+            )?;
             let cap = if profile == "research" {
                 100_000
             } else {
@@ -371,7 +417,7 @@ fn emit_research(
         for hit in report.suspicious.iter().take(100) {
             println!(
                 "{}: {} {:?}",
-                hit.candidate, hit.classification, hit.rule_ids
+                hit.candidate_display, hit.classification, hit.rule_ids
             );
         }
     }
