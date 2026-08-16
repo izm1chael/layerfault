@@ -8,7 +8,7 @@ const MAX_SNAPSHOT_BYTES: u64 = 64 * 1024 * 1024;
 
 pub fn new(state: TrustState) -> ExecutionSnapshot {
     ExecutionSnapshot {
-        version: 1,
+        version: 2,
         captured_unix: crate::paths::now_unix(),
         state,
         identities: BTreeMap::new(),
@@ -79,9 +79,9 @@ pub fn save(path: &Path, snapshot: &ExecutionSnapshot) -> Result<()> {
 }
 
 fn validate(snapshot: &ExecutionSnapshot) -> Result<()> {
-    if snapshot.version != 1 {
+    if !matches!(snapshot.version, 1 | 2) {
         bail!(
-            "unsupported execution snapshot version {}",
+            "unsupported execution snapshot version {} (this build produces version 2 and reads versions 1-2)",
             snapshot.version
         );
     }
@@ -96,4 +96,30 @@ fn validate(snapshot: &ExecutionSnapshot) -> Result<()> {
         bail!("execution snapshot contains an invalid identity value");
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn version_one_snapshot_with_aggregate_environment_remains_loadable() {
+        let snapshot: ExecutionSnapshot = serde_json::from_value(serde_json::json!({
+            "version": 1,
+            "captured_unix": 1,
+            "state": "approved",
+            "identities": {"behaviour_environment": "legacy-environment"},
+            "evidence": {}
+        }))
+        .expect("version-1 snapshot must deserialize");
+
+        validate(&snapshot).expect("version-1 snapshot must remain supported");
+        assert_eq!(
+            snapshot
+                .identities
+                .get(&SecurityComponent::BehaviourEnvironment)
+                .map(String::as_str),
+            Some("legacy-environment")
+        );
+    }
 }

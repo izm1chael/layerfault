@@ -38,12 +38,18 @@ pub fn default_dependencies(domain: EvidenceDomain) -> &'static [SecurityCompone
         E::BehaviouralAssurance => &[
             C::ModelArtifact,
             C::ModelComposition,
+            C::GenerationConfig,
             C::RuntimeBinary,
             C::RuntimeConfiguration,
             C::AgentConfiguration,
             C::McpServers,
             C::ToolSchemas,
-            C::BehaviourEnvironment,
+            C::SandboxProfile,
+            C::TelemetryConfiguration,
+            C::ProbeSuite,
+            C::SamplingConfiguration,
+            C::BehaviourAffectingEnvironment,
+            C::PlatformEnvironment,
             C::Ruleset,
         ],
         E::SecurityPassport => &[
@@ -57,6 +63,7 @@ pub fn default_dependencies(domain: EvidenceDomain) -> &'static [SecurityCompone
         E::Admission => &[
             C::ModelArtifact,
             C::ModelComposition,
+            C::GenerationConfig,
             C::RuntimeBinary,
             C::RuntimeConfiguration,
             C::AgentConfiguration,
@@ -198,6 +205,45 @@ mod tests {
         assert!(!plan
             .invalidated_domains
             .contains(&EvidenceDomain::RuntimePosture));
+    }
+
+    #[test]
+    fn generation_config_drift_invalidates_behavioural_and_admission_not_unrelated() {
+        let mut before = snapshot("runtime-a");
+        let mut after = before.clone();
+        before
+            .identities
+            .insert(SecurityComponent::GenerationConfig, "gen-a".into());
+        after
+            .identities
+            .insert(SecurityComponent::GenerationConfig, "gen-b".into());
+        for domain in [
+            EvidenceDomain::BehaviouralAssurance,
+            EvidenceDomain::Admission,
+            EvidenceDomain::TensorForensics,
+        ] {
+            before.evidence.insert(
+                domain,
+                EvidenceRecord {
+                    identity: format!("{domain:?}"),
+                    generated_unix: 1,
+                    dependencies: Vec::new(),
+                    stale: false,
+                    stale_reason: None,
+                },
+            );
+        }
+        after.evidence = before.evidence.clone();
+        let plan = diff(&before, &after);
+        assert!(plan
+            .invalidated_domains
+            .contains(&EvidenceDomain::BehaviouralAssurance));
+        assert!(plan
+            .invalidated_domains
+            .contains(&EvidenceDomain::Admission));
+        assert!(!plan
+            .invalidated_domains
+            .contains(&EvidenceDomain::TensorForensics));
     }
 
     #[test]

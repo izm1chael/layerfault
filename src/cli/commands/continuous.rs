@@ -21,6 +21,9 @@ pub(crate) fn run_continuous(args: ContinuousArgs) -> Result<()> {
             provenance_chain,
             passport,
             receipt,
+            behavioural_report,
+            behaviour_affecting_environment,
+            platform_environment,
             json,
         } => {
             let inputs = observation_inputs(
@@ -36,6 +39,9 @@ pub(crate) fn run_continuous(args: ContinuousArgs) -> Result<()> {
                 provenance_chain,
                 passport,
                 receipt,
+                behavioural_report,
+                behaviour_affecting_environment,
+                platform_environment,
             );
             let snapshot = layerfault::continuous::observe(&inputs)?;
             layerfault::continuous::save_snapshot(&output, &snapshot)?;
@@ -95,6 +101,9 @@ pub(crate) fn run_continuous(args: ContinuousArgs) -> Result<()> {
             provenance_chain,
             passport,
             receipt,
+            behavioural_report,
+            behaviour_affecting_environment,
+            platform_environment,
             jsonl,
         } => {
             if interval < 30 {
@@ -114,6 +123,9 @@ pub(crate) fn run_continuous(args: ContinuousArgs) -> Result<()> {
                 provenance_chain,
                 passport,
                 receipt,
+                behavioural_report,
+                behaviour_affecting_environment,
+                platform_environment,
             );
             let mut previous = if state_path.exists() {
                 layerfault::continuous::load_snapshot(&state_path)?
@@ -263,6 +275,9 @@ fn observation_inputs(
     provenance_chain: Option<PathBuf>,
     passport: Option<PathBuf>,
     receipt: Option<PathBuf>,
+    behavioural_report: Option<PathBuf>,
+    behaviour_affecting_environment: Option<PathBuf>,
+    platform_environment: Option<PathBuf>,
 ) -> ObservationInputs {
     ObservationInputs {
         state,
@@ -277,6 +292,9 @@ fn observation_inputs(
         provenance_chain,
         passport,
         receipt,
+        behavioural_report,
+        behaviour_affecting_environment,
+        platform_environment,
     }
 }
 

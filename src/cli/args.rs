@@ -1771,6 +1771,16 @@ pub(crate) enum ContinuousCommand {
         passport: Option<PathBuf>,
         #[arg(long)]
         receipt: Option<PathBuf>,
+        /// Path to a behaviour report (`layerfault behaviour run --json` output)
+        /// documenting an actual behavioural run. Behavioural-assurance
+        /// evidence is recorded only if this is present and binds to the
+        /// runtime binary observed in this same snapshot.
+        #[arg(long)]
+        behavioural_report: Option<PathBuf>,
+        #[arg(long)]
+        behaviour_affecting_environment: Option<PathBuf>,
+        #[arg(long)]
+        platform_environment: Option<PathBuf>,
         #[arg(long, default_value_t = false)]
         json: bool,
     },
@@ -1820,6 +1830,12 @@ pub(crate) enum ContinuousCommand {
         passport: Option<PathBuf>,
         #[arg(long)]
         receipt: Option<PathBuf>,
+        #[arg(long)]
+        behavioural_report: Option<PathBuf>,
+        #[arg(long)]
+        behaviour_affecting_environment: Option<PathBuf>,
+        #[arg(long)]
+        platform_environment: Option<PathBuf>,
         #[arg(long, default_value_t = false)]
         jsonl: bool,
     },

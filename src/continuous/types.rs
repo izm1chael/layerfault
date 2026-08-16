@@ -34,7 +34,20 @@ pub enum SecurityComponent {
     Provenance,
     SecurityPassport,
     AdmissionReceipt,
+    SandboxProfile,
+    TelemetryConfiguration,
+    ProbeSuite,
+    SamplingConfiguration,
+    /// Legacy aggregate retained only so version-1 snapshots remain
+    /// deserializable. New snapshots use the atomic components below.
     BehaviourEnvironment,
+    /// Behaviour-affecting environment variables and configuration observed
+    /// for a specific run. Deliberately narrow: this is one atomic component
+    /// among several that together make up an execution context (see
+    /// `crate::continuous::execution_context`), not an aggregate of
+    /// everything that could conceivably affect behaviour.
+    BehaviourAffectingEnvironment,
+    PlatformEnvironment,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]

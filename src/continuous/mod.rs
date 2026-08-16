@@ -5,6 +5,7 @@
 //! destructive remediation or silently escalate observation into enforcement.
 
 mod dependency;
+mod execution_context;
 mod findings;
 mod journal;
 mod observe;
@@ -15,6 +16,7 @@ mod types;
 pub use dependency::{
     apply as apply_invalidation, default_dependencies, diff as invalidation_plan,
 };
+pub use execution_context::{execution_context_identity, EXECUTION_CONTEXT_COMPONENTS};
 pub use findings::drift_findings;
 pub use journal::{append as append_event, load as load_events};
 pub use observe::{observe, ObservationInputs};
