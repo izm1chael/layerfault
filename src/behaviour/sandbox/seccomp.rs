@@ -21,7 +21,7 @@ pub(super) fn seccomp_filter_supported() -> bool {
     target_os = "linux",
     any(target_arch = "x86_64", target_arch = "aarch64")
 ))]
-pub(super) fn seccomp_filter_file() -> Result<File> {
+pub(crate) fn seccomp_filter_file() -> Result<File> {
     use std::io::{Seek, SeekFrom, Write};
 
     const BPF_LD_W_ABS: u16 = 0x20;
@@ -104,7 +104,7 @@ pub(crate) fn seccomp_profile_sha256() -> Option<String> {
     target_os = "linux",
     any(target_arch = "x86_64", target_arch = "aarch64")
 )))]
-pub(super) fn seccomp_filter_file() -> Result<File> {
+pub(crate) fn seccomp_filter_file() -> Result<File> {
     anyhow::bail!("the behavioural seccomp filter is unsupported on this platform")
 }
 

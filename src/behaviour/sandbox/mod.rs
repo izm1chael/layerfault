@@ -11,10 +11,11 @@ pub use backend::{
     require_external_execution_stack_options, require_high_risk_observation_stack,
     require_high_risk_observation_stack_options, BwrapBackend, SandboxBackend,
 };
+pub(crate) use command::pin_active_path;
 pub use command::{command_for, SandboxedCommand};
 pub(crate) use limits::configured_memory_budget_bytes;
 pub use process::{configure_process_group, terminate_process_tree};
-pub(crate) use seccomp::seccomp_profile_sha256;
+pub(crate) use seccomp::{seccomp_filter_file, seccomp_profile_sha256};
 pub(crate) use telemetry::{
     excerpt, is_canary_evidence, is_sensitive_evidence, MAX_TELEMETRY_ROWS,
 };

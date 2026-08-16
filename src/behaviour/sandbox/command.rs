@@ -16,7 +16,7 @@ pub struct SandboxedCommand {
 }
 
 #[cfg(unix)]
-pub(super) fn pin_active_path(path: &Path) -> Result<File> {
+pub(crate) fn pin_active_path(path: &Path) -> Result<File> {
     use std::os::unix::fs::OpenOptionsExt;
     let mut options = std::fs::OpenOptions::new();
     options.read(true);
@@ -34,7 +34,7 @@ pub(super) fn pin_active_path(path: &Path) -> Result<File> {
 }
 
 #[cfg(not(unix))]
-pub(super) fn pin_active_path(_path: &Path) -> Result<File> {
+pub(crate) fn pin_active_path(_path: &Path) -> Result<File> {
     bail!("descriptor-pinned behavioural sandbox inputs require Unix")
 }
 
