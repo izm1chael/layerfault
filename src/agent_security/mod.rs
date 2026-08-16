@@ -17,10 +17,11 @@ pub use capability::{
     CapabilityConfidence, CapabilityEvidenceKind, CapabilityGrant, CapabilityKind, CapabilityScope,
 };
 pub use discovery::{
-    build_snapshot, discover_stdio, parse_initialize_response, parse_prompts_list,
-    parse_resources_list, parse_tools_list, McpCapabilitySnapshot, PrimitiveCompleteness,
-    PrimitiveState, PromptArgument, PromptDefinition, ProtocolInfo, ResourceDefinition,
-    StdioDiscoveryOutcome, KNOWN_PROTOCOL_VERSIONS,
+    build_snapshot, discover_remote, discover_stdio, parse_initialize_response, parse_prompts_list,
+    parse_resources_list, parse_tools_list, snapshot_from_remote, snapshot_from_stdio,
+    McpCapabilitySnapshot, PrimitiveCompleteness, PrimitiveState, PromptArgument, PromptDefinition,
+    ProtocolInfo, RemoteDiscoveryOutcome, ResourceDefinition, StdioDiscoveryOutcome,
+    KNOWN_PROTOCOL_VERSIONS,
 };
 pub use findings::assess;
 pub use graph::{build as build_graph, dangerous_chains, PathReachability};

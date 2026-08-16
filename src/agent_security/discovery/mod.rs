@@ -19,12 +19,14 @@
 //! parsing and digest-canonicalisation logic here does not depend on, or
 //! get exercised only through, the higher-risk transport code.
 
+mod remote;
 mod stdio;
 
+pub use remote::{discover_remote, RemoteDiscoveryOutcome};
 pub use stdio::{discover_stdio, StdioDiscoveryOutcome};
 
 use super::ToolDefinition;
-use anyhow::Result;
+use anyhow::{bail, Result};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
@@ -382,6 +384,74 @@ pub fn build_snapshot(
         completeness,
         content_sha256,
     })
+}
+
+/// Run sandboxed stdio discovery against a server command and assemble the
+/// result into a snapshot. Returns the snapshot plus any transport-level
+/// limitations encountered (e.g. a per-primitive request that timed out) —
+/// kept separate from `McpCapabilitySnapshot` itself so that type's shape
+/// does not need to change to carry them.
+pub fn snapshot_from_stdio(
+    command: &str,
+    args: &[String],
+    server_transport_identity: String,
+    observed_at: u64,
+) -> Result<(McpCapabilitySnapshot, Vec<String>)> {
+    let outcome = discover_stdio(command, args)?;
+    let snapshot = snapshot_from_outcome(
+        outcome.initialize,
+        outcome.tools_list,
+        outcome.resources_list,
+        outcome.prompts_list,
+        server_transport_identity,
+        observed_at,
+    )?;
+    Ok((snapshot, outcome.limitations))
+}
+
+/// Run remote HTTP discovery against one explicit endpoint and assemble the
+/// result into a snapshot. See `snapshot_from_stdio` for the limitations
+/// return.
+pub fn snapshot_from_remote(
+    endpoint: &str,
+    server_transport_identity: String,
+    observed_at: u64,
+) -> Result<(McpCapabilitySnapshot, Vec<String>)> {
+    let outcome = discover_remote(endpoint)?;
+    let snapshot = snapshot_from_outcome(
+        outcome.initialize,
+        outcome.tools_list,
+        outcome.resources_list,
+        outcome.prompts_list,
+        server_transport_identity,
+        observed_at,
+    )?;
+    Ok((snapshot, outcome.limitations))
+}
+
+fn snapshot_from_outcome(
+    initialize: Option<Value>,
+    tools_list: Option<Value>,
+    resources_list: Option<Value>,
+    prompts_list: Option<Value>,
+    server_transport_identity: String,
+    observed_at: u64,
+) -> Result<McpCapabilitySnapshot> {
+    let Some(initialize) = initialize else {
+        bail!("MCP discovery did not receive a usable initialize response");
+    };
+    let protocol = parse_initialize_response(&initialize);
+    let tools = parse_tools_list(&initialize, tools_list.as_ref());
+    let resources = parse_resources_list(&initialize, resources_list.as_ref());
+    let prompts = parse_prompts_list(&initialize, prompts_list.as_ref());
+    build_snapshot(
+        protocol,
+        server_transport_identity,
+        tools,
+        resources,
+        prompts,
+        observed_at,
+    )
 }
 
 fn compute_content_sha256(

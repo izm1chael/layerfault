@@ -102,8 +102,7 @@ pub fn discover_stdio(command: &str, args: &[String]) -> Result<StdioDiscoveryOu
 fn resolve_command(command: &str) -> Result<PathBuf> {
     let path = Path::new(command);
     if path.is_absolute() || command.contains('/') {
-        return std::fs::canonicalize(path)
-            .with_context(|| format!("unable to resolve MCP server command '{command}'"));
+        return Ok(path.to_path_buf());
     }
     crate::sources::find_executable(command)
         .ok_or_else(|| anyhow!("MCP server command '{command}' was not found on PATH"))
@@ -482,6 +481,43 @@ for line in sys.stdin:
             .cloned()
             .unwrap_or(Value::Null);
         assert_eq!(tools.as_array().map(|a| a.len()), Some(1));
+    }
+
+    #[test]
+    fn snapshot_from_stdio_produces_a_stable_digest_across_two_real_runs() {
+        if !bwrap_available() {
+            eprintln!("skipping: bubblewrap not available");
+            return;
+        }
+        let script_path = write_executable_fixture("mock_mcp_snapshot.py", MOCK_SERVER_SCRIPT);
+
+        // Two independent real sandboxed runs against the same unchanged
+        // server: the resulting content digest must match even though each
+        // run has its own observed_at, or drift/capability-expansion
+        // detection built on snapshot diffs is unusable.
+        let (first, limitations_a) = super::super::snapshot_from_stdio(
+            script_path.to_str().unwrap(),
+            &[],
+            "test-transport".to_owned(),
+            1_000,
+        )
+        .expect("first discovery run");
+        let (second, limitations_b) = super::super::snapshot_from_stdio(
+            script_path.to_str().unwrap(),
+            &[],
+            "test-transport".to_owned(),
+            2_000,
+        )
+        .expect("second discovery run");
+
+        let _ = std::fs::remove_file(&script_path);
+
+        assert!(limitations_a.is_empty());
+        assert!(limitations_b.is_empty());
+        assert_eq!(first.tools.len(), 1);
+        assert_eq!(first.tools[0].name, "echo");
+        assert_ne!(first.observed_at, second.observed_at);
+        assert_eq!(first.content_sha256, second.content_sha256);
     }
 
     /// Attempts a real outbound TCP connection while answering `initialize`,

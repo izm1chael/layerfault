@@ -46,6 +46,7 @@ pub mod manifest;
 pub mod model;
 pub mod modeldiff;
 pub mod modelmeta;
+pub mod net_safety;
 pub mod object_cache;
 pub mod observations;
 pub mod package;

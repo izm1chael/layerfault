@@ -9,7 +9,6 @@ use reqwest::header::{AUTHORIZATION, LOCATION, RETRY_AFTER, USER_AGENT};
 use sha2::{Digest, Sha256};
 use std::fs::OpenOptions;
 use std::io::{Read, Write};
-use std::net::{IpAddr, ToSocketAddrs};
 use std::path::{Component, Path, PathBuf};
 use std::time::{Duration, Instant};
 use url::Url;
@@ -453,7 +452,8 @@ fn validate_url(url: &Url) -> Result<()> {
     if !allowed_hub_host(host) {
         bail!("redirect host '{host}' is not in the Layerfault Hugging Face allow policy");
     }
-    reject_private_resolution(host, url.port_or_known_default().unwrap_or(443))?;
+    crate::net_safety::reject_private_resolution(host, url.port_or_known_default().unwrap_or(443))
+        .context("Hub URL resolution rejected")?;
     Ok(())
 }
 
@@ -463,48 +463,6 @@ fn allowed_hub_host(host: &str) -> bool {
         || host.ends_with(".huggingface.co")
         || host.ends_with(".hf.co")
         || host.ends_with(".xethub.hf.co")
-}
-
-fn reject_private_resolution(host: &str, port: u16) -> Result<()> {
-    if let Ok(ip) = host.parse::<IpAddr>() {
-        if blocked_ip(ip) {
-            bail!("Hub URL resolves directly to blocked address {ip}");
-        }
-        return Ok(());
-    }
-    let addresses: Vec<_> = (host, port)
-        .to_socket_addrs()
-        .with_context(|| format!("unable to resolve Hub host '{host}'"))?
-        .collect();
-    if addresses.is_empty() {
-        bail!("Hub host '{host}' resolved to no addresses");
-    }
-    if addresses.iter().any(|address| blocked_ip(address.ip())) {
-        bail!("Hub host '{host}' resolved to a private/loopback/link-local address");
-    }
-    Ok(())
-}
-
-fn blocked_ip(ip: IpAddr) -> bool {
-    match ip {
-        IpAddr::V4(v) => {
-            v.is_private()
-                || v.is_loopback()
-                || v.is_link_local()
-                || v.is_broadcast()
-                || v.is_documentation()
-                || v.is_unspecified()
-                || v.octets()[0] == 0
-                || v.octets()[0] >= 224
-                || v.octets() == [169, 254, 169, 254]
-        }
-        IpAddr::V6(v) => {
-            v.is_loopback()
-                || v.is_unspecified()
-                || v.is_unique_local()
-                || v.is_unicast_link_local()
-        }
-    }
 }
 fn validate_repo_id(repo: &str) -> Result<()> {
     let mut parts = repo.split('/');
@@ -645,12 +603,9 @@ fn constant_time_eq(left: &[u8], right: &[u8]) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    #[test]
-    fn blocks_private_ips() {
-        assert!(blocked_ip("127.0.0.1".parse().unwrap()));
-        assert!(blocked_ip("169.254.169.254".parse().unwrap()));
-        assert!(!blocked_ip("8.8.8.8".parse().unwrap()));
-    }
+    // blocked_ip's own coverage now lives with its implementation in
+    // crate::net_safety, which this module reuses via
+    // reject_private_resolution rather than a private copy.
     #[test]
     fn validates_repo() {
         assert!(validate_repo_id("org/model-name").is_ok());
