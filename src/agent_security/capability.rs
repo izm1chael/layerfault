@@ -154,15 +154,53 @@ pub struct CapabilityGrant {
     pub tool: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub confirmation_required: Option<bool>,
+    /// How this grant was discovered. Orthogonal to `confidence`: a
+    /// `Declared` claim (the server says so) can still be low-confidence
+    /// (unverified self-report), just as a `LexicallyInferred` one can be
+    /// medium-confidence. Provenance and certainty are different questions.
+    #[serde(default)]
+    pub evidence_kind: CapabilityEvidenceKind,
     #[serde(default)]
     pub confidence: CapabilityConfidence,
+    /// A known isolation barrier that prevents this capability's result
+    /// from reaching the model, or the capability from being invoked in
+    /// this execution context. `None` today: static MCP configuration
+    /// parsing does not yet produce this signal — it is a hook for later
+    /// discovery/posture evidence (sandboxed sub-agents, fixed non-model
+    /// data flow) to populate, consulted by the reachability graph in
+    /// `crate::agent_security::graph`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub isolation_barrier: Option<String>,
 }
 
+/// How a capability grant was discovered.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CapabilityEvidenceKind {
+    /// The server or tool metadata explicitly declares this capability
+    /// (e.g. an annotation), without independent verification.
+    Declared,
+    /// Derived from JSON Schema structure (branches, combinators,
+    /// constraints) rather than keyword matching.
+    StructurallyInferred,
+    /// Derived from keyword/token matching against tool names,
+    /// descriptions and schema text.
+    #[default]
+    LexicallyInferred,
+    /// Observed directly from live MCP protocol discovery.
+    ProtocolObserved,
+    /// Observed from an actual behavioural run.
+    BehaviourallyObserved,
+}
+
+/// How certain Layerfault is that a grant is accurate, independent of how
+/// it was discovered.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum CapabilityConfidence {
-    Observed,
     #[default]
-    Inferred,
     Unknown,
+    Low,
+    Medium,
+    High,
 }

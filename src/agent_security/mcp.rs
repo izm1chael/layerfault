@@ -74,7 +74,7 @@ fn parse_server(name: &str, value: &Value) -> Result<McpServer> {
         executable.as_deref(),
         endpoint.as_deref(),
     );
-    let arguments = parse_arguments(object)?;
+    let (arguments, argument_limitation) = parse_arguments(object);
     let argument_count = arguments.len() as u64;
     let argument_sha256 = arguments
         .iter()
@@ -101,7 +101,19 @@ fn parse_server(name: &str, value: &Value) -> Result<McpServer> {
         limitations.push("tool schemas are not present in the static configuration; capability discovery is incomplete until a schema snapshot is supplied".into());
     }
     if transport == McpTransport::Unknown {
-        limitations.push("MCP transport could not be determined from static configuration".into());
+        if transport_is_ambiguous(
+            transport_raw.as_deref(),
+            executable.as_deref(),
+            endpoint.as_deref(),
+        ) {
+            limitations.push("MCP server configuration declares conflicting transport signals (a launch command together with a remote transport/endpoint declaration); transport is treated as ambiguous rather than silently resolved".into());
+        } else {
+            limitations
+                .push("MCP transport could not be determined from static configuration".into());
+        }
+    }
+    if let Some(reason) = argument_limitation {
+        limitations.push(reason);
     }
     let completeness = if limitations.is_empty() {
         crate::assurance::AnalysisCompleteness::Complete
@@ -127,28 +139,48 @@ fn parse_server(name: &str, value: &Value) -> Result<McpServer> {
     Ok(server)
 }
 
-fn parse_arguments(object: &Map<String, Value>) -> Result<Vec<String>> {
+/// Parse the `args` array for one server. Unlike most parsing in this
+/// module, a malformed `args` value degrades only this server's analysis to
+/// `AnalysisCompleteness::Partial` rather than aborting the whole
+/// `inspect_config` call: one adversarial or malformed server must not
+/// prevent every other server in the same configuration from being
+/// analysed. The returned `Option<String>` is a limitation to record when
+/// argument analysis stopped early.
+fn parse_arguments(object: &Map<String, Value>) -> (Vec<String>, Option<String>) {
     let Some(raw) = object.get("args") else {
-        return Ok(Vec::new());
+        return (Vec::new(), None);
     };
-    let values = raw
-        .as_array()
-        .ok_or_else(|| anyhow!("MCP server args must be an array"))?;
+    let Some(values) = raw.as_array() else {
+        return (
+            Vec::new(),
+            Some("MCP server 'args' is present but is not an array; argument analysis for this server is incomplete".to_owned()),
+        );
+    };
     if values.len() > MAX_ARGUMENTS_PER_SERVER {
-        bail!("MCP server argument list exceeds safety limit");
+        return (
+            Vec::new(),
+            Some(format!("MCP server argument list exceeds the {MAX_ARGUMENTS_PER_SERVER}-argument safety limit; argument analysis for this server is incomplete")),
+        );
     }
-    values
-        .iter()
-        .map(|value| {
-            let argument = value
-                .as_str()
-                .ok_or_else(|| anyhow!("MCP server arguments must be strings"))?;
-            if argument.len() > MAX_ARGUMENT_BYTES {
-                bail!("MCP server argument exceeds safety limit");
+    let mut out = Vec::with_capacity(values.len());
+    for value in values {
+        match value.as_str() {
+            Some(argument) if argument.len() <= MAX_ARGUMENT_BYTES => out.push(argument.to_owned()),
+            Some(_) => {
+                return (
+                    out,
+                    Some("an MCP server argument exceeds the safety byte limit; argument analysis for this server is incomplete".to_owned()),
+                );
             }
-            Ok(argument.to_owned())
-        })
-        .collect()
+            None => {
+                return (
+                    out,
+                    Some("an MCP server argument is not a string; argument analysis for this server is incomplete".to_owned()),
+                );
+            }
+        }
+    }
+    (out, None)
 }
 
 fn parse_tools(object: &Map<String, Value>) -> Result<Vec<ToolDefinition>> {
@@ -179,7 +211,10 @@ fn parse_tools(object: &Map<String, Value>) -> Result<Vec<ToolDefinition>> {
     Ok(out)
 }
 
-fn parse_tool(name_hint: Option<&String>, value: &Value) -> Result<ToolDefinition> {
+/// `pub(super)` so `crate::agent_security::discovery` can parse `tools/list`
+/// entries with the same logic used for statically configured tools,
+/// instead of a second parallel implementation.
+pub(super) fn parse_tool(name_hint: Option<&String>, value: &Value) -> Result<ToolDefinition> {
     let object = value
         .as_object()
         .ok_or_else(|| anyhow!("MCP tool definition must be an object"))?;
@@ -220,12 +255,38 @@ fn parse_tool(name_hint: Option<&String>, value: &Value) -> Result<ToolDefinitio
     })
 }
 
+/// Whether a server declares a launch command together with a remote
+/// transport signal (a `type`/`transport` value naming HTTP/SSE, or a
+/// remote endpoint) without also explicitly declaring stdio. That is a
+/// genuine conflict in the configuration, not something to resolve
+/// silently in either direction.
+fn transport_is_ambiguous(
+    raw: Option<&str>,
+    command: Option<&str>,
+    endpoint: Option<&str>,
+) -> bool {
+    if command.is_none() {
+        return false;
+    }
+    let raw = raw.unwrap_or("").to_ascii_lowercase();
+    let declares_stdio = raw.contains("stdio");
+    let declares_remote = raw.contains("http") || raw.contains("sse") || endpoint.is_some();
+    declares_remote && !declares_stdio
+}
+
 fn classify_transport(
     raw: Option<&str>,
     command: Option<&str>,
     endpoint: Option<&str>,
 ) -> McpTransport {
     if command.is_some() {
+        if transport_is_ambiguous(raw, command, endpoint) {
+            // A launch command combined with a conflicting remote-transport
+            // declaration (e.g. `{"command": ..., "type": "http"}`) must not
+            // silently resolve to Stdio: that would exempt the server from
+            // every auth/TLS check a remote transport would otherwise get.
+            return McpTransport::Unknown;
+        }
         return McpTransport::Stdio;
     }
     let raw = raw.unwrap_or("").to_ascii_lowercase();
@@ -334,5 +395,74 @@ mod tests {
         assert_ne!(first.identity, second.identity);
         let serialized = serde_json::to_string(&first).unwrap();
         assert!(!serialized.contains("trusted-server"));
+    }
+
+    #[test]
+    fn conflicting_transport_signals_are_treated_as_ambiguous_not_stdio() {
+        let value = serde_json::json!({"command":"server","type":"http"});
+        let server = parse_server("local", &value).unwrap();
+        assert_eq!(server.transport, McpTransport::Unknown);
+        // Ambiguous must not silently fall back to the Stdio exemption: an
+        // unresolved transport leaves authentication Unknown, not
+        // NotApplicable.
+        assert_eq!(server.authentication, SecurityState::Unknown);
+        assert_eq!(
+            server.completeness,
+            crate::assurance::AnalysisCompleteness::Partial
+        );
+        assert!(server
+            .limitations
+            .iter()
+            .any(|limitation| limitation.contains("conflicting transport")));
+    }
+
+    #[test]
+    fn command_with_endpoint_is_also_ambiguous() {
+        let value = serde_json::json!({"command":"server","url":"https://example.invalid/mcp"});
+        let server = parse_server("local", &value).unwrap();
+        assert_eq!(server.transport, McpTransport::Unknown);
+    }
+
+    #[test]
+    fn explicit_stdio_declaration_alongside_command_is_not_ambiguous() {
+        let value = serde_json::json!({"command":"server","type":"stdio"});
+        let server = parse_server("local", &value).unwrap();
+        assert_eq!(server.transport, McpTransport::Stdio);
+        assert_eq!(server.authentication, SecurityState::NotApplicable);
+    }
+
+    #[test]
+    fn malformed_args_degrade_this_server_instead_of_aborting_the_scan() {
+        use std::io::Write;
+        let mut file = tempfile::Builder::new().suffix(".json").tempfile().unwrap();
+        file.write_all(
+            serde_json::json!({
+                "mcpServers": {
+                    "broken": {"command": "server", "args": [123]},
+                    "fine": {"command": "server", "args": ["ok"]},
+                }
+            })
+            .to_string()
+            .as_bytes(),
+        )
+        .unwrap();
+
+        let servers = inspect_config(file.path()).expect("scan must not abort");
+        assert_eq!(servers.len(), 2);
+        let broken = servers
+            .iter()
+            .find(|server| server.name == "broken")
+            .unwrap();
+        assert_eq!(broken.argument_count, 0);
+        assert_eq!(
+            broken.completeness,
+            crate::assurance::AnalysisCompleteness::Partial
+        );
+        assert!(broken
+            .limitations
+            .iter()
+            .any(|limitation| limitation.contains("argument")));
+        let fine = servers.iter().find(|server| server.name == "fine").unwrap();
+        assert_eq!(fine.argument_count, 1);
     }
 }

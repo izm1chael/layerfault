@@ -5,6 +5,7 @@
 //! executing tool code. Unknown tool surfaces remain explicitly incomplete.
 
 mod capability;
+mod discovery;
 mod findings;
 mod graph;
 mod identity;
@@ -12,9 +13,17 @@ mod mcp;
 mod schema;
 mod types;
 
-pub use capability::{CapabilityConfidence, CapabilityGrant, CapabilityKind, CapabilityScope};
+pub use capability::{
+    CapabilityConfidence, CapabilityEvidenceKind, CapabilityGrant, CapabilityKind, CapabilityScope,
+};
+pub use discovery::{
+    build_snapshot, discover_stdio, parse_initialize_response, parse_prompts_list,
+    parse_resources_list, parse_tools_list, McpCapabilitySnapshot, PrimitiveCompleteness,
+    PrimitiveState, PromptArgument, PromptDefinition, ProtocolInfo, ResourceDefinition,
+    StdioDiscoveryOutcome, KNOWN_PROTOCOL_VERSIONS,
+};
 pub use findings::assess;
-pub use graph::{build as build_graph, dangerous_chains};
+pub use graph::{build as build_graph, dangerous_chains, PathReachability};
 pub use identity::{server_set_identity, tool_schema_identity};
 pub use mcp::inspect_config;
 pub use schema::capabilities_for_tool;

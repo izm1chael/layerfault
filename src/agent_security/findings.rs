@@ -1,4 +1,7 @@
-use super::{AgentSecurityAssessment, CapabilityGraph, McpTransport, SecurityState};
+use super::{
+    AgentSecurityAssessment, CapabilityGrant, CapabilityGraph, McpTransport, PathReachability,
+    SecurityState,
+};
 use crate::finding_evidence::{structural_invariant, EvidenceSubject, FindingBuilder};
 use crate::scanner::{CheckType, Confidence, FindingClass, LayerScanResult, ScanStatus};
 
@@ -44,6 +47,41 @@ pub fn assess(graph: CapabilityGraph) -> AgentSecurityAssessment {
         }
     }
     for chain in &graph.dangerous_chains {
+        let (confidence, detail) = match chain.reachability {
+            PathReachability::Reachable => (
+                Confidence::High,
+                format!(
+                    "{}: {} A potential path exists from {} to {}. Layerfault records this as a graph-reachability claim, not evidence that data has actually flowed.",
+                    chain.title,
+                    chain.impact,
+                    describe_grant(&chain.source),
+                    describe_grant(&chain.sink)
+                ),
+            ),
+            PathReachability::ReachableWithControl => (
+                Confidence::High,
+                format!(
+                    "{}: {} A potential path exists from {} to {}, mitigated by a known control: {}.",
+                    chain.title,
+                    chain.impact,
+                    describe_grant(&chain.source),
+                    describe_grant(&chain.sink),
+                    chain.barrier.as_deref().unwrap_or("an identified control")
+                ),
+            ),
+            PathReachability::Indeterminate => (
+                Confidence::Low,
+                format!(
+                    "{}: {} Whether a path exists from {} to {} could not be determined: {}. This is not evidence that no path exists.",
+                    chain.title,
+                    chain.impact,
+                    describe_grant(&chain.source),
+                    describe_grant(&chain.sink),
+                    chain.barrier.as_deref().unwrap_or("insufficient evidence")
+                ),
+            ),
+            PathReachability::Blocked => continue, // dangerous_chains() never returns Blocked entries.
+        };
         findings.push(
             FindingBuilder::new(
                 "LF-AGENT-DANGEROUS-CAPABILITY-CHAIN",
@@ -51,16 +89,19 @@ pub fn assess(graph: CapabilityGraph) -> AgentSecurityAssessment {
                 ScanStatus::Warn,
             )
             .class(FindingClass::Policy)
-            .confidence(Confidence::High)
+            .confidence(confidence)
             .subject(subject.clone())
-            .detail(format!("{}: {}", chain.title, chain.impact))
+            .detail(detail)
             .evidence(structural_invariant(
                 subject.clone(),
                 "dangerous capability chain",
                 serde_json::json!({
                     "chain_id": chain.id,
                     "title": chain.title,
-                    "capabilities": chain.capabilities,
+                    "reachability": chain.reachability,
+                    "source": chain.source,
+                    "sink": chain.sink,
+                    "barrier": chain.barrier,
                 }),
             ))
             .finish(),
@@ -97,6 +138,19 @@ pub fn assess(graph: CapabilityGraph) -> AgentSecurityAssessment {
         );
     }
     AgentSecurityAssessment { graph, findings }
+}
+
+fn describe_grant(grant: &CapabilityGrant) -> String {
+    match (grant.server.as_deref(), grant.tool.as_deref()) {
+        (Some(server), Some(tool)) => {
+            format!(
+                "{} (server '{server}', tool '{tool}')",
+                grant.capability.as_str()
+            )
+        }
+        (Some(server), None) => format!("{} (server '{server}')", grant.capability.as_str()),
+        _ => grant.capability.as_str().to_owned(),
+    }
 }
 
 fn server_finding(

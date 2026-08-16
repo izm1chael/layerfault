@@ -74,12 +74,26 @@ pub struct AgentDefinition {
     pub limitations: Vec<String>,
 }
 
+/// A concrete potential path from one capability to another, mediated by
+/// the model, that the agent's capability graph makes possible. `Reachable`
+/// under Layerfault's default assumption that a tool result the model can
+/// see is available to construct arguments for another tool the agent can
+/// invoke — this is a claim about what the graph makes *possible*, not
+/// evidence that data actually flowed. See `PathReachability`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DangerousCapabilityChain {
     pub id: String,
     pub title: String,
     pub impact: String,
-    pub capabilities: Vec<super::CapabilityGrant>,
+    pub reachability: super::PathReachability,
+    pub source: super::CapabilityGrant,
+    pub sink: super::CapabilityGrant,
+    /// Why the path is `ReachableWithControl` or `Indeterminate`. Always
+    /// present for those two states; `Blocked` paths are never reported
+    /// here (they are not dangerous), and `Reachable` paths need no
+    /// explanation beyond the default assumption above.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub barrier: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
