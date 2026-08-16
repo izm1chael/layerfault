@@ -39,11 +39,49 @@ pub struct McpServer {
     pub tls: SecurityState,
     #[serde(default)]
     pub credential_names: Vec<String>,
+    /// Credential-like `env`/`headers` keys (see `credential_names`) whose
+    /// configured value looks like a literal secret rather than an
+    /// indirection reference (`${VAR}`, `$VAR`, `{{...}}`, or empty). The
+    /// *names* are recorded, never the values.
+    #[serde(default)]
+    pub literal_credential_env_names: Vec<String>,
+    /// The endpoint URL embeds userinfo credentials
+    /// (`https://user:pass@host/...`).
+    #[serde(default)]
+    pub credential_in_url: bool,
+    /// A remote HTTP(S) endpoint that resolves to a loopback/local address
+    /// without TLS: exposed to DNS rebinding, because a browser or other
+    /// same-host client cannot distinguish this server's plaintext
+    /// responses from an attacker's.
+    #[serde(default)]
+    pub origin_dns_rebinding_exposed: bool,
+    /// Present only when the configuration declares an `oauth`-shaped
+    /// block. `None` is not "no OAuth posture issues" — it means this
+    /// server declares no OAuth configuration to assess at all.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub oauth: Option<OAuthPosture>,
     #[serde(default)]
     pub tools: Vec<ToolDefinition>,
     pub completeness: AnalysisCompleteness,
     #[serde(default)]
     pub limitations: Vec<String>,
+}
+
+/// Static OAuth posture derived from a declared `oauth` configuration
+/// block. This is derived entirely from the operator's own static
+/// configuration; Layerfault does not fetch a live
+/// `.well-known/oauth-protected-resource` document or perform any
+/// authorization flow to populate this.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OAuthPosture {
+    /// A `resource` (RFC 8707 resource indicator) is declared.
+    pub resource_declared: bool,
+    /// An `authorization_servers`/`authorizationServers` list is declared.
+    pub authorization_servers_declared: bool,
+    /// An `audience` binding is declared.
+    pub audience_declared: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scope: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -1,4 +1,4 @@
-use super::{McpServer, McpTransport, SecurityState, ToolDefinition};
+use super::{McpServer, McpTransport, OAuthPosture, SecurityState, ToolDefinition};
 use anyhow::{anyhow, bail, Context, Result};
 use serde_json::{Map, Value};
 use sha2::{Digest, Sha256};
@@ -67,7 +67,11 @@ fn parse_server(name: &str, value: &Value) -> Result<McpServer> {
         .as_object()
         .ok_or_else(|| anyhow!("MCP server '{name}' must be an object"))?;
     let executable = string_field(object, &["command", "executable"]);
-    let endpoint = string_field(object, &["url", "endpoint", "serverUrl", "server_url"]);
+    let raw_endpoint = string_field(object, &["url", "endpoint", "serverUrl", "server_url"]);
+    let credential_in_url = raw_endpoint
+        .as_deref()
+        .is_some_and(endpoint_embeds_credentials);
+    let endpoint = raw_endpoint.map(|value| redact_endpoint_credentials(&value));
     let transport_raw = string_field(object, &["transport", "type"]);
     let transport = classify_transport(
         transport_raw.as_deref(),
@@ -86,15 +90,30 @@ fn parse_server(name: &str, value: &Value) -> Result<McpServer> {
         })
         .collect();
     let mut credential_names = Vec::new();
+    let mut literal_credential_env_names = Vec::new();
     for key in ["env", "headers"] {
         if let Some(map) = object.get(key).and_then(Value::as_object) {
-            credential_names.extend(map.keys().filter(|name| credential_like(name)).cloned());
+            for (entry_name, entry_value) in map {
+                if !credential_like(entry_name) {
+                    continue;
+                }
+                credential_names.push(entry_name.clone());
+                if entry_value.as_str().is_some_and(looks_like_literal_secret) {
+                    literal_credential_env_names.push(entry_name.clone());
+                }
+            }
         }
     }
     credential_names.sort();
     credential_names.dedup();
+    literal_credential_env_names.sort();
+    literal_credential_env_names.dedup();
     let authentication = auth_state(object, transport, &credential_names);
     let tls = tls_state(transport, endpoint.as_deref());
+    let origin_dns_rebinding_exposed = tls == SecurityState::Absent
+        && endpoint.as_deref().is_some_and(endpoint_is_local)
+        && !origin_restriction_declared(object);
+    let oauth = parse_oauth_posture(object);
     let tools = parse_tools(object)?;
     let mut limitations = Vec::new();
     if tools.is_empty() {
@@ -131,6 +150,10 @@ fn parse_server(name: &str, value: &Value) -> Result<McpServer> {
         authentication,
         tls,
         credential_names,
+        literal_credential_env_names,
+        credential_in_url,
+        origin_dns_rebinding_exposed,
+        oauth,
         tools,
         completeness,
         limitations,
@@ -337,6 +360,112 @@ fn tls_state(transport: McpTransport, endpoint: Option<&str>) -> SecurityState {
     }
 }
 
+/// True when a credential-like `env`/`headers` value looks like a literal
+/// secret rather than an indirection reference the operator resolves some
+/// other way (`${VAR}`, `$VAR`, `{{ ... }}`, `<...>` placeholder syntax, or
+/// empty). This is a coarse, deliberately conservative heuristic: it only
+/// flags values that do NOT match any recognised indirection shape, so it
+/// under-reports rather than misclassifying an indirection reference as a
+/// hardcoded secret.
+fn looks_like_literal_secret(value: &str) -> bool {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return false;
+    }
+    if trimmed.starts_with('$')
+        || trimmed.starts_with("{{")
+        || (trimmed.starts_with('<') && trimmed.ends_with('>'))
+    {
+        return false;
+    }
+    true
+}
+
+/// True when the endpoint URL embeds userinfo credentials
+/// (`https://user:pass@host/...`).
+fn endpoint_embeds_credentials(endpoint: &str) -> bool {
+    url::Url::parse(endpoint)
+        .map(|url| !url.username().is_empty() || url.password().is_some())
+        .unwrap_or(false)
+}
+
+fn redact_endpoint_credentials(endpoint: &str) -> String {
+    let Ok(mut url) = url::Url::parse(endpoint) else {
+        return endpoint.to_owned();
+    };
+    if url.username().is_empty() && url.password().is_none() {
+        return endpoint.to_owned();
+    }
+    let _ = url.set_username("");
+    let _ = url.set_password(None);
+    url.into()
+}
+
+fn origin_restriction_declared(object: &Map<String, Value>) -> bool {
+    ["allowedOrigins", "allowed_origins", "originAllowlist"]
+        .iter()
+        .any(|key| {
+            object.get(*key).is_some_and(|value| match value {
+                Value::Array(values) => !values.is_empty(),
+                Value::String(value) => !value.trim().is_empty(),
+                _ => false,
+            })
+        })
+}
+
+/// True when the endpoint host is `localhost` or a literal IP address in a
+/// private/loopback/link-local range (`crate::net_safety::blocked_ip`).
+/// This is a static, config-only check: no DNS resolution happens here, so
+/// a hostname that merely *resolves* to a local address at runtime is not
+/// detected — only a literal local address declared in the configuration.
+fn endpoint_is_local(endpoint: &str) -> bool {
+    let Ok(url) = url::Url::parse(endpoint) else {
+        return false;
+    };
+    let Some(host) = url.host_str() else {
+        return false;
+    };
+    if host.eq_ignore_ascii_case("localhost") {
+        return true;
+    }
+    host.parse::<std::net::IpAddr>()
+        .map(crate::net_safety::blocked_ip)
+        .unwrap_or(false)
+}
+
+/// Parse a declared `oauth`-shaped configuration block, if present. `None`
+/// means the server declares no OAuth configuration at all — not that its
+/// OAuth posture is fine, and not that it has none in reality (Layerfault
+/// never fetches live authorization-server metadata to find out).
+fn parse_oauth_posture(object: &Map<String, Value>) -> Option<OAuthPosture> {
+    let oauth = object.get("oauth").and_then(Value::as_object)?;
+    Some(OAuthPosture {
+        resource_declared: nonempty_string(oauth.get("resource")),
+        authorization_servers_declared: nonempty_string_array(
+            oauth
+                .get("authorization_servers")
+                .or_else(|| oauth.get("authorizationServers")),
+        ),
+        audience_declared: nonempty_string(oauth.get("audience")),
+        scope: oauth
+            .get("scope")
+            .and_then(Value::as_str)
+            .map(str::to_owned),
+    })
+}
+
+fn nonempty_string(value: Option<&Value>) -> bool {
+    value
+        .and_then(Value::as_str)
+        .is_some_and(|value| !value.trim().is_empty())
+}
+
+fn nonempty_string_array(value: Option<&Value>) -> bool {
+    value.and_then(Value::as_array).is_some_and(|values| {
+        !values.is_empty() && values.iter().all(|value| nonempty_string(Some(value)))
+    })
+}
+
 fn credential_like(name: &str) -> bool {
     let lower = name.to_ascii_lowercase();
     [
@@ -464,5 +593,93 @@ mod tests {
             .any(|limitation| limitation.contains("argument")));
         let fine = servers.iter().find(|server| server.name == "fine").unwrap();
         assert_eq!(fine.argument_count, 1);
+    }
+
+    #[test]
+    fn literal_secret_detection() {
+        assert!(looks_like_literal_secret("sk-live-abcdef123456"));
+        assert!(!looks_like_literal_secret("${API_TOKEN}"));
+        assert!(!looks_like_literal_secret("$API_TOKEN"));
+        assert!(!looks_like_literal_secret("{{ secrets.api_token }}"));
+        assert!(!looks_like_literal_secret("<from-vault>"));
+        assert!(!looks_like_literal_secret("   "));
+    }
+
+    #[test]
+    fn endpoint_credential_detection() {
+        assert!(endpoint_embeds_credentials(
+            "https://user:pass@example.invalid/mcp"
+        ));
+        assert!(!endpoint_embeds_credentials("https://example.invalid/mcp"));
+        assert!(!endpoint_embeds_credentials("not a url"));
+        assert_eq!(
+            redact_endpoint_credentials("https://user:pass@example.invalid/mcp"),
+            "https://example.invalid/mcp"
+        );
+    }
+
+    #[test]
+    fn local_endpoint_detection() {
+        assert!(endpoint_is_local("http://localhost:8080/mcp"));
+        assert!(endpoint_is_local("http://127.0.0.1:8080/mcp"));
+        assert!(!endpoint_is_local("https://example.invalid/mcp"));
+        assert!(!endpoint_is_local("not a url"));
+    }
+
+    #[test]
+    fn oauth_posture_parsing_distinguishes_absent_from_incomplete() {
+        let no_oauth = serde_json::json!({}).as_object().unwrap().clone();
+        assert!(parse_oauth_posture(&no_oauth).is_none());
+
+        let incomplete = serde_json::json!({"oauth": {"scope": "read:all"}})
+            .as_object()
+            .unwrap()
+            .clone();
+        let posture = parse_oauth_posture(&incomplete).expect("oauth block declared");
+        assert!(!posture.resource_declared);
+        assert!(!posture.authorization_servers_declared);
+        assert!(!posture.audience_declared);
+        assert_eq!(posture.scope.as_deref(), Some("read:all"));
+
+        let complete = serde_json::json!({
+            "oauth": {
+                "resource": "https://example.invalid/mcp",
+                "authorization_servers": ["https://auth.invalid"],
+                "audience": "https://example.invalid/mcp",
+            }
+        })
+        .as_object()
+        .unwrap()
+        .clone();
+        let posture = parse_oauth_posture(&complete).expect("oauth block declared");
+        assert!(posture.resource_declared);
+        assert!(posture.authorization_servers_declared);
+        assert!(posture.audience_declared);
+    }
+
+    #[test]
+    fn credential_in_url_and_local_plaintext_origin_are_recorded_on_the_server() {
+        let value = serde_json::json!({
+            "url": "http://user:pass@127.0.0.1:8080/mcp",
+            "transport": "http",
+        });
+        let server = parse_server("local-remote", &value).unwrap();
+        assert!(server.credential_in_url);
+        assert!(server.origin_dns_rebinding_exposed);
+        assert_eq!(
+            server.endpoint.as_deref(),
+            Some("http://127.0.0.1:8080/mcp")
+        );
+    }
+
+    #[test]
+    fn declared_origin_restriction_avoids_local_origin_finding() {
+        let value = serde_json::json!({
+            "url": "http://127.0.0.1:8080/mcp",
+            "transport": "http",
+            "allowedOrigins": ["https://trusted.example"]
+        });
+        let server = parse_server("local-remote", &value).unwrap();
+        assert!(!server.origin_dns_rebinding_exposed);
     }
 }

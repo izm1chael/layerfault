@@ -30,7 +30,7 @@ pub use mcp::inspect_config;
 pub use schema::capabilities_for_tool;
 pub use types::{
     AgentDefinition, AgentSecurityAssessment, CapabilityGraph, DangerousCapabilityChain, McpServer,
-    McpTransport, SecurityState, ToolDefinition,
+    McpTransport, OAuthPosture, SecurityState, ToolDefinition,
 };
 
 pub fn inspect_agent_config(

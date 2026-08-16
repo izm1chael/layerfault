@@ -105,3 +105,149 @@ fn max_tokens_alone_does_not_produce_a_secret_exfiltration_chain() {
         .iter()
         .any(|chain| chain.id == "secret-read-to-network-egress"));
 }
+
+#[test]
+fn read_only_hint_contradicting_a_delete_tool_is_flagged() {
+    let config = write_config(serde_json::json!({
+        "mcpServers": {
+            "repo": {
+                "command": "server",
+                "tools": [{
+                    "name": "delete_repository",
+                    "inputSchema": {"type": "object", "properties": {"name": {"type": "string"}}},
+                    "annotations": {"readOnlyHint": true}
+                }]
+            }
+        }
+    }));
+    let assessment = layerfault::agent_security::inspect_agent_config("agent", config.path(), None)
+        .expect("inspect config");
+    assert!(assessment
+        .findings
+        .iter()
+        .any(|finding| finding.rule_id.as_deref() == Some("LF-MCP-CONTRADICTORY-ANNOTATION")));
+}
+
+#[test]
+fn consistent_annotation_on_a_delete_tool_is_not_flagged() {
+    let config = write_config(serde_json::json!({
+        "mcpServers": {
+            "repo": {
+                "command": "server",
+                "tools": [{
+                    "name": "delete_repository",
+                    "inputSchema": {"type": "object", "properties": {"name": {"type": "string"}}},
+                    "annotations": {"readOnlyHint": false}
+                }]
+            }
+        }
+    }));
+    let assessment = layerfault::agent_security::inspect_agent_config("agent", config.path(), None)
+        .expect("inspect config");
+    assert!(!assessment
+        .findings
+        .iter()
+        .any(|finding| finding.rule_id.as_deref() == Some("LF-MCP-CONTRADICTORY-ANNOTATION")));
+}
+
+#[test]
+fn same_credential_name_across_distinct_servers_flags_token_passthrough_risk() {
+    let config = write_config(serde_json::json!({
+        "mcpServers": {
+            "one": {"url": "https://one.invalid/mcp", "env": {"API_TOKEN": "${API_TOKEN}"}},
+            "two": {"url": "https://two.invalid/mcp", "env": {"API_TOKEN": "${API_TOKEN}"}},
+        }
+    }));
+    let assessment = layerfault::agent_security::inspect_agent_config("agent", config.path(), None)
+        .expect("inspect config");
+    assert!(assessment
+        .findings
+        .iter()
+        .any(|finding| finding.rule_id.as_deref() == Some("LF-MCP-TOKEN-PASSTHROUGH-RISK")));
+}
+
+#[test]
+fn credential_in_url_and_literal_credential_and_local_plaintext_origin_are_flagged() {
+    let config = write_config(serde_json::json!({
+        "mcpServers": {
+            "local": {
+                "url": "http://user:pass@127.0.0.1:8080/mcp",
+                "env": {"API_TOKEN": "sk-live-hardcoded-value"}
+            }
+        }
+    }));
+    let assessment = layerfault::agent_security::inspect_agent_config("agent", config.path(), None)
+        .expect("inspect config");
+    for rule_id in [
+        "LF-MCP-CREDENTIAL-IN-URL",
+        "LF-MCP-CREDENTIAL-ENV-EXPOSURE",
+        "LF-MCP-ORIGIN-UNRESTRICTED",
+    ] {
+        assert!(
+            assessment
+                .findings
+                .iter()
+                .any(|finding| finding.rule_id.as_deref() == Some(rule_id)),
+            "expected {rule_id} to be reported"
+        );
+    }
+}
+
+#[test]
+fn oauth_configuration_missing_metadata_and_audience_is_flagged() {
+    let config = write_config(serde_json::json!({
+        "mcpServers": {
+            "remote": {
+                "url": "https://example.invalid/mcp",
+                "oauth": {"scope": "admin"}
+            }
+        }
+    }));
+    let assessment = layerfault::agent_security::inspect_agent_config("agent", config.path(), None)
+        .expect("inspect config");
+    for rule_id in [
+        "LF-MCP-AUTH-METADATA-MISSING",
+        "LF-MCP-TOKEN-AUDIENCE-UNBOUND",
+        "LF-MCP-SCOPE-OVERBROAD",
+    ] {
+        assert!(
+            assessment
+                .findings
+                .iter()
+                .any(|finding| finding.rule_id.as_deref() == Some(rule_id)),
+            "expected {rule_id} to be reported"
+        );
+    }
+}
+
+#[test]
+fn complete_oauth_configuration_with_narrow_scope_is_not_flagged() {
+    let config = write_config(serde_json::json!({
+        "mcpServers": {
+            "remote": {
+                "url": "https://example.invalid/mcp",
+                "oauth": {
+                    "resource": "https://example.invalid/mcp",
+                    "authorization_servers": ["https://auth.invalid"],
+                    "audience": "https://example.invalid/mcp",
+                    "scope": "repo:read"
+                }
+            }
+        }
+    }));
+    let assessment = layerfault::agent_security::inspect_agent_config("agent", config.path(), None)
+        .expect("inspect config");
+    for rule_id in [
+        "LF-MCP-AUTH-METADATA-MISSING",
+        "LF-MCP-TOKEN-AUDIENCE-UNBOUND",
+        "LF-MCP-SCOPE-OVERBROAD",
+    ] {
+        assert!(
+            !assessment
+                .findings
+                .iter()
+                .any(|finding| finding.rule_id.as_deref() == Some(rule_id)),
+            "did not expect {rule_id} to be reported"
+        );
+    }
+}
