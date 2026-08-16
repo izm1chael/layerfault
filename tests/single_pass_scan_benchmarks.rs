@@ -7,15 +7,16 @@ use tempfile::tempdir;
 #[test]
 fn benchmark_single_pass_vs_multi_pass_synthetic() {
     let dir = tempdir().unwrap();
-    let file_path = dir.path().join("synthetic_100mb.bin");
+    let file_path = dir.path().join("synthetic_10mb.bin");
 
-    // Create 100 MiB synthetic file with embedded signatures
+    // Ten MiB is enough to cross many scanner chunks and validate pass fusion
+    // without turning a correctness test into a sustained disk-load benchmark.
     let chunk = vec![b'a'; 1024 * 1024];
     let mut f = std::fs::File::create(&file_path).unwrap();
-    for i in 0..100 {
-        if i == 50 {
+    for i in 0..10 {
+        if i == 5 {
             f.write_all(b"os.system('id')\n").unwrap();
-        } else if i == 75 {
+        } else if i == 7 {
             f.write_all(b"\x7fELF\x02\x01\x01\x00").unwrap();
         } else {
             f.write_all(&chunk).unwrap();
@@ -28,7 +29,7 @@ fn benchmark_single_pass_vs_multi_pass_synthetic() {
     // Measure Single Pass (fused SHA-256 + Binary + Text)
     let start_single = Instant::now();
     let session = ScanSession::new(&file_path, &file).unwrap();
-    let text_obs = Box::new(TextStreamObserver::new("synthetic_100mb.bin"));
+    let text_obs = Box::new(TextStreamObserver::new("synthetic_10mb.bin"));
     let bin_obs = Box::new(BinaryStreamObserver::new());
     let (digest, findings) = session
         .run("application/octet-stream", vec![text_obs, bin_obs])
@@ -43,7 +44,7 @@ fn benchmark_single_pass_vs_multi_pass_synthetic() {
         "Single-pass run must use exactly 1 full pass"
     );
 
-    println!("\n--- Single-Pass Benchmark (100 MiB) ---");
+    println!("\n--- Single-Pass Benchmark (10 MiB) ---");
     println!("Duration: {:?}", duration_single);
     println!("Sequential Bytes Read: {}", metrics.bytes_read_sequential);
     println!("Full Passes: {}", metrics.full_passes);

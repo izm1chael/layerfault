@@ -68,14 +68,18 @@ PY
 log "Repository architecture substance gate"
 bash scripts/security/architecture-gates.sh "$ROOT"
 
-log "Rust formatting / compile / tests / Clippy"
+log "Rust formatting / compile / Clippy"
 cargo fmt --all -- --check
 cargo check --locked --all-targets --jobs "$BUILD_JOBS"
-cargo test --locked --all-targets --jobs "$BUILD_JOBS"
 cargo clippy --locked --all-targets --all-features --jobs "$BUILD_JOBS" -- -D warnings
 
-log "Layerfault security and schema contracts"
+# Run timing-sensitive regression checks before the exhaustive test suite can
+# leave the host under sustained CPU or disk pressure.
+log "Layerfault security and performance contracts"
 bash scripts/security/gates.sh
+
+log "Exhaustive Rust tests and schema contracts"
+cargo test --locked --all-targets --jobs "$BUILD_JOBS"
 python3 scripts/security/schema-gates.py --binary target/debug/layerfault --sarif-fixture tests/corpus/pickle/benign_opcodes.pkl
 
 log "Dependency lock requirements"
