@@ -25,6 +25,12 @@ pub struct LineageVerification {
     pub identity: VerificationState,
     pub consistency: LineageConsistency,
     pub reasons: Vec<String>,
+    /// Real, rule-catalogued findings for this verification — not just the
+    /// informal `reasons` text. Populated by `verify()` itself so every
+    /// caller gets consistent evidence rather than needing to re-derive
+    /// findings from the raw states.
+    #[serde(default)]
+    pub findings: Vec<crate::scanner::LayerScanResult>,
 }
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]

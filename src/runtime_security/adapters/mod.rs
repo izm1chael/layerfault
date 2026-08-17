@@ -43,6 +43,11 @@ pub(crate) fn extract_build(raw: &str) -> Option<String> {
     Some(format!("b{}", &captures[1]))
 }
 
+pub(crate) fn immutable_git_revision(value: &str) -> bool {
+    let value = value.trim();
+    value.len() == 40 && value.bytes().all(|byte| byte.is_ascii_hexdigit())
+}
+
 pub fn all_adapters() -> [&'static dyn RuntimeAdapter; 12] {
     [
         &OLLAMA,

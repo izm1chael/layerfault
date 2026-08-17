@@ -89,6 +89,24 @@ pub struct EvidenceRecord {
     pub stale_reason: Option<String>,
 }
 
+/// What an [`InvalidationPlan`] requires before evidence can be current
+/// again. Computed by [`super::dependency::reassessment_action`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ReassessmentAction {
+    /// Nothing was invalidated.
+    None,
+    /// Invalidated evidence can be refreshed by passive analysis alone
+    /// (parsing, static inspection) — no model execution is required.
+    PassiveRescanRecommended,
+    /// `EvidenceDomain::BehaviouralAssurance` was invalidated. Refreshing it
+    /// requires an actual model run, which Layerfault never launches on its
+    /// own: a caller must supply a fresh `behavioural_report` produced by a
+    /// deliberate, operator-initiated run. Until one is supplied, this
+    /// evidence stays stale and the trust state stays at `ReviewRequired`.
+    ActiveReassessmentRequired,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct InvalidationPlan {
     #[serde(default)]

@@ -100,7 +100,12 @@ pub(super) struct CountedFile {
 
 #[derive(Debug, Default)]
 pub(super) struct LocalAnalysis {
-    pub(super) duplicate_counts: HashMap<String, (u64, String)>,
+    /// Keyed by exact-content SHA-256 digest: (occurrence count, a bounded
+    /// display example, a SimHash fingerprint of the full normalized text
+    /// used for near-duplicate clustering). One entry per distinct exact
+    /// digest, so near-duplicate comparison never re-flags exact duplicates
+    /// against themselves.
+    pub(super) duplicate_counts: HashMap<String, (u64, String, u64)>,
     pub(super) token_counts: HashMap<String, u64>,
     pub(super) label_token_counts: HashMap<(String, String), u64>,
     pub(super) label_counts: HashMap<String, u64>,

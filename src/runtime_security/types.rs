@@ -132,6 +132,38 @@ pub struct RuntimeConfiguration {
     pub authentication: PostureState,
     pub tls: PostureState,
     pub network_exposure: PostureState,
+    /// A middleware/plugin was configured that loads additional code at
+    /// startup (e.g. vLLM's `--middleware`/`--tool-parser-plugin`). Distinct
+    /// from `trust_remote_code`: this is code the *operator's own launch
+    /// command* points at, not code bundled with a downloaded model.
+    #[serde(default)]
+    pub custom_code_extension: Option<bool>,
+    /// The runtime is configured to deserialize model weights via a
+    /// pickle-based load path (e.g. vLLM's `--load-format pt`) rather than a
+    /// safe tensor format.
+    #[serde(default)]
+    pub pickle_weight_loading: Option<bool>,
+    /// CORS is configured to allow any origin (a wildcard, or the
+    /// runtime's unconfigured default when that default is a wildcard).
+    #[serde(default)]
+    pub cors_wildcard_origin: Option<bool>,
+    /// A chat template was overridden from the runtime's launch
+    /// configuration rather than the one bundled with the model.
+    #[serde(default)]
+    pub custom_chat_template: Option<bool>,
+    /// The model is loaded from a pinned, immutable revision rather than a
+    /// floating reference (e.g. a branch name or no revision at all).
+    #[serde(default)]
+    pub revision_pinned: Option<bool>,
+    /// The runtime is configured to read media (images/audio) from local
+    /// filesystem paths supplied in requests.
+    #[serde(default)]
+    pub local_media_access: Option<bool>,
+    /// An endpoint or mode is enabled that exposes per-request/per-slot
+    /// internal state (e.g. another client's in-flight prompt) across
+    /// clients sharing the same server instance.
+    #[serde(default)]
+    pub cross_tenant_state_exposure: Option<bool>,
 }
 
 impl Default for RuntimeConfiguration {
@@ -147,6 +179,13 @@ impl Default for RuntimeConfiguration {
             authentication: PostureState::Unknown,
             tls: PostureState::Unknown,
             network_exposure: PostureState::Unknown,
+            custom_code_extension: None,
+            pickle_weight_loading: None,
+            cors_wildcard_origin: None,
+            custom_chat_template: None,
+            revision_pinned: None,
+            local_media_access: None,
+            cross_tenant_state_exposure: None,
         }
     }
 }

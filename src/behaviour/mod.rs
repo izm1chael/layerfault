@@ -6,6 +6,7 @@ pub mod ebpf_telemetry;
 pub mod ebpf_verify;
 pub mod evaluate;
 pub mod microvm;
+pub mod parity;
 pub mod probes;
 pub mod python;
 pub mod runtime;

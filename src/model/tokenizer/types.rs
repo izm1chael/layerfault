@@ -10,8 +10,23 @@ pub struct TokenizerSecurityReport {
     pub special_tokens: Vec<SpecialTokenRecord>,
     pub chat_template: Option<ChatTemplateSecurity>,
     pub unicode_controls: Vec<UnicodeControlRecord>,
+    /// A plain vocabulary entry whose literal string exactly matches a
+    /// declared role-boundary special token. If the runtime's text-based
+    /// prompt assembly does not otherwise prevent it, content that decodes
+    /// to this ordinary token can render identically to a genuine role
+    /// boundary marker — "special-token smuggling". Exact-string match
+    /// only; see the finding's own limitation text for what this does not
+    /// cover (Unicode-confusable/homoglyph near-matches).
+    #[serde(default)]
+    pub special_token_collisions: Vec<SpecialTokenCollision>,
     pub findings: Vec<LayerScanResult>,
     pub coverage: Coverage,
+}
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SpecialTokenCollision {
+    pub token: String,
+    pub special_source: String,
+    pub vocabulary_source: String,
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TokenizerFileSummary {

@@ -1,6 +1,7 @@
 use super::indicators::{
-    add, add_duplicate_indicator, add_rare_trigger_indicator, confidence, contains_zero_width,
-    credential_like, detail, has_url, unsafe_code_like, MAX_DUPLICATE_EXAMPLES,
+    add, add_duplicate_indicator, add_near_duplicate_indicator, add_rare_trigger_indicator,
+    confidence, contains_zero_width, credential_like, detail, has_url, simhash, unsafe_code_like,
+    MAX_DUPLICATE_EXAMPLES,
 };
 use super::inventory::build_inventory;
 use super::readers::{parseable, visit_records};
@@ -55,6 +56,7 @@ pub fn poisoning_review_with_jobs(path: &Path, jobs: usize) -> Result<PoisoningR
     }
 
     add_duplicate_indicator(&mut aggregate);
+    add_near_duplicate_indicator(&mut aggregate);
     add_rare_trigger_indicator(&mut aggregate);
 
     let opaque_count = inventory
@@ -163,10 +165,14 @@ fn observe_record(out: &mut LocalAnalysis, record: Record, token_key_quota: usiz
         return;
     }
     let digest = hex::encode(Sha256::digest(normalized.as_bytes()));
-    let entry = out
-        .duplicate_counts
-        .entry(digest)
-        .or_insert((0, super::indicators::bounded(&record.text, 240)));
+    let record_tokens = tokens(&normalized);
+    let entry = out.duplicate_counts.entry(digest).or_insert_with(|| {
+        (
+            0,
+            super::indicators::bounded(&record.text, 240),
+            simhash(&record_tokens),
+        )
+    });
     entry.0 = entry.0.saturating_add(1);
 
     if contains_zero_width(&record.text) {
@@ -194,7 +200,6 @@ fn observe_record(out: &mut LocalAnalysis, record: Record, token_key_quota: usiz
         );
     }
 
-    let record_tokens = tokens(&normalized);
     for token in record_tokens.iter().take(512) {
         bounded_increment(
             &mut out.token_counts,
@@ -237,11 +242,11 @@ fn merge_analysis(target: &mut LocalAnalysis, source: LocalAnalysis) {
 
     let mut duplicates: Vec<_> = source.duplicate_counts.into_iter().collect();
     duplicates.sort_by(|a, b| a.0.cmp(&b.0));
-    for (digest, (count, example)) in duplicates {
+    for (digest, (count, example, record_simhash)) in duplicates {
         let entry = target
             .duplicate_counts
             .entry(digest)
-            .or_insert((0, example));
+            .or_insert((0, example, record_simhash));
         entry.0 = entry.0.saturating_add(count);
     }
     merge_count_map(

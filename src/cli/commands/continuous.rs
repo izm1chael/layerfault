@@ -63,6 +63,7 @@ pub(crate) fn run_continuous(args: ContinuousArgs) -> Result<()> {
             current,
             output,
             journal,
+            head_anchor,
             entity,
             json,
         } => {
@@ -74,6 +75,10 @@ pub(crate) fn run_continuous(args: ContinuousArgs) -> Result<()> {
             }
             if let (Some(path), Some(event)) = (journal.as_deref(), evaluation.event.as_ref()) {
                 layerfault::continuous::append_event(path, event)?;
+                if let Some(anchor_path) = head_anchor.as_deref() {
+                    let records = layerfault::continuous::load_events(path)?;
+                    layerfault::continuous::write_head_anchor(anchor_path, &records)?;
+                }
             }
             if json {
                 write_stdout_json(&evaluation, true)?;
@@ -87,6 +92,7 @@ pub(crate) fn run_continuous(args: ContinuousArgs) -> Result<()> {
         ContinuousCommand::Watch {
             state_path,
             journal,
+            head_anchor,
             entity,
             state,
             interval,
@@ -151,6 +157,10 @@ pub(crate) fn run_continuous(args: ContinuousArgs) -> Result<()> {
                 layerfault::continuous::save_snapshot(&state_path, &evaluation.snapshot)?;
                 if let Some(event) = evaluation.event.as_ref() {
                     layerfault::continuous::append_event(&journal, event)?;
+                    if let Some(anchor_path) = head_anchor.as_deref() {
+                        let records = layerfault::continuous::load_events(&journal)?;
+                        layerfault::continuous::write_head_anchor(anchor_path, &records)?;
+                    }
                 }
                 if jsonl {
                     println!("{}", serde_json::to_string(&evaluation)?);
@@ -160,21 +170,41 @@ pub(crate) fn run_continuous(args: ContinuousArgs) -> Result<()> {
                 previous = evaluation.snapshot;
             }
         }
-        ContinuousCommand::Journal { journal, json } => {
-            let events = layerfault::continuous::load_events(&journal)?;
-            if json {
-                write_stdout_json(&events, true)?;
-            } else if events.is_empty() {
+        ContinuousCommand::Journal {
+            journal,
+            verify,
+            head_anchor,
+            json,
+        } => {
+            let records = layerfault::continuous::load_events(&journal)?;
+            if verify {
+                let head = match head_anchor.as_deref() {
+                    Some(path) => layerfault::continuous::load_head_anchor(path)?,
+                    None => None,
+                };
+                let result = layerfault::continuous::verify_chain(&records, head.as_ref())?;
+                if json {
+                    write_stdout_json(&result, true)?;
+                } else {
+                    print_chain_verification(&result);
+                }
+                if !matches!(result, layerfault::continuous::ChainVerification::Intact) {
+                    std::process::exit(1);
+                }
+            } else if json {
+                write_stdout_json(&records, true)?;
+            } else if records.is_empty() {
                 println!("Trust journal is empty.");
             } else {
-                for event in events {
+                for record in records {
                     println!(
-                        "{}\t{}\t{:?}->{:?}\t{}",
-                        event.timestamp_unix,
-                        event.entity,
-                        event.previous_state,
-                        event.new_state,
-                        event.cause
+                        "{}\t{}\t{}\t{:?}->{:?}\t{}",
+                        record.sequence,
+                        record.event.timestamp_unix,
+                        record.event.entity,
+                        record.event.previous_state,
+                        record.event.new_state,
+                        record.event.cause
                     );
                 }
             }
@@ -187,9 +217,34 @@ pub(crate) fn run_continuous(args: ContinuousArgs) -> Result<()> {
 struct ChangeEvaluation {
     plan: layerfault::continuous::InvalidationPlan,
     state: TrustState,
+    action: layerfault::continuous::ReassessmentAction,
     findings: Vec<layerfault::scanner::LayerScanResult>,
     event: Option<layerfault::continuous::TrustEvent>,
     snapshot: layerfault::continuous::ExecutionSnapshot,
+}
+
+fn print_chain_verification(result: &layerfault::continuous::ChainVerification) {
+    use layerfault::continuous::ChainVerification;
+    match result {
+        ChainVerification::Intact => println!("Journal chain: intact"),
+        ChainVerification::Broken {
+            at_sequence,
+            reason,
+        } => {
+            println!("Journal chain: BROKEN at sequence {at_sequence}: {reason}");
+        }
+        ChainVerification::TruncationSuspected {
+            anchored_sequence,
+            tail_sequence,
+        } => {
+            println!(
+                "Journal chain: TRUNCATION SUSPECTED — anchor expects tail sequence {anchored_sequence}, journal ends at {}",
+                tail_sequence
+                    .map(|value| value.to_string())
+                    .unwrap_or_else(|| "none (empty journal)".to_owned())
+            );
+        }
+    }
 }
 
 fn evaluate_change(
@@ -212,6 +267,7 @@ fn evaluate_change(
     };
     layerfault::continuous::apply_invalidation(&mut after, &plan, &reason);
     let new_state = layerfault::continuous::state_after_invalidation(before.state, &plan);
+    let action = layerfault::continuous::reassessment_action(&plan);
     let findings = layerfault::continuous::drift_findings(entity, &plan, before.state);
     let event = if new_state != before.state || !plan.changed_components.is_empty() {
         let mut event = layerfault::continuous::transition(
@@ -237,6 +293,7 @@ fn evaluate_change(
     Ok(ChangeEvaluation {
         plan,
         state: new_state,
+        action,
         findings,
         event,
         snapshot: after,
@@ -253,6 +310,7 @@ fn print_evaluation(evaluation: &ChangeEvaluation) {
         evaluation.plan.invalidated_domains.len()
     );
     println!("Trust state: {:?}", evaluation.state);
+    println!("Reassessment action: {:?}", evaluation.action);
     for component in &evaluation.plan.changed_components {
         println!("- changed: {component:?}");
     }

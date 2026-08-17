@@ -1,7 +1,29 @@
 use super::super::{ResearchArgs, ResearchCommand};
 use anyhow::{anyhow, bail, Result};
 use layerfault::json_stream::write_stdout_json;
-use layerfault::research::{CandidateSource, TriggerCandidate};
+use layerfault::research::{CandidateSource, ContextTemplate, TriggerCandidate};
+
+/// `announced` keeps prior CLI behaviour and cost (one model call per
+/// candidate); `full`/`all` runs the complete context matrix (several times
+/// the model calls, one per candidate per template); otherwise a
+/// comma-separated list of specific template ids from `ContextTemplate::id`.
+fn parse_context_templates(value: &str) -> Result<Vec<ContextTemplate>> {
+    match value.trim() {
+        "announced" => Ok(vec![ContextTemplate::AnnouncedSyntheticPrefix]),
+        "full" | "all" => Ok(ContextTemplate::all().to_vec()),
+        other => other
+            .split(',')
+            .map(|piece| {
+                let piece = piece.trim();
+                ContextTemplate::all()
+                    .iter()
+                    .find(|template| template.id() == piece)
+                    .copied()
+                    .ok_or_else(|| anyhow!("unknown context template '{piece}'"))
+            })
+            .collect(),
+    }
+}
 
 fn tag(text: String, source: CandidateSource, rationale: &str) -> TriggerCandidate {
     TriggerCandidate {
@@ -33,8 +55,10 @@ pub(crate) fn run_research(args: ResearchArgs) -> Result<()> {
             suffix,
             seed,
             timeout_seconds,
+            context_templates,
             json: emit_json,
         } => {
+            let templates = parse_context_templates(&context_templates)?;
             let space = layerfault::research::trigger_space_from_strings(
                 alphabet,
                 min_length,
@@ -55,6 +79,7 @@ pub(crate) fn run_research(args: ResearchArgs) -> Result<()> {
                     base.as_deref(),
                     runtime_path.as_deref(),
                     &candidates,
+                    &templates,
                     seed,
                     timeout_seconds,
                 )?,
@@ -67,6 +92,7 @@ pub(crate) fn run_research(args: ResearchArgs) -> Result<()> {
                         base.as_deref(),
                         tokenizer,
                         &candidates,
+                        &templates,
                         seed,
                         timeout_seconds,
                     )?
@@ -82,8 +108,10 @@ pub(crate) fn run_research(args: ResearchArgs) -> Result<()> {
             runtime_path,
             tokenizer,
             seed,
+            context_templates,
             json: emit_json,
         } => {
+            let templates = parse_context_templates(&context_templates)?;
             let seed_literals = vec![
                 "RFC-79".to_owned(),
                 "CWE-79".to_owned(),
@@ -133,6 +161,7 @@ pub(crate) fn run_research(args: ResearchArgs) -> Result<()> {
                     base.as_deref(),
                     runtime_path.as_deref(),
                     &candidates,
+                    &templates,
                     seed,
                     120,
                 )?,
@@ -145,6 +174,7 @@ pub(crate) fn run_research(args: ResearchArgs) -> Result<()> {
                         base.as_deref(),
                         tokenizer,
                         &candidates,
+                        &templates,
                         seed,
                         120,
                     )?
@@ -310,6 +340,7 @@ pub(crate) fn run_research(args: ResearchArgs) -> Result<()> {
             beam_width,
             beam_rounds,
             profile,
+            context_templates,
             json: emit_json,
         } => {
             if profile != "standard" && profile != "research" {
@@ -318,6 +349,7 @@ pub(crate) fn run_research(args: ResearchArgs) -> Result<()> {
                     profile
                 );
             }
+            let templates = parse_context_templates(&context_templates)?;
             let tokenizer_path = if model.is_dir() {
                 ["tokenizer.json", "tokenizer.model"]
                     .into_iter()
@@ -383,11 +415,11 @@ pub(crate) fn run_research(args: ResearchArgs) -> Result<()> {
                 bail!("trigger hunt requires at least one --candidate or --from-tokenizer");
             }
             let mut report = match runtime.as_deref() {
-                Some("llama-cpp") => layerfault::research::search_external(&model, parent.as_deref(), None, &candidates, 0, 120)?,
+                Some("llama-cpp") => layerfault::research::search_external(&model, parent.as_deref(), None, &candidates, &templates, 0, 120)?,
                 Some(other) => bail!("active trigger hunt runtime '{}' is not available through the current guarded behavioural backend; use llama-cpp or omit --runtime for embedded analysis", other),
                 None => {
                     let tokenizer = tokenizer_path.as_deref().ok_or_else(|| anyhow!("embedded trigger hunt is unavailable for this target; supply --runtime llama-cpp"))?;
-                    layerfault::research::search_embedded(&model, parent.as_deref(), tokenizer, &candidates, 0, 120)?
+                    layerfault::research::search_embedded(&model, parent.as_deref(), tokenizer, &candidates, &templates, 0, 120)?
                 }
             };
             report.boundary = layerfault::model::research::HUNT_BOUNDARY.into();
@@ -422,4 +454,42 @@ fn emit_research(
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn announced_keyword_selects_the_single_original_template() {
+        let templates = parse_context_templates("announced").unwrap();
+        assert_eq!(templates, vec![ContextTemplate::AnnouncedSyntheticPrefix]);
+    }
+
+    #[test]
+    fn full_keyword_selects_the_entire_matrix() {
+        let templates = parse_context_templates("full").unwrap();
+        assert_eq!(templates.len(), ContextTemplate::all().len());
+        let templates = parse_context_templates("all").unwrap();
+        assert_eq!(templates.len(), ContextTemplate::all().len());
+    }
+
+    #[test]
+    fn explicit_comma_list_selects_exactly_those_templates() {
+        let templates = parse_context_templates(&format!(
+            "{},{}",
+            ContextTemplate::Bare.id(),
+            ContextTemplate::ZeroWidthObfuscated.id()
+        ))
+        .unwrap();
+        assert_eq!(
+            templates,
+            vec![ContextTemplate::Bare, ContextTemplate::ZeroWidthObfuscated]
+        );
+    }
+
+    #[test]
+    fn unknown_template_id_is_rejected() {
+        assert!(parse_context_templates("not-a-real-template").is_err());
+    }
 }

@@ -628,6 +628,76 @@
           "subject_path": "install.js"
         }
       }
+    },
+    {
+      "id": "positive-warn-agent-mcp-unpinned-supply-chain",
+      "category": "positive_warn",
+      "description": "MCP server launched via unpinned npx with auto-confirm, plus a tool asserting readOnlyHint on a delete operation",
+      "command": {
+        "kind": "agent inspect",
+        "path": "tests/detector_quality/fixtures/positive_warn/agent_mcp_unpinned_supply_chain/mcp.json"
+      },
+      "expected": {
+        "exit_code": 0,
+        "must_include_rules": [
+          "LF-MCP-SUPPLY-CHAIN-AUTO-DOWNLOAD",
+          "LF-MCP-SUPPLY-CHAIN-AUTO-CONFIRM",
+          "LF-MCP-CONTRADICTORY-ANNOTATION"
+        ],
+        "must_not_include_rules": []
+      }
+    },
+    {
+      "id": "negative-benign-agent-mcp-pinned-supply-chain",
+      "category": "negative_benign",
+      "description": "MCP server launched via a version-pinned npx package with a consistent readOnlyHint tool annotation",
+      "command": {
+        "kind": "agent inspect",
+        "path": "tests/detector_quality/fixtures/negative_benign/agent_mcp_pinned_supply_chain/mcp.json"
+      },
+      "expected": {
+        "exit_code": 0,
+        "must_include_rules": [],
+        "must_not_include_rules": [
+          "LF-MCP-SUPPLY-CHAIN-AUTO-DOWNLOAD",
+          "LF-MCP-SUPPLY-CHAIN-AUTO-CONFIRM",
+          "LF-MCP-CONTRADICTORY-ANNOTATION"
+        ]
+      }
+    },
+    {
+      "id": "positive-warn-dataset-near-duplicate",
+      "category": "positive_warn",
+      "description": "Dataset with templated near-duplicate records (same wording, substituted account number)",
+      "command": {
+        "kind": "dataset poisoning-review",
+        "path": "tests/detector_quality/fixtures/positive_warn/dataset_near_duplicate"
+      },
+      "expected": {
+        "overall": "WARN",
+        "exit_code": 1,
+        "must_include_rules": [
+          "LF-DATASET-NEAR-DUPLICATE-CONCENTRATION"
+        ],
+        "must_not_include_rules": []
+      }
+    },
+    {
+      "id": "negative-benign-dataset-unrelated-records",
+      "category": "negative_benign",
+      "description": "Dataset of genuinely unrelated benign records, regression fixture for near-duplicate false positives",
+      "command": {
+        "kind": "dataset poisoning-review",
+        "path": "tests/detector_quality/fixtures/negative_benign/dataset_unrelated_records"
+      },
+      "expected": {
+        "overall": "PASS",
+        "exit_code": 0,
+        "must_include_rules": [],
+        "must_not_include_rules": [
+          "LF-DATASET-NEAR-DUPLICATE-CONCENTRATION"
+        ]
+      }
     }
   ]
 }

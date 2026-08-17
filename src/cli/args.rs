@@ -795,6 +795,13 @@ pub(crate) enum ResearchCommand {
         seed: u64,
         #[arg(long, default_value_t = 120)]
         timeout_seconds: u64,
+        /// Which prompt-embedding context(s) to run each candidate through:
+        /// `announced` (the original single template, one model call per
+        /// candidate — the default, to keep run cost predictable), `full`
+        /// (every template in the context matrix — several times the model
+        /// calls), or a comma-separated list of specific template ids.
+        #[arg(long, default_value = "announced")]
+        context_templates: String,
         #[arg(long, default_value_t = false)]
         json: bool,
     },
@@ -810,6 +817,8 @@ pub(crate) enum ResearchCommand {
         tokenizer: Option<PathBuf>,
         #[arg(long, default_value_t = 0)]
         seed: u64,
+        #[arg(long, default_value = "announced")]
+        context_templates: String,
         #[arg(long, default_value_t = false)]
         json: bool,
     },
@@ -856,6 +865,8 @@ pub(crate) enum ResearchCommand {
         beam_rounds: usize,
         #[arg(long, default_value = "standard")]
         profile: String,
+        #[arg(long, default_value = "announced")]
+        context_templates: String,
         #[arg(long, default_value_t = false)]
         json: bool,
     },
@@ -1792,6 +1803,13 @@ pub(crate) enum ContinuousCommand {
         output: Option<PathBuf>,
         #[arg(long)]
         journal: Option<PathBuf>,
+        /// Path to write the journal's tail anchor after appending, so a
+        /// later `journal --verify` can detect the journal being made
+        /// shorter (see `continuous::journal` module docs for what this
+        /// does and does not protect against). Only meaningful together
+        /// with `--journal`.
+        #[arg(long)]
+        head_anchor: Option<PathBuf>,
         #[arg(long, default_value = "execution")]
         entity: String,
         #[arg(long, default_value_t = false)]
@@ -1802,6 +1820,8 @@ pub(crate) enum ContinuousCommand {
         state_path: PathBuf,
         #[arg(long)]
         journal: PathBuf,
+        #[arg(long)]
+        head_anchor: Option<PathBuf>,
         #[arg(long, default_value = "execution")]
         entity: String,
         #[arg(long, default_value = "unknown")]
@@ -1841,6 +1861,13 @@ pub(crate) enum ContinuousCommand {
     },
     Journal {
         journal: PathBuf,
+        /// Verify the journal's hash chain (and, if given, its tail against
+        /// this anchor file written by `--head-anchor` elsewhere) instead
+        /// of listing events.
+        #[arg(long, default_value_t = false)]
+        verify: bool,
+        #[arg(long)]
+        head_anchor: Option<PathBuf>,
         #[arg(long, default_value_t = false)]
         json: bool,
     },

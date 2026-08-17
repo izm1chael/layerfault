@@ -1,4 +1,6 @@
-use super::{SpecialTokenRecord, TokenizerSecurityReport, UnicodeControlRecord};
+use super::{
+    SpecialTokenCollision, SpecialTokenRecord, TokenizerSecurityReport, UnicodeControlRecord,
+};
 use crate::finding_evidence::{EvidenceKind, FindingBuilder, FindingEvidence};
 use crate::scanner::{CheckType, Confidence, FindingClass, LayerScanResult, ScanStatus};
 use std::collections::BTreeMap;
@@ -8,6 +10,9 @@ pub(crate) fn build(report: &TokenizerSecurityReport) -> Vec<LayerScanResult> {
         out.push(control(report, c));
     }
     conflicts(report, &report.special_tokens, &mut out);
+    for collision in &report.special_token_collisions {
+        out.push(collision_finding(report, collision));
+    }
     if let Some(t) = &report.chat_template {
         if !t.hidden_literals.is_empty() {
             out.push(simple(
@@ -70,6 +75,33 @@ fn control(r: &TokenizerSecurityReport, c: &UnicodeControlRecord) -> LayerScanRe
         )
         .finish()
 }
+fn collision_finding(
+    r: &TokenizerSecurityReport,
+    collision: &SpecialTokenCollision,
+) -> LayerScanResult {
+    FindingBuilder::new(
+        "LF-TOKENIZER-SPECIAL-TOKEN-SPOOFABLE",
+        CheckType::TokenizerSecurity,
+        ScanStatus::Warn,
+    )
+    .class(FindingClass::ContentIndicator)
+    .confidence(Confidence::High)
+    .subject(r.subject.clone())
+    .detail(format!(
+        "plain vocabulary entry in {} matches the literal string of a role-boundary special token declared in {}",
+        collision.vocabulary_source, collision.special_source
+    ))
+    .evidence(
+        FindingEvidence::new(
+            EvidenceKind::TokenizerRecord,
+            r.subject.clone(),
+            "Special token smuggling: plain vocabulary entry matches a role-boundary marker",
+        )
+        .structured(serde_json::json!(collision)),
+    )
+    .finish()
+}
+
 fn conflicts(
     r: &TokenizerSecurityReport,
     t: &[SpecialTokenRecord],

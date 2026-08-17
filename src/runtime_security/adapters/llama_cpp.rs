@@ -37,7 +37,12 @@ impl RuntimeAdapter for LlamaCppAdapter {
         if let Some(port) = arg_value(&process.args, "--port").and_then(|v| v.parse().ok()) {
             config.listen_ports.push(port);
         }
-        config.authentication = if arg_present(&process.args, "--api-key") {
+        // `--api-key-file` is an equally valid authentication mechanism to
+        // `--api-key`; treating only the latter as "authenticated" would
+        // misreport a key-file-authenticated server as unauthenticated.
+        config.authentication = if arg_present(&process.args, "--api-key")
+            || arg_present(&process.args, "--api-key-file")
+        {
             PostureState::Enabled
         } else {
             PostureState::Disabled
@@ -49,6 +54,57 @@ impl RuntimeAdapter for LlamaCppAdapter {
         } else {
             PostureState::Disabled
         };
+        // `--slots` enables llama-server's /slots endpoint, which returns
+        // the current contents of every active slot — including other
+        // clients' in-flight prompts on a shared server. This is
+        // llama.cpp's own documented reason the endpoint defaults off.
+        config.cross_tenant_state_exposure = Some(arg_present(&process.args, "--slots"));
         config
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn process(args: &[&str]) -> RuntimeProcess {
+        RuntimeProcess {
+            pid: 1,
+            executable: "llama-server".into(),
+            args: args.iter().map(|value| value.to_string()).collect(),
+            environment: BTreeMap::new(),
+        }
+    }
+
+    #[test]
+    fn api_key_file_counts_as_authentication_enabled() {
+        let config = LLAMA_CPP.inspect_process(&process(&[
+            "llama-server",
+            "--api-key-file",
+            "/etc/llama/key.txt",
+        ]));
+        assert_eq!(config.authentication, PostureState::Enabled);
+    }
+
+    #[test]
+    fn no_auth_flag_is_disabled() {
+        let config = LLAMA_CPP.inspect_process(&process(&["llama-server"]));
+        assert_eq!(config.authentication, PostureState::Disabled);
+    }
+
+    #[test]
+    fn slots_flag_is_cross_tenant_state_exposure() {
+        let config = LLAMA_CPP.inspect_process(&process(&["llama-server", "--slots"]));
+        assert_eq!(config.cross_tenant_state_exposure, Some(true));
+        let config = LLAMA_CPP.inspect_process(&process(&["llama-server"]));
+        assert_eq!(config.cross_tenant_state_exposure, Some(false));
+    }
+
+    #[test]
+    fn secret_shaped_args_are_redacted() {
+        let process = process(&["llama-server", "--api-key", "secret-value"]);
+        let json = serde_json::to_string(&LLAMA_CPP.inspect_process(&process)).unwrap();
+        assert!(!json.contains("secret-value"));
+        assert!(json.contains("<redacted>"));
     }
 }

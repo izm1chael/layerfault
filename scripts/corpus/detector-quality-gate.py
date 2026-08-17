@@ -74,7 +74,10 @@ def validate_fixture(binary: pathlib.Path, fixture: Dict[str, Any], verbose: boo
     if not target_path.exists():
         return [f"Fixture path '{rel_path}' does not exist"]
 
-    cmd = [str(binary), kind, str(target_path)]
+    # `kind` may name a multi-token subcommand (e.g. "agent inspect",
+    # "dataset poisoning-review") — each whitespace-separated piece is its
+    # own argv token, not one literal string containing a space.
+    cmd = [str(binary), *kind.split(), str(target_path)]
     if "policy" in cmd_spec:
         cmd.extend(["--policy", cmd_spec["policy"]])
     cmd.append("--json")

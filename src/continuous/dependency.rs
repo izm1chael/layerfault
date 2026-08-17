@@ -112,6 +112,22 @@ pub fn diff(previous: &ExecutionSnapshot, current: &ExecutionSnapshot) -> Invali
     }
 }
 
+/// What refreshing the evidence named by `plan` requires. See
+/// `ReassessmentAction` for what each variant means and why
+/// `BehaviouralAssurance` is treated differently from every other domain.
+pub fn reassessment_action(plan: &InvalidationPlan) -> super::ReassessmentAction {
+    if plan
+        .invalidated_domains
+        .contains(&EvidenceDomain::BehaviouralAssurance)
+    {
+        super::ReassessmentAction::ActiveReassessmentRequired
+    } else if plan.invalidated_domains.is_empty() {
+        super::ReassessmentAction::None
+    } else {
+        super::ReassessmentAction::PassiveRescanRecommended
+    }
+}
+
 pub fn apply(snapshot: &mut ExecutionSnapshot, plan: &InvalidationPlan, reason: &str) {
     for domain in &plan.invalidated_domains {
         if let Some(record) = snapshot.evidence.get_mut(domain) {
@@ -244,6 +260,34 @@ mod tests {
         assert!(!plan
             .invalidated_domains
             .contains(&EvidenceDomain::TensorForensics));
+        assert_eq!(
+            reassessment_action(&plan),
+            super::super::ReassessmentAction::ActiveReassessmentRequired
+        );
+    }
+
+    #[test]
+    fn passive_only_invalidation_does_not_require_active_reassessment() {
+        let before = snapshot("runtime-a");
+        let after = snapshot("runtime-b");
+        let plan = diff(&before, &after);
+        assert!(!plan
+            .invalidated_domains
+            .contains(&EvidenceDomain::BehaviouralAssurance));
+        assert_eq!(
+            reassessment_action(&plan),
+            super::super::ReassessmentAction::PassiveRescanRecommended
+        );
+    }
+
+    #[test]
+    fn no_invalidation_requires_no_reassessment() {
+        let snapshot = snapshot("runtime-a");
+        let plan = diff(&snapshot, &snapshot);
+        assert_eq!(
+            reassessment_action(&plan),
+            super::super::ReassessmentAction::None
+        );
     }
 
     #[test]

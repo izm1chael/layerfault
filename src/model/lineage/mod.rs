@@ -1,4 +1,5 @@
 //! Deep model lineage verification with the legacy comparison API re-exported.
+mod findings;
 mod graph;
 mod legacy;
 mod types;

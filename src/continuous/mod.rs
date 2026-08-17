@@ -15,10 +15,14 @@ mod types;
 
 pub use dependency::{
     apply as apply_invalidation, default_dependencies, diff as invalidation_plan,
+    reassessment_action,
 };
 pub use execution_context::{execution_context_identity, EXECUTION_CONTEXT_COMPONENTS};
 pub use findings::drift_findings;
-pub use journal::{append as append_event, load as load_events};
+pub use journal::{
+    append as append_event, load as load_events, load_head_anchor, record_hash, verify_chain,
+    write_head_anchor, ChainVerification, JournalHead, JournalRecord,
+};
 pub use observe::{observe, ObservationInputs};
 pub use snapshot::{
     canonical_bytes, identity as snapshot_identity, load as load_snapshot, new as new_snapshot,
@@ -26,6 +30,6 @@ pub use snapshot::{
 };
 pub use state::{state_after_invalidation, transition, transition_allowed};
 pub use types::{
-    EvidenceDomain, EvidenceRecord, ExecutionSnapshot, InvalidationPlan, SecurityComponent,
-    TrustEvent, TrustState,
+    EvidenceDomain, EvidenceRecord, ExecutionSnapshot, InvalidationPlan, ReassessmentAction,
+    SecurityComponent, TrustEvent, TrustState,
 };
