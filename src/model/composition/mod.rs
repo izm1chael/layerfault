@@ -15,8 +15,8 @@ pub use adapter::{inspect as inspect_adapter, AdapterAssessment, BaseRelation};
 pub use canonical::{adapter_set_identity, canonical_bytes, identity, validate};
 pub use findings::{adapter_analysis_incomplete, adapter_findings, assess};
 pub use manifest::{
-    load as load_manifest, resolve as resolve_manifest, write_example, ComponentReference,
-    CompositionManifest,
+    load as load_manifest, manifest_directory, resolve as resolve_manifest, write_example,
+    ComponentReference, CompositionManifest,
 };
 pub use merge::verify_lora as verify_lora_merge;
 pub use types::{

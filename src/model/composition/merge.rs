@@ -47,6 +47,7 @@ fn map_state(
 ) -> MergeVerificationState {
     if non_target_changed > 0
         || raw.eq_ignore_ascii_case("inconsistent")
+        || raw.eq_ignore_ascii_case("contradicted")
         || raw.eq_ignore_ascii_case("failed")
     {
         return MergeVerificationState::Inconsistent;
@@ -64,4 +65,19 @@ fn map_state(
         return MergeVerificationState::UnableToVerify;
     }
     MergeVerificationState::Unknown
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn contradicted_raw_state_is_inconsistent_case_insensitively() {
+        for raw in ["CONTRADICTED", "contradicted", "Contradicted"] {
+            assert_eq!(
+                map_state(raw, 0, 0, 0),
+                MergeVerificationState::Inconsistent
+            );
+        }
+    }
 }

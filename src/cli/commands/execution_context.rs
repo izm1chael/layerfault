@@ -109,11 +109,8 @@ pub(crate) fn observe(request: ObservationRequest<'_>) -> Result<ObservedExecuti
         observed.adapter_identities.dedup();
         observed.derived_model = Some(!assessment.composition.adapters.is_empty());
         observed.findings.extend(assessment.findings.clone());
-        manifest_root = Some(
-            path.parent()
-                .unwrap_or_else(|| Path::new("."))
-                .to_path_buf(),
-        );
+        manifest_root =
+            Some(layerfault::model::composition::manifest_directory(path).to_path_buf());
         composition = Some((manifest, assessment));
     }
 

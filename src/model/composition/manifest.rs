@@ -58,9 +58,16 @@ pub fn load(path: &Path) -> Result<CompositionManifest> {
     Ok(manifest)
 }
 
+/// Directory against which paths stored in a composition manifest are resolved.
+pub fn manifest_directory(path: &Path) -> &Path {
+    path.parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."))
+}
+
 pub fn resolve(path: &Path) -> Result<ModelComposition> {
     let manifest = load(path)?;
-    let root = path.parent().unwrap_or_else(|| Path::new("."));
+    let root = manifest_directory(path);
     let mut limitations = Vec::new();
     let base_model = resolve_component(
         root,
@@ -287,5 +294,40 @@ mod tests {
             AnalysisCompleteness::Complete
         );
         assert!(composition.base_model.identity.starts_with("unknown:"));
+    }
+
+    #[test]
+    fn manifest_directory_normalizes_bare_and_absolute_paths() {
+        assert_eq!(
+            manifest_directory(Path::new("composition.json")),
+            Path::new(".")
+        );
+        assert_eq!(
+            manifest_directory(Path::new("/tmp/example/composition.json")),
+            Path::new("/tmp/example")
+        );
+    }
+
+    #[test]
+    fn absolute_manifest_resolves_relative_components_from_its_directory() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("model.bin"), b"model").unwrap();
+        let path = dir.path().join("composition.json");
+        std::fs::write(
+            &path,
+            serde_json::to_vec(&serde_json::json!({
+                "version": 1,
+                "base_model": {"name": "base", "path": "model.bin"}
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+
+        let composition = resolve(&path).unwrap();
+        assert_eq!(composition.base_model.source.as_deref(), Some("model.bin"));
+        assert_eq!(
+            composition.base_model.completeness,
+            AnalysisCompleteness::Complete
+        );
     }
 }

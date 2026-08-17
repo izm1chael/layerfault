@@ -6,6 +6,7 @@ use layerfault::json_stream::write_stdout_json;
 pub(crate) fn run_composition(args: CompositionArgs) -> Result<()> {
     match args.command {
         CompositionCommand::Inspect { manifest, json } => {
+            let manifest_root = layerfault::model::composition::manifest_directory(&manifest);
             let composition = layerfault::model::composition::resolve_manifest(&manifest)?;
             let mut assessment = layerfault::model::composition::assess(composition)?;
             let subject = EvidenceSubject::identity(
@@ -16,12 +17,12 @@ pub(crate) fn run_composition(args: CompositionArgs) -> Result<()> {
                 let Some(source) = adapter.source.as_deref() else {
                     continue;
                 };
-                let path = std::path::Path::new(source);
+                let path = manifest_root.join(source);
                 if !path.exists() || !path.is_dir() {
                     continue;
                 }
                 let inspected = layerfault::model::composition::inspect_adapter(
-                    path,
+                    &path,
                     adapter.declared_base.as_deref(),
                 )?;
                 assessment
