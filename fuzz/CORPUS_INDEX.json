@@ -41,6 +41,11 @@
       "sha256": "048c7d7785d1343989f749405f2d5eb92a1a093f1115f8a741aa8df1e653862d"
     },
     {
+      "bytes": 135,
+      "path": "corpus/binary/overflowing-embedded-elf.bin",
+      "sha256": "4669047bad0edb8774a246461b4e7b5192ad6c334e9eecdbe1346fcf32ca8439"
+    },
+    {
       "bytes": 48,
       "path": "corpus/binary/self-referential-fat-macho.bin",
       "sha256": "2268c85e40ed6c15d88a301977e27b27391a48458b27147014d7bcb8b4c423a6"

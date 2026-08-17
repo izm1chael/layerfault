@@ -625,6 +625,23 @@ def self_referential_fat_macho() -> bytes:
     return bytes(b)
 
 
+def overflowing_embedded_elf() -> bytes:
+    base = 7
+    b = bytearray(base + 128)
+    header = memoryview(b)[base : base + 64]
+    header[:4] = b"\x7fELF"
+    header[4] = 2
+    header[5] = 1
+    header[6] = 1
+    header[16:18] = struct.pack("<H", 2)
+    header[18:20] = struct.pack("<H", 62)
+    header[40:48] = struct.pack("<Q", 64)
+    header[58:60] = struct.pack("<H", 64)
+    header[60:62] = struct.pack("<H", 1)
+    b[base + 64 + 24 : base + 64 + 32] = struct.pack("<Q", 2**64 - 1)
+    return bytes(b)
+
+
 def generate_binary() -> dict[str, bytes]:
     return {
         "benign.bin": b"ordinary tensor bytes\0\1\2",
@@ -641,6 +658,7 @@ def generate_binary() -> dict[str, bytes]:
         "truncated-pe.bin": b"MZ" + b"\0" * 20,
         "truncated-macho.bin": b"\xcf\xfa\xed\xfe" + b"\0" * 8,
         "self-referential-fat-macho.bin": self_referential_fat_macho(),
+        "overflowing-embedded-elf.bin": overflowing_embedded_elf(),
         "bad-wasm-version.bin": b"\0asm\x02\0\0\0",
     }
 
