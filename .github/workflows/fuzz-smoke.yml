@@ -28,24 +28,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          targets=(
-            manifest
-            gguf
-            heuristics
-            safetensors
-            safetensors_index
-            onnx
-            tflite
-            keras
-            package
-            tensorflow
-            tensorflow_checkpoint
-            binary
-            sources_hf_cache
-            sources_directory
-            lmstudio
-            ollama_store
-          )
+          mapfile -t targets < <(cargo fuzz list)
+          [[ ${#targets[@]} -gt 0 ]]
           for target in "${targets[@]}"; do
             echo "::group::fuzz $target"
             dict_args=()

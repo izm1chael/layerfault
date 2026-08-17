@@ -7,6 +7,10 @@ edition = "2021"
 [package.metadata]
 cargo-fuzz = true
 
+# Keep this cargo-fuzz project independent from the parent workspace while it
+# uses the parent package through the explicit path dependency below.
+[workspace]
+
 [dependencies]
 libfuzzer-sys = "0.4"
 layerfault = { path = ".." }
