@@ -19,33 +19,5 @@ jobs:
           rustup default nightly
       - name: Install pinned cargo-fuzz
         run: cargo install cargo-fuzz --version 0.13.2 --locked
-      - name: Verify deterministic seed corpus
-        run: |
-          python3 scripts/corpus/generate-fuzz-corpus.py
-          git diff --exit-code -- fuzz/corpus fuzz/CORPUS_INDEX.json
-      - name: Build all fuzz targets
-        working-directory: fuzz
-        run: cargo +nightly fuzz build
-      - name: Run all fuzz targets against seeded corpora
-        working-directory: fuzz
-        shell: bash
-        run: |
-          set -euo pipefail
-          mapfile -t targets < <(cargo +nightly fuzz list)
-          [[ ${#targets[@]} -gt 0 ]]
-          for target in "${targets[@]}"; do
-            echo "::group::fuzz $target"
-            dict_args=()
-            if [[ -f "dictionaries/$target.dict" ]]; then
-              dict_args+=("-dict=dictionaries/$target.dict")
-            fi
-            cargo +nightly fuzz run "$target" "corpus/$target" -- \
-              -max_total_time=60 \
-              -max_len=2097152 \
-              -timeout=10 \
-              -rss_limit_mb=4096 \
-              -use_value_profile=1 \
-              "${dict_args[@]}" \
-              -print_final_stats=1
-            echo "::endgroup::"
-          done
+      - name: Build and run all fuzz targets against seeded corpora
+        run: bash fuzz/smoke.sh

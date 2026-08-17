@@ -73,6 +73,9 @@ cargo fmt --all -- --check
 cargo check --locked --all-targets --jobs "$BUILD_JOBS"
 cargo clippy --locked --all-targets --all-features --jobs "$BUILD_JOBS" -- -D warnings
 
+log "All-target fuzz smoke"
+bash fuzz/smoke.sh
+
 # Run timing-sensitive regression checks before the exhaustive test suite can
 # leave the host under sustained CPU or disk pressure.
 log "Layerfault security and performance contracts"
