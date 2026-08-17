@@ -75,9 +75,27 @@ fn parse_macho_fat(
     }
 
     if let Some(slice_off) = best_slice {
-        parse_macho(file, file_len, slice_off)
+        parse_fat_slice(file, file_len, slice_off)
     } else {
         Ok(None)
+    }
+}
+
+fn parse_fat_slice(file: &File, file_len: u64, offset: u64) -> Result<Option<BinaryMetadata>> {
+    let magic_bytes = match super::read_at(file, offset, 4)? {
+        Some(bytes) if bytes.len() == 4 => bytes,
+        _ => return Ok(None),
+    };
+
+    // A universal Mach-O architecture entry contains a thin Mach-O image.
+    // Reject another universal header instead of recursively following
+    // attacker-controlled slice offsets, which can point back to themselves.
+    match magic_bytes.as_slice() {
+        b"\xfe\xed\xfa\xce" => parse_macho_thin(file, file_len, offset, false, false),
+        b"\xce\xfa\xed\xfe" => parse_macho_thin(file, file_len, offset, true, false),
+        b"\xfe\xed\xfa\xcf" => parse_macho_thin(file, file_len, offset, false, true),
+        b"\xcf\xfa\xed\xfe" => parse_macho_thin(file, file_len, offset, true, true),
+        _ => Ok(None),
     }
 }
 
@@ -402,5 +420,34 @@ fn read_u64(bytes: &[u8], little: bool) -> u64 {
         u64::from_le_bytes(arr)
     } else {
         u64::from_be_bytes(arr)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Write;
+
+    #[test]
+    fn self_referential_fat_macho_is_rejected_without_recursion() {
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(b"\xca\xfe\xba\xbe");
+        bytes.extend_from_slice(&1_u32.to_be_bytes());
+        bytes.extend_from_slice(&0x0100_0007_u32.to_be_bytes());
+        bytes.extend_from_slice(&0_u32.to_be_bytes());
+        bytes.extend_from_slice(&0_u32.to_be_bytes());
+        bytes.extend_from_slice(&48_u32.to_be_bytes());
+        bytes.extend_from_slice(&0_u32.to_be_bytes());
+        bytes.resize(48, 0);
+
+        let mut fixture = tempfile::NamedTempFile::new().expect("create Mach-O fixture");
+        fixture
+            .write_all(&bytes)
+            .expect("write self-referential Mach-O fixture");
+        let file = fixture.reopen().expect("reopen Mach-O fixture");
+
+        assert!(parse_macho(&file, bytes.len() as u64, 0)
+            .expect("parse self-referential Mach-O")
+            .is_none());
     }
 }

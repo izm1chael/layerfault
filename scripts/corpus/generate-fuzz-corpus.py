@@ -615,6 +615,16 @@ def minimal_macho64() -> bytes:
     b=bytearray(40); b[:4]=b"\xcf\xfa\xed\xfe"; b[4:8]=struct.pack("<I",0x01000007); b[8:12]=struct.pack("<I",3); b[12:16]=struct.pack("<I",2); b[16:20]=struct.pack("<I",1); b[20:24]=struct.pack("<I",8); b[32:36]=struct.pack("<I",1); b[36:40]=struct.pack("<I",8); return bytes(b)
 
 
+def self_referential_fat_macho() -> bytes:
+    b = bytearray(48)
+    b[:4] = b"\xca\xfe\xba\xbe"
+    b[4:8] = struct.pack(">I", 1)
+    b[8:12] = struct.pack(">I", 0x01000007)
+    b[16:20] = struct.pack(">I", 0)
+    b[20:24] = struct.pack(">I", len(b))
+    return bytes(b)
+
+
 def generate_binary() -> dict[str, bytes]:
     return {
         "benign.bin": b"ordinary tensor bytes\0\1\2",
@@ -630,6 +640,7 @@ def generate_binary() -> dict[str, bytes]:
         "truncated-elf.bin": b"\x7fELF\x02\x01\x01",
         "truncated-pe.bin": b"MZ" + b"\0" * 20,
         "truncated-macho.bin": b"\xcf\xfa\xed\xfe" + b"\0" * 8,
+        "self-referential-fat-macho.bin": self_referential_fat_macho(),
         "bad-wasm-version.bin": b"\0asm\x02\0\0\0",
     }
 

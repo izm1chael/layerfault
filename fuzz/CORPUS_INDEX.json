@@ -41,6 +41,11 @@
       "sha256": "048c7d7785d1343989f749405f2d5eb92a1a093f1115f8a741aa8df1e653862d"
     },
     {
+      "bytes": 48,
+      "path": "corpus/binary/self-referential-fat-macho.bin",
+      "sha256": "2268c85e40ed6c15d88a301977e27b27391a48458b27147014d7bcb8b4c423a6"
+    },
+    {
       "bytes": 7,
       "path": "corpus/binary/truncated-elf.bin",
       "sha256": "ced1af6d51438341a0335cc00e1c2867fb718a537c1173cf210070a6b1cdf40a"
