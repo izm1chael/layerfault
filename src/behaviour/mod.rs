@@ -182,6 +182,37 @@ mod tests {
     }
 
     #[test]
+    fn telemetry_security_evidence_survives_incomplete_inference() {
+        let mut exec = execution(
+            "runtime-side-effects",
+            "runtime_side_effects",
+            "loader failed later",
+        );
+        exec.exit_code = Some(1);
+        exec.evaluation.risk = Risk::High;
+        exec.evaluation.rule_ids = vec!["LF-BEHAV-DANGEROUS-EXEC".to_owned()];
+        let report = finalize_report(
+            "sha256:side-effect".to_owned(),
+            "side-effect".to_owned(),
+            runtime_identity(),
+            probes::ProbeSuite {
+                version: 1,
+                id: "test".to_owned(),
+                probes: Vec::new(),
+            },
+            7,
+            BehaviourLimits::for_profile("quick").unwrap(),
+            vec![exec],
+        )
+        .unwrap();
+        assert_eq!(report.state, BehaviourState::HighRisk);
+        assert!(report
+            .findings
+            .iter()
+            .any(|rule| rule == "LF-BEHAV-DANGEROUS-EXEC"));
+    }
+
+    #[test]
     fn identical_runtime_failures_are_an_incomplete_comparison() {
         let diff = compare_reports(runtime_failure("base"), runtime_failure("derived")).unwrap();
         assert_eq!(diff.state, DifferentialBehaviourState::NotRun);

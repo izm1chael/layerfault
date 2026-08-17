@@ -128,7 +128,11 @@ pub(crate) fn finalize_report(
         matches!(
             value.evaluation.risk,
             evaluate::Risk::Medium | evaluate::Risk::High
-        )
+        ) && value
+            .evaluation
+            .rule_ids
+            .iter()
+            .any(|rule| rule != "LF-BEHAV-RUNTIME-FAILURE")
     });
     let meaningful_probe_completed = executions.iter().any(|value| {
         value.category != "runtime_side_effects" && value.exit_code == Some(0) && !value.timed_out
@@ -145,12 +149,14 @@ pub(crate) fn finalize_report(
         limits,
         executions,
         dynamic_observations,
-        state: if !meaningful_probe_completed {
-            crate::transformation::BehaviourState::NotRun
-        } else if high {
+        state: if high {
+            // Proven high-risk side effects are not erased by a later model or
+            // tokenizer failure that prevents a normal inference response.
             crate::transformation::BehaviourState::HighRisk
         } else if suspicious {
             crate::transformation::BehaviourState::Suspicious
+        } else if !meaningful_probe_completed {
+            crate::transformation::BehaviourState::NotRun
         } else {
             crate::transformation::BehaviourState::NoSuspiciousObserved
         },

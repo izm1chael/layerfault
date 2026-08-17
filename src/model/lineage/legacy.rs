@@ -407,7 +407,9 @@ fn semantic_template_change(base: &ModelSnapshot, derived: &ModelSnapshot) -> Se
             .and_then(|value| value.exact_hash.as_ref()),
     ) {
         (Some(left), Some(right)) if left == right => SemanticChange::Same,
-        (Some(_), Some(_)) => SemanticChange::Changed,
+        // Cross-format template bytes are representation-specific. Same-format
+        // changes are handled above and remain a contradiction.
+        (Some(_), Some(_)) => SemanticChange::Incomparable,
         (None, None) if base.template.is_none() && derived.template.is_none() => {
             SemanticChange::Same
         }
@@ -438,11 +440,14 @@ fn semantic_tokenizer_change(base: &ModelSnapshot, derived: &ModelSnapshot) -> S
         (left.merges_hash.as_ref(), right.merges_hash.as_ref()),
     ];
     let mut compared = 0usize;
+    let mut representation_hash_mismatch = false;
     for (a, b) in pairs {
         if let (Some(a), Some(b)) = (a, b) {
             compared += 1;
             if a != b {
-                return SemanticChange::Changed;
+                // Vocabulary/merge hashes from different serialization formats
+                // are representation fingerprints, not canonical semantics.
+                representation_hash_mismatch = true;
             }
         }
     }
@@ -458,7 +463,7 @@ fn semantic_tokenizer_change(base: &ModelSnapshot, derived: &ModelSnapshot) -> S
             }
         }
     }
-    if compared == 0 {
+    if compared == 0 || representation_hash_mismatch {
         SemanticChange::Incomparable
     } else {
         SemanticChange::Same
@@ -652,7 +657,7 @@ mod tests {
     }
 
     #[test]
-    fn cross_format_quantization_blocks_semantic_template_change() {
+    fn cross_format_quantization_marks_template_hash_mismatch_incomparable() {
         let mut base = snapshot("safetensors", "model.layers.0.weight");
         let mut derived = snapshot("gguf", "blk.0.weight");
         base.template = Some(TemplateSummary {
@@ -666,11 +671,11 @@ mod tests {
             source: None,
         });
         let report = compare_snapshots(base, derived, Some(TransformationType::Quantization), None);
-        assert_eq!(report.lineage, LineageState::Contradicted);
+        assert_ne!(report.lineage, LineageState::Contradicted);
         assert!(report
             .findings
             .iter()
-            .any(|finding| finding.rule_id == "LF-LINEAGE-QUANTIZATION-TEMPLATE"));
+            .any(|finding| finding.rule_id == "LF-LINEAGE-QUANTIZATION-METADATA-INCOMPARABLE"));
     }
 
     #[test]

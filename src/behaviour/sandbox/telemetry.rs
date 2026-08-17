@@ -375,11 +375,24 @@ fn discard_one_expected_runtime_exec(telemetry: &mut SandboxTelemetry) {
     }
 }
 
+fn trace_syscall_succeeded(lower: &str) -> bool {
+    let Some((_, result)) = lower.rsplit_once(" = ") else {
+        return false;
+    };
+    !result.trim_start().starts_with("-1")
+}
+
+fn is_internet_network_attempt(lower: &str) -> bool {
+    (lower.contains("connect(") || lower.contains("sendto(") || lower.contains("sendmsg("))
+        && (lower.contains("af_inet6") || lower.contains("af_inet"))
+}
+
 fn classify_trace_line(line: &str, telemetry: &mut SandboxTelemetry) {
     let lower = line.to_ascii_lowercase();
-    if (lower.contains("connect(") || lower.contains("sendto(") || lower.contains("sendmsg("))
-        && telemetry.network_attempts.len() < MAX_TELEMETRY_ROWS
+    if is_internet_network_attempt(&lower) && telemetry.network_attempts.len() < MAX_TELEMETRY_ROWS
     {
+        // A denied/unreachable AF_INET/AF_INET6 connect still proves attempted
+        // egress. Local AF_UNIX/AF_NETLINK IPC is not Internet egress.
         telemetry.network_attempts.push(excerpt(line));
     }
 
@@ -420,7 +433,11 @@ fn classify_trace_line(line: &str, telemetry: &mut SandboxTelemetry) {
         telemetry.process_exec_attempts.push(excerpt(line));
     }
 
-    if is_canary_evidence(&lower) && telemetry.canary_accesses.len() < MAX_TELEMETRY_ROWS {
+    if is_canary_evidence(&lower)
+        && trace_syscall_succeeded(&lower)
+        && telemetry.canary_accesses.len() < MAX_TELEMETRY_ROWS
+    {
+        // Failed import-resolution/stat probes are not successful secret access.
         telemetry.canary_accesses.push(excerpt(line));
     }
 
@@ -497,6 +514,32 @@ mod tests {
         assert_eq!(telemetry.process_exec_attempts.len(), 1);
         assert_eq!(telemetry.canary_accesses.len(), 1);
         assert_eq!(telemetry.filesystem_write_attempts.len(), 3);
+    }
+
+    #[test]
+    fn local_ipc_is_not_internet_egress_and_failed_canary_probe_is_not_access() {
+        let mut telemetry = SandboxTelemetry::default();
+        classify_trace_line(
+            r#"connect(5, {sa_family=AF_UNIX, sun_path="/var/run/nscd/socket"}, 110) = -1 ENOENT"#,
+            &mut telemetry,
+        );
+        classify_trace_line(
+            r#"openat(AT_FDCWD, "/workspace/workspace/secrets/api_token.txt", O_RDONLY) = -1 ENOENT"#,
+            &mut telemetry,
+        );
+        assert!(telemetry.network_attempts.is_empty());
+        assert!(telemetry.canary_accesses.is_empty());
+
+        classify_trace_line(
+            r#"connect(7, {sa_family=AF_INET6, sin6_port=htons(443)}, 28) = -1 ENETUNREACH"#,
+            &mut telemetry,
+        );
+        classify_trace_line(
+            r#"openat(AT_FDCWD, "/workspace/workspace/secrets/api_token.txt", O_RDONLY) = 4"#,
+            &mut telemetry,
+        );
+        assert_eq!(telemetry.network_attempts.len(), 1);
+        assert_eq!(telemetry.canary_accesses.len(), 1);
     }
 
     #[test]

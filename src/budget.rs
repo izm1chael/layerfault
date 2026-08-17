@@ -181,8 +181,10 @@ impl ScanBudgetProfile {
                 wall_clock_ms: 15_000,
             },
             Self::Default => ScanBudgetLimits {
-                source_bytes: gib,
-                decompressed_bytes: 2 * gib,
+                // SourceBytes tracks scanner reads, not resident memory. Keep
+                // this finite but large enough for common multi-GB local models.
+                source_bytes: 32 * gib,
+                decompressed_bytes: 32 * gib,
                 temporary_disk_bytes: 512 * mib,
                 retained_evidence_bytes: 16 * mib,
                 objects: 100_000,
@@ -194,8 +196,8 @@ impl ScanBudgetProfile {
                 wall_clock_ms: 60_000,
             },
             Self::Deep => ScanBudgetLimits {
-                source_bytes: 4 * gib,
-                decompressed_bytes: 8 * gib,
+                source_bytes: 48 * gib,
+                decompressed_bytes: 48 * gib,
                 temporary_disk_bytes: 2 * gib,
                 retained_evidence_bytes: 64 * mib,
                 objects: 500_000,
@@ -207,8 +209,8 @@ impl ScanBudgetProfile {
                 wall_clock_ms: 300_000,
             },
             Self::Research => ScanBudgetLimits {
-                source_bytes: 16 * gib,
-                decompressed_bytes: 32 * gib,
+                source_bytes: 64 * gib,
+                decompressed_bytes: 64 * gib,
                 temporary_disk_bytes: 8 * gib,
                 retained_evidence_bytes: 256 * mib,
                 objects: 2_000_000,
