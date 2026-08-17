@@ -1,6 +1,6 @@
 use super::{
-    AgentSecurityAssessment, CapabilityGrant, CapabilityGraph, CapabilityKind, McpTransport,
-    PathReachability, SecurityState,
+    AgentSecurityAssessment, CapabilityExpansion, CapabilityGrant, CapabilityGraph, CapabilityKind,
+    McpTransport, PathReachability, SecurityState,
 };
 use crate::finding_evidence::{structural_invariant, EvidenceSubject, FindingBuilder};
 use crate::scanner::{CheckType, Confidence, FindingClass, LayerScanResult, ScanStatus};
@@ -116,6 +116,36 @@ pub fn assess(graph: CapabilityGraph) -> AgentSecurityAssessment {
                 }
             }
         }
+        if let Some(posture) = &server.supply_chain {
+            if posture.auto_downloads && !posture.version_pinned {
+                findings.push(server_finding(
+                    "LF-MCP-SUPPLY-CHAIN-AUTO-DOWNLOAD",
+                    ScanStatus::Warn,
+                    FindingClass::Policy,
+                    Confidence::High,
+                    &subject,
+                    server,
+                    &format!(
+                        "MCP server is launched via {}, which fetches the package on demand, without an exact pinned version in the package specifier",
+                        posture.package_manager.as_str()
+                    ),
+                ));
+            }
+            if posture.auto_confirm_flag_present {
+                findings.push(server_finding(
+                    "LF-MCP-SUPPLY-CHAIN-AUTO-CONFIRM",
+                    ScanStatus::Warn,
+                    FindingClass::Policy,
+                    Confidence::Medium,
+                    &subject,
+                    server,
+                    &format!(
+                        "MCP server launch command passes an auto-confirm flag to {}, bypassing any interactive install confirmation",
+                        posture.package_manager.as_str()
+                    ),
+                ));
+            }
+        }
     }
     findings.extend(token_passthrough_findings(&graph, &subject));
     findings.extend(annotation_contradiction_findings(&graph, &subject));
@@ -211,6 +241,72 @@ pub fn assess(graph: CapabilityGraph) -> AgentSecurityAssessment {
         );
     }
     AgentSecurityAssessment { graph, findings }
+}
+
+/// Report what a capability graph gained relative to a prior baseline
+/// observation of the same agent (e.g. the graph recorded at admission).
+/// Empty when nothing expanded. This does not run automatically as part of
+/// [`assess`] — a caller must supply the baseline graph it is comparing
+/// against, since `assess` alone has no notion of "previous".
+pub fn expansion_findings(
+    delta: &CapabilityExpansion,
+    subject: &EvidenceSubject,
+) -> Vec<LayerScanResult> {
+    if delta.is_empty() {
+        return Vec::new();
+    }
+    let mut detail_parts = Vec::new();
+    if !delta.added_servers.is_empty() {
+        detail_parts.push(format!("new server(s): {}", delta.added_servers.join(", ")));
+    }
+    if !delta.added_tools.is_empty() {
+        let tools: Vec<String> = delta
+            .added_tools
+            .iter()
+            .map(|tool| format!("{}/{}", tool.server, tool.tool))
+            .collect();
+        detail_parts.push(format!("new tool(s): {}", tools.join(", ")));
+    }
+    if !delta.added_capabilities.is_empty() {
+        let capabilities: Vec<&str> = delta
+            .added_capabilities
+            .iter()
+            .map(|grant| grant.capability.as_str())
+            .collect();
+        detail_parts.push(format!(
+            "new capability grant(s): {}",
+            capabilities.join(", ")
+        ));
+    }
+    if !delta.newly_reachable_chains.is_empty() {
+        let chains: Vec<&str> = delta
+            .newly_reachable_chains
+            .iter()
+            .map(|chain| chain.id.as_str())
+            .collect();
+        detail_parts.push(format!(
+            "newly reachable dangerous path(s): {}",
+            chains.join(", ")
+        ));
+    }
+    vec![FindingBuilder::new(
+        "LF-AGENT-CAPABILITY-EXPANSION",
+        CheckType::AgentSecurity,
+        ScanStatus::Warn,
+    )
+    .class(FindingClass::Policy)
+    .confidence(Confidence::High)
+    .subject(subject.clone())
+    .detail(format!(
+        "Agent capability graph expanded relative to its baseline observation: {}",
+        detail_parts.join("; ")
+    ))
+    .evidence(structural_invariant(
+        subject.clone(),
+        "capability graph expansion",
+        serde_json::to_value(delta).unwrap_or(serde_json::Value::Null),
+    ))
+    .finish()]
 }
 
 /// True for a scope string that grants broad access rather than a narrow,

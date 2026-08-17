@@ -6,11 +6,13 @@
 
 mod capability;
 mod discovery;
+mod drift;
 mod findings;
 mod graph;
 mod identity;
 mod mcp;
 mod schema;
+mod supply_chain;
 mod types;
 
 pub use capability::{
@@ -23,11 +25,13 @@ pub use discovery::{
     ProtocolInfo, RemoteDiscoveryOutcome, ResourceDefinition, StdioDiscoveryOutcome,
     KNOWN_PROTOCOL_VERSIONS,
 };
-pub use findings::assess;
+pub use drift::{expansion, AddedTool, CapabilityExpansion};
+pub use findings::{assess, expansion_findings};
 pub use graph::{build as build_graph, dangerous_chains, PathReachability};
 pub use identity::{server_set_identity, tool_schema_identity};
 pub use mcp::inspect_config;
 pub use schema::capabilities_for_tool;
+pub use supply_chain::{PackageManagerKind, SupplyChainPosture};
 pub use types::{
     AgentDefinition, AgentSecurityAssessment, CapabilityGraph, DangerousCapabilityChain, McpServer,
     McpTransport, OAuthPosture, SecurityState, ToolDefinition,

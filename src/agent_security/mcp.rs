@@ -1,3 +1,4 @@
+use super::supply_chain;
 use super::{McpServer, McpTransport, OAuthPosture, SecurityState, ToolDefinition};
 use anyhow::{anyhow, bail, Context, Result};
 use serde_json::{Map, Value};
@@ -114,6 +115,7 @@ fn parse_server(name: &str, value: &Value) -> Result<McpServer> {
         && endpoint.as_deref().is_some_and(endpoint_is_local)
         && !origin_restriction_declared(object);
     let oauth = parse_oauth_posture(object);
+    let supply_chain_posture = supply_chain::analyze(executable.as_deref(), &arguments);
     let tools = parse_tools(object)?;
     let mut limitations = Vec::new();
     if tools.is_empty() {
@@ -154,6 +156,7 @@ fn parse_server(name: &str, value: &Value) -> Result<McpServer> {
         credential_in_url,
         origin_dns_rebinding_exposed,
         oauth,
+        supply_chain: supply_chain_posture,
         tools,
         completeness,
         limitations,

@@ -60,6 +60,11 @@ pub struct McpServer {
     /// server declares no OAuth configuration to assess at all.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub oauth: Option<OAuthPosture>,
+    /// Present only when the launch command matches a recognised ad-hoc
+    /// package-runner shape (`npx`, `uvx`, `pnpm dlx`, ...). See
+    /// [`super::SupplyChainPosture`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub supply_chain: Option<super::SupplyChainPosture>,
     #[serde(default)]
     pub tools: Vec<ToolDefinition>,
     pub completeness: AnalysisCompleteness,

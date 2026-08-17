@@ -657,18 +657,36 @@ impl EffectivePolicy {
                 .push("Policy requires complete agent/MCP/tool capability discovery".to_owned());
         }
         if self.block_dangerous_capability_chains
-            && !context.dangerous_capability_chain_ids.is_empty()
+            && (!context.dangerous_capability_chains.is_empty()
+                || !context.dangerous_capability_chain_ids.is_empty())
         {
+            let mut ids: Vec<&str> = context
+                .dangerous_capability_chains
+                .iter()
+                .map(|chain| chain.id.as_str())
+                .collect();
+            ids.extend(
+                context
+                    .dangerous_capability_chain_ids
+                    .iter()
+                    .map(String::as_str),
+            );
+            ids.sort_unstable();
+            ids.dedup();
             block_reasons.push(format!(
                 "Policy blocks dangerous agent capability chains: {}",
-                context.dangerous_capability_chain_ids.join(", ")
+                ids.join(", ")
             ));
         }
         for denied in &self.denied_capability_chain_ids {
             if context
-                .dangerous_capability_chain_ids
+                .dangerous_capability_chains
                 .iter()
-                .any(|observed| observed.eq_ignore_ascii_case(denied))
+                .any(|chain| chain.id.eq_ignore_ascii_case(denied))
+                || context
+                    .dangerous_capability_chain_ids
+                    .iter()
+                    .any(|observed| observed.eq_ignore_ascii_case(denied))
             {
                 block_reasons.push(format!("Capability chain '{denied}' is denied by policy"));
             }

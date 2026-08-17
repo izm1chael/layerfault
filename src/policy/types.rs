@@ -265,6 +265,18 @@ pub struct PolicyContext {
     pub provenance_verified: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub agent_capabilities_complete: Option<bool>,
+    /// Each dangerous capability chain the agent's capability graph
+    /// reported, carrying its concrete source/sink capability, scope,
+    /// server, tool and evidence kind — not just an opaque id. Policy that
+    /// needs to reason about *what* is reachable (a `SecretRead` grant with
+    /// `CapabilityConfidence::Low`, say, versus a `Declared` one) has that
+    /// available directly, rather than needing to look the id back up
+    /// against the graph.
+    #[serde(default)]
+    pub dangerous_capability_chains: Vec<crate::agent_security::DangerousCapabilityChain>,
+    /// Legacy v1 representation retained so previously serialized policy
+    /// contexts continue to enforce chain-id denials after the richer chain
+    /// records were introduced.
     #[serde(default)]
     pub dangerous_capability_chain_ids: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

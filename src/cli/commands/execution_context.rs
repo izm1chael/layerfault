@@ -22,6 +22,8 @@ pub(crate) struct ObservedExecutionContext {
     pub(crate) builder_identities: Vec<String>,
     pub(crate) derived_model: Option<bool>,
     pub(crate) agent_capabilities_complete: Option<bool>,
+    pub(crate) dangerous_capability_chains:
+        Vec<layerfault::agent_security::DangerousCapabilityChain>,
     pub(crate) dangerous_capability_chain_ids: Vec<String>,
     pub(crate) findings: Vec<LayerScanResult>,
 }
@@ -76,6 +78,7 @@ impl ObservedExecutionContext {
                 Some(layerfault::model::lineage::LineageConsistency::Consistent);
         }
         context.agent_capabilities_complete = self.agent_capabilities_complete;
+        context.dangerous_capability_chains = self.dangerous_capability_chains.clone();
         context.dangerous_capability_chain_ids = self.dangerous_capability_chain_ids.clone();
     }
 }
@@ -204,6 +207,7 @@ pub(crate) fn observe(request: ObservationRequest<'_>) -> Result<ObservedExecuti
         observed.mcp_server_identities.dedup();
         observed.agent_capabilities_complete =
             Some(assessment.graph.completeness == AnalysisCompleteness::Complete);
+        observed.dangerous_capability_chains = assessment.graph.dangerous_chains.clone();
         observed.dangerous_capability_chain_ids = assessment
             .graph
             .dangerous_chains

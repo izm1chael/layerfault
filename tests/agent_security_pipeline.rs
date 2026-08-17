@@ -221,6 +221,114 @@ fn oauth_configuration_missing_metadata_and_audience_is_flagged() {
 }
 
 #[test]
+fn a_new_server_with_a_secret_capability_produces_a_capability_expansion_finding() {
+    let baseline_config = write_config(serde_json::json!({
+        "mcpServers": {"fs": {"command": "server"}}
+    }));
+    let baseline =
+        layerfault::agent_security::inspect_agent_config("agent", baseline_config.path(), None)
+            .expect("inspect baseline config")
+            .graph;
+
+    let current_config = write_config(serde_json::json!({
+        "mcpServers": {
+            "fs": {"command": "server"},
+            "secrets": {
+                "command": "server",
+                "tools": [{
+                    "name": "read_secret",
+                    "inputSchema": {"type": "object", "properties": {"key": {"type": "string"}}}
+                }]
+            }
+        }
+    }));
+    let current =
+        layerfault::agent_security::inspect_agent_config("agent", current_config.path(), None)
+            .expect("inspect current config")
+            .graph;
+
+    let delta = layerfault::agent_security::expansion(&baseline, &current);
+    assert!(!delta.is_empty());
+    assert_eq!(delta.added_servers, vec!["secrets".to_owned()]);
+
+    let subject = layerfault::finding_evidence::EvidenceSubject::identity(
+        &current.graph_identity,
+        "application/vnd.layerfault.agent-capability-graph+json",
+    );
+    let findings = layerfault::agent_security::expansion_findings(&delta, &subject);
+    assert!(findings
+        .iter()
+        .any(|finding| finding.rule_id.as_deref() == Some("LF-AGENT-CAPABILITY-EXPANSION")));
+}
+
+#[test]
+fn unpinned_npx_launcher_with_auto_confirm_is_flagged() {
+    let config = write_config(serde_json::json!({
+        "mcpServers": {
+            "fs": {
+                "command": "npx",
+                "args": ["-y", "@modelcontextprotocol/server-filesystem"]
+            }
+        }
+    }));
+    let assessment = layerfault::agent_security::inspect_agent_config("agent", config.path(), None)
+        .expect("inspect config");
+    for rule_id in [
+        "LF-MCP-SUPPLY-CHAIN-AUTO-DOWNLOAD",
+        "LF-MCP-SUPPLY-CHAIN-AUTO-CONFIRM",
+    ] {
+        assert!(
+            assessment
+                .findings
+                .iter()
+                .any(|finding| finding.rule_id.as_deref() == Some(rule_id)),
+            "expected {rule_id} to be reported"
+        );
+    }
+}
+
+#[test]
+fn pinned_npx_launcher_without_auto_confirm_is_not_flagged() {
+    let config = write_config(serde_json::json!({
+        "mcpServers": {
+            "fs": {
+                "command": "npx",
+                "args": ["@modelcontextprotocol/server-filesystem@1.4.2"]
+            }
+        }
+    }));
+    let assessment = layerfault::agent_security::inspect_agent_config("agent", config.path(), None)
+        .expect("inspect config");
+    for rule_id in [
+        "LF-MCP-SUPPLY-CHAIN-AUTO-DOWNLOAD",
+        "LF-MCP-SUPPLY-CHAIN-AUTO-CONFIRM",
+    ] {
+        assert!(
+            !assessment
+                .findings
+                .iter()
+                .any(|finding| finding.rule_id.as_deref() == Some(rule_id)),
+            "did not expect {rule_id} to be reported"
+        );
+    }
+}
+
+#[test]
+fn locally_installed_executable_has_no_supply_chain_findings() {
+    let config = write_config(serde_json::json!({
+        "mcpServers": {
+            "fs": {"command": "/usr/local/bin/my-mcp-server"}
+        }
+    }));
+    let assessment = layerfault::agent_security::inspect_agent_config("agent", config.path(), None)
+        .expect("inspect config");
+    assert!(!assessment.findings.iter().any(|finding| finding
+        .rule_id
+        .as_deref()
+        .is_some_and(|id| id.starts_with("LF-MCP-SUPPLY-CHAIN"))));
+}
+
+#[test]
 fn complete_oauth_configuration_with_narrow_scope_is_not_flagged() {
     let config = write_config(serde_json::json!({
         "mcpServers": {
