@@ -86,11 +86,12 @@ impl TaskCost {
         }
     }
 
-    pub fn large_sequential_io(size: u64, buffer_size: u64) -> Self {
+    pub fn large_sequential_io(_size: u64, buffer_size: u64) -> Self {
+        let streaming_window = buffer_size.max(4 * 1024 * 1024);
         Self {
             cpu_units: 1,
-            memory_reservation: buffer_size.max(4 * 1024 * 1024),
-            io_reservation: size.max(buffer_size),
+            memory_reservation: streaming_window,
+            io_reservation: streaming_window,
             temp_disk_reservation: 0,
             class: TaskClass::LargeSequentialIo,
         }

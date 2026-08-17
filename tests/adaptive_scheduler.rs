@@ -98,6 +98,34 @@ fn huge_file_plus_many_small_files() -> Result<()> {
 }
 
 #[test]
+fn multi_gigabyte_stream_reserves_only_its_bounded_window() -> Result<()> {
+    let budget = ScanBudget::new(ScanBudgetProfile::Default.limits())?;
+    let mut config = SchedulerConfig::detect(
+        Some(4),
+        Some(512),
+        Some(16 * 1024 * 1024),
+        SchedulerMode::Adaptive,
+        ScanBudgetProfile::Default,
+    );
+    config.max_inflight_bytes = 16 * 1024 * 1024;
+    let scheduler = AdaptiveScheduler::new(config);
+    let cost = TaskCost::large_sequential_io(4 * 1024 * 1024 * 1024, 8 * 1024 * 1024);
+
+    assert_eq!(cost.memory_reservation, 8 * 1024 * 1024);
+    assert_eq!(cost.io_reservation, 8 * 1024 * 1024);
+    let first = scheduler.acquire(cost, &budget)?;
+    let second = scheduler.acquire(cost, &budget)?;
+    assert_eq!(
+        scheduler.diagnostics().peak_inflight_bytes,
+        16 * 1024 * 1024
+    );
+
+    drop(second);
+    drop(first);
+    Ok(())
+}
+
+#[test]
 fn permits_released_after_error_and_panic() -> Result<()> {
     let budget = ScanBudget::new(ScanBudgetProfile::Default.limits())?;
     let scheduler = AdaptiveScheduler::new(SchedulerConfig::detect(
