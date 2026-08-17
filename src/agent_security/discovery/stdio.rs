@@ -584,7 +584,7 @@ for line in sys.stdin:
 
     #[test]
     fn refuses_relative_command_without_path_or_slash_when_not_found() {
-        let error = discover_stdio("definitely-not-a-real-mcp-server-binary", &[])
+        let error = resolve_command("definitely-not-a-real-mcp-server-binary")
             .expect_err("unresolvable command must fail, not hang or silently succeed");
         assert!(error.to_string().contains("not found"));
     }

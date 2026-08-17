@@ -28,7 +28,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          mapfile -t targets < <(cargo fuzz list)
+          mapfile -t targets < <(cargo +nightly fuzz list)
           [[ ${#targets[@]} -gt 0 ]]
           for target in "${targets[@]}"; do
             echo "::group::fuzz $target"
@@ -36,7 +36,7 @@ jobs:
             if [[ -f "dictionaries/$target.dict" ]]; then
               dict_args+=("-dict=dictionaries/$target.dict")
             fi
-            cargo fuzz run "$target" "corpus/$target" -- \
+            cargo +nightly fuzz run "$target" "corpus/$target" -- \
               -max_total_time=60 \
               -max_len=2097152 \
               -timeout=10 \
