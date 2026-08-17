@@ -1,6 +1,7 @@
 #![no_main]
 mod support;
 
+use layerfault::budget::{ScanBudget, ScanBudgetProfile};
 use libfuzzer_sys::fuzz_target;
 use std::fs;
 use std::fs::File;
@@ -85,11 +86,15 @@ fuzz_target!(|data: &[u8]| {
         return;
     };
     let _ = layerfault::formats::safetensors::validate_index(&index_path, &file, len);
+    let Ok(budget) = ScanBudget::new(ScanBudgetProfile::Default.limits()) else {
+        return;
+    };
     let _ = layerfault::formats::safetensors::scan_index(
         &index_path,
         &file,
         len,
         "sha256:fuzz",
         "application/x-safetensors-index",
+        &budget,
     );
 });

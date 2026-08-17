@@ -1,4 +1,5 @@
 #![no_main]
+use layerfault::budget::{ScanBudget, ScanBudgetProfile};
 use libfuzzer_sys::fuzz_target;
 use std::io::Write;
 
@@ -24,10 +25,14 @@ fuzz_target!(|data: &[u8]| {
             );
         }
     }
+    let Ok(budget) = ScanBudget::new(ScanBudgetProfile::Default.limits()) else {
+        return;
+    };
     let _ = layerfault::formats::safetensors::scan_file(
         &file,
         data.len() as u64,
         "sha256:fuzz",
         "application/x-safetensors",
+        &budget,
     );
 });
