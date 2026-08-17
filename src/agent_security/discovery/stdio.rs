@@ -100,9 +100,16 @@ pub fn discover_stdio(command: &str, args: &[String]) -> Result<StdioDiscoveryOu
 }
 
 fn resolve_command(command: &str) -> Result<PathBuf> {
-    let path = Path::new(command);
-    if path.is_absolute() || command.contains('/') {
-        return Ok(path.to_path_buf());
+    if command.starts_with('/') || command.contains('/') {
+        let resolved = std::fs::canonicalize(command)
+            .with_context(|| format!("failed to resolve MCP server command '{command}'"))?;
+        if !resolved.is_file() {
+            bail!(
+                "MCP server command '{}' is not a regular file",
+                resolved.display()
+            );
+        }
+        return Ok(resolved);
     }
     crate::sources::find_executable(command)
         .ok_or_else(|| anyhow!("MCP server command '{command}' was not found on PATH"))
@@ -580,5 +587,26 @@ for line in sys.stdin:
         let error = discover_stdio("definitely-not-a-real-mcp-server-binary", &[])
             .expect_err("unresolvable command must fail, not hang or silently succeed");
         assert!(error.to_string().contains("not found"));
+    }
+
+    #[test]
+    fn explicit_command_paths_are_canonicalized_and_must_be_files() {
+        let directory = fixture_dir().join(format!("resolve_{}", std::process::id()));
+        std::fs::create_dir_all(&directory).expect("create resolution fixture directory");
+        let executable = directory.join("server");
+        std::fs::write(&executable, "fixture").expect("write resolution fixture");
+
+        let relative = directory.join("nested").join("..").join("server");
+        std::fs::create_dir_all(directory.join("nested")).expect("create nested fixture directory");
+        assert_eq!(
+            resolve_command(relative.to_str().unwrap()).expect("resolve explicit command"),
+            std::fs::canonicalize(&executable).expect("canonical fixture path")
+        );
+
+        let error = resolve_command(directory.to_str().unwrap())
+            .expect_err("directories must not be accepted as commands");
+        assert!(error.to_string().contains("not a regular file"));
+
+        let _ = std::fs::remove_dir_all(&directory);
     }
 }

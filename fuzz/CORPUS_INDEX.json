@@ -1,6 +1,11 @@
 {
   "files": [
     {
+      "bytes": 122,
+      "path": "corpus/agent_mcp/minimal.json",
+      "sha256": "43edb66191e08d3ed62c200b16748d25f0b9e73a54676af7552dde15f6409a38"
+    },
+    {
       "bytes": 8,
       "path": "corpus/binary/bad-wasm-version.bin",
       "sha256": "593ab0b4d166fc4aa2d6956ea38019e2c575134f8139b0a18235f7abd595103f"
@@ -69,6 +74,11 @@
       "bytes": 8,
       "path": "corpus/binary/valid-wasm.bin",
       "sha256": "93a44bbb96c751218e4c00d479e4c14358122a389acca16205b1e4d0dc5f9476"
+    },
+    {
+      "bytes": 128,
+      "path": "corpus/composition_manifest/minimal.json",
+      "sha256": "da64623e13f0122065519da42431bd013ca98c4dbbf5d3d40fb0d62746af715d"
     },
     {
       "bytes": 0,
@@ -334,6 +344,11 @@
       "bytes": 48,
       "path": "corpus/heuristics/unicode.txt",
       "sha256": "797118f63055f2b6fb1e06f593966ed37fddc0fe2b2d77185941dfe883fdce74"
+    },
+    {
+      "bytes": 7893,
+      "path": "corpus/intelligence_pack/builtin.json",
+      "sha256": "325509dc1fa6189cfac3f4962b7756b629822d46640c37a2dc22811ddfe1f09a"
     },
     {
       "bytes": 129,
@@ -936,6 +951,11 @@
       "sha256": "94875250b4391579b54c96ee6fa168fdaf84b838c134dc632e73ed614c236a03"
     },
     {
+      "bytes": 154,
+      "path": "corpus/security_passport/minimal.json",
+      "sha256": "4f9d399e7767953e9a36da6fd886e31fcb105cc9d56e23857e9f6e494dc43808"
+    },
+    {
       "bytes": 308,
       "path": "corpus/sources_directory/empty-name.dirseed",
       "sha256": "c0a1ac4b1083822517acdf6b87722975588d6830d253a7ffb9f044406eb50c30"
@@ -1249,6 +1269,11 @@
       "bytes": 80,
       "path": "corpus/tflite/valid-short-vtable-optional-fields.tflite",
       "sha256": "e1e5fd248c0bbdc7279f1c1976a9f75247441729a1d89a28436e180ae2804c07"
+    },
+    {
+      "bytes": 25,
+      "path": "corpus/transformation_chain/empty.json",
+      "sha256": "8a5a375cea6a55d24bd5f875856da63feba33adbefb15a92a0007719b84bcf11"
     }
   ],
   "schema_version": 1
