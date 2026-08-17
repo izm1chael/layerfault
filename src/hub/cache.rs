@@ -305,10 +305,13 @@ pub fn insert_verified_object(
         ensure_private_dir(parent)?;
     }
 
-    if !obj_p.is_file() {
-        fs::copy(partial_path, &obj_p)
-            .with_context(|| format!("unable to copy object to cache '{}'", obj_p.display()))?;
+    let inserted = if obj_p.is_file() {
+        false
+    } else {
+        install_object_noclobber(partial_path, &obj_p)?
+    };
 
+    if inserted {
         #[cfg(unix)]
         {
             let _ = fs::set_permissions(&obj_p, fs::Permissions::from_mode(0o400));
@@ -371,6 +374,44 @@ pub fn insert_verified_object(
     let _ = gc::run();
 
     Ok(())
+}
+
+fn install_object_noclobber(source: &Path, destination: &Path) -> Result<bool> {
+    let parent = destination.parent().with_context(|| {
+        format!(
+            "object cache destination '{}' has no parent directory",
+            destination.display()
+        )
+    })?;
+    let staged = tempfile::NamedTempFile::new_in(parent).with_context(|| {
+        format!(
+            "unable to create temporary object beside '{}'",
+            destination.display()
+        )
+    })?;
+    fs::copy(source, staged.path()).with_context(|| {
+        format!(
+            "unable to copy verified object into temporary cache file beside '{}'",
+            destination.display()
+        )
+    })?;
+    staged.as_file().sync_all().with_context(|| {
+        format!(
+            "unable to sync temporary object beside '{}'",
+            destination.display()
+        )
+    })?;
+
+    match staged.persist_noclobber(destination) {
+        Ok(_) => Ok(true),
+        Err(error) if error.error.kind() == std::io::ErrorKind::AlreadyExists => Ok(false),
+        Err(error) => Err(error.error).with_context(|| {
+            format!(
+                "unable to atomically install object in cache '{}'",
+                destination.display()
+            )
+        }),
+    }
 }
 
 fn save_metadata(path: &Path, metadata: &ObjectMetadata) -> Result<()> {
