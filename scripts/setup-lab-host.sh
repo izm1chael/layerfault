@@ -31,7 +31,7 @@ if [[ ! -x "$python_runtime" ]]; then
   echo "MISSING: managed Transformers runtime $python_runtime" >&2
   missing=1
 else
-  "$python_runtime" -c 'import torch, transformers, peft, safetensors' >/dev/null || missing=1
+  "$python_runtime" -c 'import torch, transformers, peft, safetensors, sentencepiece, tiktoken' >/dev/null || missing=1
 fi
 cap="$(mktemp)"; doc="$(mktemp)"; trap 'rm -f "$cap" "$doc"' EXIT
 LAYERFAULT_PYTHON_RUNTIME="$python_runtime" layerfault capabilities --json >"$cap"

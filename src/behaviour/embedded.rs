@@ -130,6 +130,9 @@ pub(crate) fn finalize_report(
             evaluate::Risk::Medium | evaluate::Risk::High
         )
     });
+    let meaningful_probe_completed = executions.iter().any(|value| {
+        value.category != "runtime_side_effects" && value.exit_code == Some(0) && !value.timed_out
+    });
     let dynamic_observations = summarize_dynamic_observations(&executions);
     Ok(BehaviourReport {
         schema_version: "1.1".to_owned(),
@@ -142,7 +145,9 @@ pub(crate) fn finalize_report(
         limits,
         executions,
         dynamic_observations,
-        state: if high {
+        state: if !meaningful_probe_completed {
+            crate::transformation::BehaviourState::NotRun
+        } else if high {
             crate::transformation::BehaviourState::HighRisk
         } else if suspicious {
             crate::transformation::BehaviourState::Suspicious

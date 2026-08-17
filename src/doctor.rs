@@ -468,7 +468,7 @@ fn python_ml_runtime_ready(path: &Path) -> bool {
     command
         .args([
             "-c",
-            "import torch, transformers, peft, safetensors; print('ok')",
+            "import torch, transformers, peft, safetensors, sentencepiece, tiktoken; print('ok')",
         ])
         .output()
         .is_ok_and(|output| output.status.success())

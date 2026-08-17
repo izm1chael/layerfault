@@ -142,6 +142,98 @@ mod tests {
         report
     }
 
+    fn runtime_failure(label: &str) -> BehaviourReport {
+        let mut report = report(label, &[]);
+        let mut execution = execution("runtime-side-effects", "runtime_side_effects", "failed");
+        execution.exit_code = Some(1);
+        execution
+            .evaluation
+            .rule_ids
+            .push("LF-BEHAV-RUNTIME-FAILURE".to_owned());
+        report.executions.push(execution);
+        report.state = BehaviourState::NotRun;
+        report.findings.push("LF-BEHAV-RUNTIME-FAILURE".to_owned());
+        report
+    }
+
+    #[test]
+    fn report_without_a_completed_non_telemetry_probe_is_not_run() {
+        let report = finalize_report(
+            "sha256:empty".to_owned(),
+            "empty".to_owned(),
+            runtime_identity(),
+            probes::ProbeSuite {
+                version: 1,
+                id: "test".to_owned(),
+                probes: Vec::new(),
+            },
+            7,
+            BehaviourLimits::for_profile("quick").unwrap(),
+            vec![execution(
+                "runtime-side-effects",
+                "runtime_side_effects",
+                "telemetry only",
+            )],
+        )
+        .unwrap();
+
+        assert_eq!(report.state, BehaviourState::NotRun);
+    }
+
+    #[test]
+    fn identical_runtime_failures_are_an_incomplete_comparison() {
+        let diff = compare_reports(runtime_failure("base"), runtime_failure("derived")).unwrap();
+        assert_eq!(diff.state, DifferentialBehaviourState::NotRun);
+        assert!(diff
+            .findings
+            .iter()
+            .any(|rule| rule == "LF-DIFF-INCOMPLETE"));
+    }
+
+    #[test]
+    fn one_sided_runtime_failure_is_an_incomplete_comparison() {
+        let diff = compare_reports(
+            report("base", &[("probe", "general", "ok")]),
+            runtime_failure("derived"),
+        )
+        .unwrap();
+        assert_eq!(diff.state, DifferentialBehaviourState::NotRun);
+    }
+
+    #[test]
+    fn zero_unmatched_and_partial_probes_are_incomplete() {
+        let zero = compare_reports(report("base", &[]), report("derived", &[])).unwrap();
+        assert_eq!(zero.state, DifferentialBehaviourState::NotRun);
+
+        let unmatched = compare_reports(
+            report("base", &[("a", "general", "ok")]),
+            report("derived", &[("b", "general", "ok")]),
+        )
+        .unwrap();
+        assert_eq!(unmatched.state, DifferentialBehaviourState::NotRun);
+
+        let base = report("base", &[("a", "general", "ok"), ("b", "general", "ok")]);
+        let mut derived = report("derived", &[("a", "general", "ok"), ("b", "general", "ok")]);
+        derived.executions[1].exit_code = Some(1);
+        let partial = compare_reports(base, derived).unwrap();
+        assert_eq!(partial.state, DifferentialBehaviourState::NotRun);
+        assert_eq!(partial.rows.len(), 2, "diagnostic rows must be preserved");
+    }
+
+    #[test]
+    fn fully_successful_matching_probes_can_be_expected() {
+        let diff = compare_reports(
+            report("base", &[("probe", "general", "same")]),
+            report("derived", &[("probe", "general", "same")]),
+        )
+        .unwrap();
+        assert_eq!(diff.state, DifferentialBehaviourState::Expected);
+        assert!(!diff
+            .findings
+            .iter()
+            .any(|rule| rule == "LF-DIFF-INCOMPLETE"));
+    }
+
     #[test]
     fn trigger_localized_response_divergence_is_not_hidden_by_none_risk_labels() {
         let base = report(

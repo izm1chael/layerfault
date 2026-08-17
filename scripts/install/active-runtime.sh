@@ -86,9 +86,9 @@ else
   elif [[ -f /usr/share/layerfault/active-requirements.txt ]]; then
     "$PYTHON_DIR/bin/python" -m pip install -r /usr/share/layerfault/active-requirements.txt
   else
-    "$PYTHON_DIR/bin/python" -m pip install 'transformers==5.14.1' 'peft==0.19.1' 'safetensors==0.8.0'
+    "$PYTHON_DIR/bin/python" -m pip install 'transformers==5.14.1' 'peft==0.19.1' 'safetensors==0.8.0' 'sentencepiece==0.2.2' 'tiktoken==0.13.0'
   fi
-  "$PYTHON_DIR/bin/python" -c 'import torch, transformers, peft, safetensors'
+  "$PYTHON_DIR/bin/python" -c 'import torch, transformers, peft, safetensors, sentencepiece, tiktoken'
   TRANSFORMERS_READY=1
 fi
 

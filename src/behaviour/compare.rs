@@ -6,6 +6,56 @@ pub fn compare_reports(
     use crate::transformation::DifferentialBehaviourState as D;
     use std::collections::{BTreeMap, VecDeque};
 
+    fn successful_non_runtime(execution: &ProbeExecution) -> bool {
+        execution.category != "runtime_side_effects"
+            && execution.exit_code == Some(0)
+            && !execution.timed_out
+    }
+
+    fn has_runtime_failure(report: &BehaviourReport) -> bool {
+        report.state == crate::transformation::BehaviourState::NotRun
+            || report
+                .findings
+                .iter()
+                .any(|rule| rule == "LF-BEHAV-RUNTIME-FAILURE")
+            || report.executions.iter().any(|execution| {
+                execution
+                    .evaluation
+                    .rule_ids
+                    .iter()
+                    .any(|rule| rule == "LF-BEHAV-RUNTIME-FAILURE")
+            })
+    }
+
+    fn completed_probe_counts(report: &BehaviourReport) -> BTreeMap<(&str, &str), usize> {
+        let mut counts = BTreeMap::new();
+        for execution in report
+            .executions
+            .iter()
+            .filter(|value| successful_non_runtime(value))
+        {
+            *counts
+                .entry((execution.probe_id.as_str(), execution.category.as_str()))
+                .or_default() += 1;
+        }
+        counts
+    }
+
+    let base_completed = completed_probe_counts(&base_report);
+    let derived_completed = completed_probe_counts(&derived_report);
+    let all_non_runtime_successful = [&base_report, &derived_report].into_iter().all(|report| {
+        report
+            .executions
+            .iter()
+            .filter(|execution| execution.category != "runtime_side_effects")
+            .all(successful_non_runtime)
+    });
+    let comparison_complete = !base_completed.is_empty()
+        && base_completed == derived_completed
+        && all_non_runtime_successful
+        && !has_runtime_failure(&base_report)
+        && !has_runtime_failure(&derived_report);
+
     // Preserve repeated probes rather than collapsing them into a single map
     // entry. Repeated trigger probes are valuable evidence of stable derived
     // behaviour and should be compared occurrence-for-occurrence.
@@ -147,6 +197,16 @@ pub fn compare_reports(
             findings.push("LF-DIFF-SAFETY-BOUNDARY-FLIP".to_owned());
             findings.push("LF-DIFF-SECURITY-REGRESSION".to_owned());
             overall = evaluate::stronger_difference(overall, D::SuspiciousTrigger);
+        }
+    }
+
+    if !comparison_complete {
+        findings.push("LF-DIFF-INCOMPLETE".to_owned());
+        if !matches!(
+            overall,
+            D::SecurityRegression | D::SuspiciousTrigger | D::HighRiskBehaviour
+        ) {
+            overall = D::NotRun;
         }
     }
 
