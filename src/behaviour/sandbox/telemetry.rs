@@ -484,6 +484,55 @@ fn is_trusted_wrapper_setup(lower: &str, actor_is_trusted_wrapper: bool) -> bool
     actor_is_trusted_wrapper && !lower.contains("/workspace/")
 }
 
+/// True for the sandbox wrapper's own user-namespace construction, matched
+/// by its implementation-specific artifacts rather than by which pid
+/// produced it. Bubblewrap's setup is not a single process: after the
+/// initial exec it forks internally (without a further execve) to continue
+/// namespace/mount construction, so a per-pid "does this trace file's own
+/// exec match the wrapper path" check — `is_trusted_wrapper_setup` above —
+/// never matches those forked-but-not-exec'd children, even though the
+/// activity is unmistakably still the wrapper's own setup:
+///
+/// - `uid_map`/`gid_map`/`setgroups` are opened by *name* only to write a
+///   user-namespace id mapping; no traced program has any reason to open
+///   files with these exact relative names.
+/// - `/newroot/` is bubblewrap's own hardcoded pivot_root staging path. It
+///   only exists during setup, before the traced program's own image is
+///   ever running, and stops being a meaningful path the moment pivot_root
+///   completes — nothing the sandboxed program does can be attributed to a
+///   path under it, because nothing sandboxed has started yet when these
+///   calls happen.
+///
+/// Both are causally impossible to originate from the traced program: they
+/// happen before it exists. This is intentionally not gated on the
+/// per-file actor check, because the actor check cannot see this pid's own
+/// exec (there isn't one) — the artifacts themselves are the only
+/// available and, here, sufficient signal.
+fn is_bwrap_namespace_construction(lower: &str) -> bool {
+    // The genuine pattern always opens these by a numeric /proc directory
+    // fd obtained earlier in the same setup sequence, never relative to the
+    // traced program's own working directory. Requiring a non-AT_FDCWD
+    // open closes the simplest evasion: a probe creating its own
+    // decoy-named "uid_map"/"gid_map"/"setgroups" file inside its own
+    // workspace (which would open via AT_FDCWD) does not match.
+    let id_map_write = ["\"uid_map\"", "\"gid_map\"", "\"setgroups\""]
+        .iter()
+        .any(|name| lower.contains(name))
+        && !lower.contains("at_fdcwd");
+    let newroot_setup = (lower.contains("/newroot/") || lower.contains("/newroot\""))
+        && [
+            "mkdir(",
+            "mkdirat(",
+            "mount(",
+            "pivot_root(",
+            "symlink(",
+            "symlinkat(",
+        ]
+        .iter()
+        .any(|call| lower.contains(call));
+    id_map_write || newroot_setup
+}
+
 fn classify_trace_line(
     line: &str,
     telemetry: &mut SandboxTelemetry,
@@ -523,7 +572,8 @@ fn classify_trace_line(
     .any(|call| lower.contains(call));
     let trusted_housekeeping =
         is_trusted_resource_tracker_cleanup(&lower, actor_is_resource_tracker)
-            || is_trusted_wrapper_setup(&lower, actor_is_trusted_wrapper);
+            || is_trusted_wrapper_setup(&lower, actor_is_trusted_wrapper)
+            || is_bwrap_namespace_construction(&lower);
     if (write_like || mutate_like)
         && !trusted_housekeeping
         && telemetry.filesystem_write_attempts.len() < MAX_TELEMETRY_ROWS
@@ -833,12 +883,13 @@ mod tests {
 
     #[test]
     fn wrapper_setup_writes_without_confirmed_wrapper_actor_are_still_reported() {
-        // A write outside /workspace/ is not automatically trusted — the
-        // actor must be confirmed as the exact resolved wrapper binary for
-        // this run first.
+        // A write outside /workspace/ that isn't one of bwrap's own
+        // implementation-specific artifacts (/newroot/, uid_map/gid_map/
+        // setgroups) is not automatically trusted — the actor must be
+        // confirmed as the exact resolved wrapper binary for this run.
         let mut telemetry = SandboxTelemetry::default();
         classify_trace_line(
-            r#"mkdir("/newroot/proc", 0755) = 0"#,
+            r#"mkdir("/tmp/attacker-controlled", 0755) = 0"#,
             &mut telemetry,
             false,
             false,
@@ -908,6 +959,74 @@ mod tests {
 
         let _ = std::fs::remove_dir_all(&root);
         Ok(())
+    }
+
+    #[test]
+    fn bwrap_forked_child_with_no_exec_of_its_own_is_still_suppressed() -> Result<()> {
+        // Real lab trace: bwrap forks internally to continue namespace
+        // setup without a further execve, so the forked child's own trace
+        // file has no exec line at all to match against
+        // `is_trusted_wrapper_setup`. This is exactly what
+        // `is_bwrap_namespace_construction` covers instead.
+        let root = std::env::temp_dir().join(format!(
+            "layerfault-trace-bwrap-fork-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root)?;
+        std::fs::write(
+            root.join("strace.300"),
+            concat!(
+                "openat(10, \"uid_map\", O_RDWR|O_CLOEXEC) = 11\n",
+                "openat(10, \"setgroups\", O_RDWR|O_CLOEXEC) = 11\n",
+                "openat(10, \"gid_map\", O_RDWR|O_CLOEXEC) = 11\n",
+                "mkdir(\"/newroot/runtime-support\", 0755) = 0\n",
+                "mkdir(\"/newroot/runtime-support/0\", 0755) = 0\n",
+            ),
+        )?;
+
+        let mut telemetry = SandboxTelemetry::default();
+        parse_trace_files(&root, &mut telemetry, Some(Path::new("/usr/bin/bwrap")))?;
+
+        assert!(
+            telemetry.filesystem_write_attempts.is_empty(),
+            "bwrap's own forked-but-not-exec'd namespace setup must not be reported: {:?}",
+            telemetry.filesystem_write_attempts
+        );
+
+        let _ = std::fs::remove_dir_all(&root);
+        Ok(())
+    }
+
+    #[test]
+    fn id_map_write_via_at_fdcwd_is_not_trusted_as_namespace_construction() {
+        // Evasion check: the genuine pattern always opens uid_map/gid_map/
+        // setgroups via a numeric /proc directory fd, never relative to
+        // the traced program's own cwd. A probe creating its own
+        // decoy-named file via AT_FDCWD must not ride along.
+        let mut telemetry = SandboxTelemetry::default();
+        classify_trace_line(
+            r#"openat(AT_FDCWD, "uid_map", O_WRONLY|O_CREAT) = 4"#,
+            &mut telemetry,
+            false,
+            false,
+        );
+        assert_eq!(telemetry.filesystem_write_attempts.len(), 1);
+    }
+
+    #[test]
+    fn arbitrary_newroot_file_write_is_not_trusted_as_namespace_construction() {
+        // The /newroot/ exception is limited to bwrap's setup operations. A
+        // later arbitrary file write must remain visible even if a trace
+        // happens to contain that implementation-specific path.
+        let mut telemetry = SandboxTelemetry::default();
+        classify_trace_line(
+            r#"openat(10, \"/newroot/payload\", O_WRONLY|O_CREAT) = 4"#,
+            &mut telemetry,
+            false,
+            false,
+        );
+        assert_eq!(telemetry.filesystem_write_attempts.len(), 1);
     }
 
     #[test]

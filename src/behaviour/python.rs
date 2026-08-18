@@ -771,10 +771,13 @@ fn version_string(path: &Path) -> Option<String> {
 const RUNNER: &str = r#"
 import argparse
 import contextlib
+import faulthandler
 import json
 import os
 import sys
 import traceback
+
+GENERATE_STALL_DUMP_SECONDS = 20
 
 PREFIX = "LAYERFAULT_JSON:"
 
@@ -862,13 +865,17 @@ for raw in sys.stdin:
             max_length=4096,
         )
         input_len = int(encoded["input_ids"].shape[-1])
-        with torch.no_grad(), contextlib.redirect_stdout(sys.stderr):
-            generated = model.generate(
-                **encoded,
-                max_new_tokens=max_tokens,
-                do_sample=False,
-                pad_token_id=(tokenizer.eos_token_id if tokenizer.eos_token_id is not None else 0),
-            )
+        faulthandler.dump_traceback_later(GENERATE_STALL_DUMP_SECONDS, exit=False, file=sys.stderr)
+        try:
+            with torch.no_grad(), contextlib.redirect_stdout(sys.stderr):
+                generated = model.generate(
+                    **encoded,
+                    max_new_tokens=max_tokens,
+                    do_sample=False,
+                    pad_token_id=(tokenizer.eos_token_id if tokenizer.eos_token_id is not None else 0),
+                )
+        finally:
+            faulthandler.cancel_dump_traceback_later()
         new_tokens = generated[0][input_len:]
         output = tokenizer.decode(new_tokens, skip_special_tokens=True)
         emit({"id": req.get("id"), "output": output})

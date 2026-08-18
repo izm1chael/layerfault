@@ -4,6 +4,20 @@ use super::{
 use crate::finding_evidence::{EvidenceKind, FindingBuilder, FindingEvidence};
 use crate::scanner::{CheckType, Confidence, FindingClass, LayerScanResult, ScanStatus};
 use std::collections::BTreeMap;
+
+/// Standard HF practice: models without a dedicated pad token commonly
+/// reuse eos/bos/unk as pad (e.g. SmolLM2's `<|im_end|>` as both eos_token
+/// and pad_token). Reusing a token for one of these known-safe role pairs
+/// is not a conflict; genuine id/content contradictions are still caught
+/// separately below.
+const SAFE_ROLE_OVERLAP_PAIRS: &[(&str, &str)] = &[("eos", "pad"), ("bos", "pad"), ("unk", "pad")];
+
+fn is_safe_role_overlap(a: &str, b: &str) -> bool {
+    SAFE_ROLE_OVERLAP_PAIRS
+        .iter()
+        .any(|(x, y)| (*x == a && *y == b) || (*x == b && *y == a))
+}
+
 pub(crate) fn build(report: &TokenizerSecurityReport) -> Vec<LayerScanResult> {
     let mut out = Vec::new();
     for c in &report.unicode_controls {
@@ -113,7 +127,11 @@ fn conflicts(
     let mut by_role_token_special: BTreeMap<(&str, &str), bool> = BTreeMap::new();
     for x in t {
         if let Some(prev) = by_token.insert(&x.token, &x.role) {
-            if prev != &x.role {
+            let is_safe_overlap = match (prev, &x.role) {
+                (Some(prev_role), Some(new_role)) => is_safe_role_overlap(prev_role, new_role),
+                _ => false,
+            };
+            if prev != &x.role && !is_safe_overlap {
                 out.push(simple(
                     r,
                     "LF-TOKENIZER-SPECIAL-TOKEN-CONFLICT",
@@ -269,6 +287,66 @@ mod conflict_tests {
                 false,
                 Some(0),
                 "tokenizer_config.json",
+            ),
+        ];
+        let findings = conflict_ids(&tokens);
+        assert_eq!(findings.len(), 1);
+        assert_eq!(
+            findings[0].rule_id.as_deref(),
+            Some("LF-TOKENIZER-SPECIAL-TOKEN-CONFLICT")
+        );
+    }
+
+    #[test]
+    fn eos_token_also_serving_as_pad_is_not_a_conflict() {
+        // SmolLM2's special_tokens_map.json: <|im_end|> is both eos_token
+        // and pad_token. Standard HF practice, not a conflict.
+        let tokens = vec![
+            record(
+                "<|im_end|>",
+                "eos",
+                true,
+                Some(2),
+                "special_tokens_map.json",
+            ),
+            record(
+                "<|im_end|>",
+                "pad",
+                true,
+                Some(2),
+                "special_tokens_map.json",
+            ),
+        ];
+        assert!(conflict_ids(&tokens).is_empty());
+    }
+
+    #[test]
+    fn bos_and_unk_token_also_serving_as_pad_is_not_a_conflict() {
+        let bos_pad = vec![
+            record("<s>", "bos", true, Some(0), "special_tokens_map.json"),
+            record("<s>", "pad", true, Some(0), "special_tokens_map.json"),
+        ];
+        assert!(conflict_ids(&bos_pad).is_empty());
+
+        let unk_pad = vec![
+            record("<unk>", "unk", true, Some(3), "special_tokens_map.json"),
+            record("<unk>", "pad", true, Some(3), "special_tokens_map.json"),
+        ];
+        assert!(conflict_ids(&unk_pad).is_empty());
+    }
+
+    #[test]
+    fn eos_and_bos_role_overlap_on_the_same_token_still_conflicts() {
+        // The allowlist only covers known-safe pairs; eos+bos on the same
+        // token is not one of them and must still be flagged.
+        let tokens = vec![
+            record("<|im_end|>", "eos", true, Some(2), "tokenizer_config.json"),
+            record(
+                "<|im_end|>",
+                "bos",
+                true,
+                Some(2),
+                "special_tokens_map.json",
             ),
         ];
         let findings = conflict_ids(&tokens);
