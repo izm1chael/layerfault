@@ -501,6 +501,15 @@ fn scan_zip(
         if total > MAX_TOTAL_PICKLE_BYTES {
             bail!("pickle ZIP exceeds total decompressed pickle-byte cap");
         }
+        budget
+            .consume(
+                crate::budget::BudgetDimension::DecompressedBytes,
+                len,
+                &format!("pickle member '{name}'"),
+            )
+            .map_err(|error| {
+                anyhow!("pickle member '{name}' would exceed decompressed-bytes budget: {error}")
+            })?;
         let capacity = usize::try_from(len).context("pickle member size does not fit usize")?;
         let mut bytes = Vec::with_capacity(capacity);
         member
@@ -1715,5 +1724,112 @@ mod tests {
             }
             other => panic!("expected transcript-cap incompleteness, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn zip_member_decompression_is_charged_against_the_shared_scan_budget() -> Result<()> {
+        // A ZIP-contained pickle member must consume the same
+        // ScanBudget::DecompressedBytes dimension every other decompressed
+        // layer draws from, not a private counter local to this parser —
+        // otherwise a nested/compressed payload could sidestep the global
+        // scan-budget ceiling that bounds every other format's expansion.
+        use std::io::Write;
+
+        let dir = tempfile::tempdir()?;
+        let path = dir.path().join("model.pt");
+        let file = File::create(&path)?;
+        let mut archive = zip::ZipWriter::new(file);
+        let payload = vec![b'A'; 4096];
+        archive.start_file("archive/data.pkl", zip::write::SimpleFileOptions::default())?;
+        archive.write_all(&payload)?;
+        archive.finish()?;
+
+        let file = File::open(&path)?;
+
+        // A budget whose DecompressedBytes ceiling is far smaller than the
+        // member's decompressed size must reject the member rather than
+        // silently accepting content beyond the shared budget.
+        let mut tight_limits = crate::budget::ScanBudgetProfile::Constrained.limits();
+        tight_limits.decompressed_bytes = 128;
+        let tight_budget = crate::budget::ScanBudget::new(tight_limits)?;
+        let results = scan(
+            &path,
+            &file,
+            file.metadata()?.len(),
+            "sha256:test",
+            "application/zip",
+            &tight_budget,
+        )?;
+        assert!(
+            results.iter().any(|result| {
+                result.status == ScanStatus::Fail
+                    && result
+                        .detail
+                        .as_deref()
+                        .unwrap_or_default()
+                        .contains("decompressed-bytes budget")
+            }),
+            "a ZIP pickle member exceeding the decompressed-bytes budget must be rejected, not silently scanned: {results:?}"
+        );
+
+        // The same file with an ordinary budget must scan without error,
+        // confirming the rejection above was budget-driven, not a general
+        // parse failure.
+        let file = File::open(&path)?;
+        let ample_budget =
+            crate::budget::ScanBudget::new(crate::budget::ScanBudgetProfile::Default.limits())?;
+        scan(
+            &path,
+            &file,
+            file.metadata()?.len(),
+            "sha256:test",
+            "application/zip",
+            &ample_budget,
+        )?;
+        Ok(())
+    }
+
+    #[test]
+    fn truncated_nested_zip_member_fails_safely_without_panicking() -> Result<()> {
+        // A ZIP member whose local header claims a `.pkl` name and a size
+        // but whose actual compressed bytes are corrupt/truncated must
+        // surface as a bounded error, never a panic, even under repeated
+        // scanning.
+        use std::io::Write;
+
+        let dir = tempfile::tempdir()?;
+        let path = dir.path().join("truncated.pt");
+        {
+            let file = File::create(&path)?;
+            let mut archive = zip::ZipWriter::new(file);
+            archive.start_file("archive/data.pkl", zip::write::SimpleFileOptions::default())?;
+            archive.write_all(&[0x80, 0x02, 0x4e, 0x2e])?;
+            archive.finish()?;
+        }
+        // Truncate the file after it was written as a valid ZIP so the
+        // local/central directory disagree about available bytes.
+        let full_len = std::fs::metadata(&path)?.len();
+        let truncated = crate::safeio::open_readonly_nofollow(&path)?
+            .metadata()?
+            .len()
+            .min(full_len.saturating_sub(8));
+        let file = std::fs::OpenOptions::new().write(true).open(&path)?;
+        file.set_len(truncated)?;
+        drop(file);
+
+        let file = File::open(&path)?;
+        let budget =
+            crate::budget::ScanBudget::new(crate::budget::ScanBudgetProfile::Default.limits())?;
+        // Either a bounded error or a bounded result is acceptable; a panic
+        // is not. Calling this at all is the assertion.
+        let _ = scan(
+            &path,
+            &file,
+            file.metadata()?.len(),
+            "sha256:test",
+            "application/zip",
+            &budget,
+        );
+        Ok(())
     }
 }

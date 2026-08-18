@@ -353,8 +353,17 @@ fn parse_trace_files(root: &Path, telemetry: &mut SandboxTelemetry) -> Result<()
         bounded.read_to_end(&mut bytes)?;
         consumed = consumed.saturating_add(bytes.len() as u64);
         let text = String::from_utf8_lossy(&bytes);
+        // strace -ff writes one file per traced pid, so every line in this
+        // file was produced by the same process. Establish once, from that
+        // process's own exec, whether it is the interpreter and lifecycle
+        // stage Python's multiprocessing.resource_tracker helper runs as,
+        // before classifying any of its individual syscalls. This is the
+        // actor half of the attribution check in `classify_trace_line`; a
+        // process that merely writes a matching path without being this
+        // exact helper does not qualify.
+        let actor_is_resource_tracker = is_resource_tracker_actor(&text);
         for line in text.lines() {
-            classify_trace_line(line, telemetry);
+            classify_trace_line(line, telemetry, actor_is_resource_tracker);
         }
     }
     // The sandbox launcher itself performs exactly one expected exec of the
@@ -387,7 +396,40 @@ fn is_internet_network_attempt(lower: &str) -> bool {
         && (lower.contains("af_inet6") || lower.contains("af_inet"))
 }
 
-fn classify_trace_line(line: &str, telemetry: &mut SandboxTelemetry) {
+/// True when a trace file's own process exec identifies it as CPython's
+/// `multiprocessing.resource_tracker` helper: the interpreter path contains
+/// "python" and its command line names the `resource_tracker` module, which
+/// is how the standard library actually launches it
+/// (`python -c "from multiprocessing.resource_tracker import main;..."`).
+/// This is the actor half of trusted-runtime-housekeeping attribution — see
+/// `is_trusted_resource_tracker_cleanup`.
+fn is_resource_tracker_actor(text: &str) -> bool {
+    text.lines().any(|line| {
+        let lower = line.to_ascii_lowercase();
+        lower.contains("execve(") && lower.contains("python") && lower.contains("resource_tracker")
+    })
+}
+
+/// True when a syscall line is `multiprocessing.resource_tracker`'s expected
+/// unlink of a leaked POSIX semaphore/shared-memory object under `/dev/shm/`
+/// — the only filesystem-mutating operation that helper performs, and the
+/// only path prefix it operates on. Both the actor (`actor_is_resource_tracker`,
+/// established from that process's own exec) and this operation/path match
+/// must hold; neither alone is enough, so a process that merely names itself
+/// "resource_tracker" without this exact operation and path, or that reaches
+/// this path from a process that isn't the helper, still gets reported
+/// normally.
+fn is_trusted_resource_tracker_cleanup(lower: &str, actor_is_resource_tracker: bool) -> bool {
+    actor_is_resource_tracker
+        && (lower.contains("unlink(\"/dev/shm/")
+            || lower.contains("unlinkat(") && lower.contains("\"/dev/shm/"))
+}
+
+fn classify_trace_line(
+    line: &str,
+    telemetry: &mut SandboxTelemetry,
+    actor_is_resource_tracker: bool,
+) {
     let lower = line.to_ascii_lowercase();
     if is_internet_network_attempt(&lower) && telemetry.network_attempts.len() < MAX_TELEMETRY_ROWS
     {
@@ -419,7 +461,11 @@ fn classify_trace_line(line: &str, telemetry: &mut SandboxTelemetry) {
     ]
     .iter()
     .any(|call| lower.contains(call));
-    if (write_like || mutate_like) && telemetry.filesystem_write_attempts.len() < MAX_TELEMETRY_ROWS
+    let trusted_housekeeping =
+        is_trusted_resource_tracker_cleanup(&lower, actor_is_resource_tracker);
+    if (write_like || mutate_like)
+        && !trusted_housekeeping
+        && telemetry.filesystem_write_attempts.len() < MAX_TELEMETRY_ROWS
     {
         telemetry.filesystem_write_attempts.push(excerpt(line));
     }
@@ -492,23 +538,32 @@ mod tests {
         classify_trace_line(
             r#"connect(7, {sa_family=AF_INET, sin_port=htons(443)}, 16) = -1 ENETUNREACH"#,
             &mut telemetry,
+            false,
         );
-        classify_trace_line(r#"execve("/bin/sh", ["sh"], 0x0) = 0"#, &mut telemetry);
+        classify_trace_line(
+            r#"execve("/bin/sh", ["sh"], 0x0) = 0"#,
+            &mut telemetry,
+            false,
+        );
         classify_trace_line(
             r#"openat(AT_FDCWD, "/workspace/workspace/.env", O_RDONLY) = 4"#,
             &mut telemetry,
+            false,
         );
         classify_trace_line(
             r#"openat(AT_FDCWD, "/model/package/config.json", O_WRONLY|O_TRUNC) = -1 EROFS"#,
             &mut telemetry,
+            false,
         );
         classify_trace_line(
             r#"openat(AT_FDCWD, "/proc/self/mem", O_WRONLY) = -1 EACCES"#,
             &mut telemetry,
+            false,
         );
         classify_trace_line(
             r#"openat(AT_FDCWD, "/tmp/dropper", O_WRONLY|O_CREAT) = 4"#,
             &mut telemetry,
+            false,
         );
         assert_eq!(telemetry.network_attempts.len(), 1);
         assert_eq!(telemetry.process_exec_attempts.len(), 1);
@@ -522,10 +577,12 @@ mod tests {
         classify_trace_line(
             r#"connect(5, {sa_family=AF_UNIX, sun_path="/var/run/nscd/socket"}, 110) = -1 ENOENT"#,
             &mut telemetry,
+            false,
         );
         classify_trace_line(
             r#"openat(AT_FDCWD, "/workspace/workspace/secrets/api_token.txt", O_RDONLY) = -1 ENOENT"#,
             &mut telemetry,
+            false,
         );
         assert!(telemetry.network_attempts.is_empty());
         assert!(telemetry.canary_accesses.is_empty());
@@ -533,10 +590,12 @@ mod tests {
         classify_trace_line(
             r#"connect(7, {sa_family=AF_INET6, sin6_port=htons(443)}, 28) = -1 ENETUNREACH"#,
             &mut telemetry,
+            false,
         );
         classify_trace_line(
             r#"openat(AT_FDCWD, "/workspace/workspace/secrets/api_token.txt", O_RDONLY) = 4"#,
             &mut telemetry,
+            false,
         );
         assert_eq!(telemetry.network_attempts.len(), 1);
         assert_eq!(telemetry.canary_accesses.len(), 1);
@@ -548,10 +607,12 @@ mod tests {
         classify_trace_line(
             r#"execve("/runtime", ["/runtime", "runner.py"], 0x0) = 0"#,
             &mut telemetry,
+            false,
         );
         classify_trace_line(
             r#"execve("/runtime", ["/runtime", "-c", "payload"], 0x0) = 0"#,
             &mut telemetry,
+            false,
         );
         discard_one_expected_runtime_exec(&mut telemetry);
         assert_eq!(telemetry.process_exec_attempts.len(), 1);
@@ -561,6 +622,123 @@ mod tests {
     fn expected_runtime_artifacts_are_separated_from_unexpected_mutations() {
         assert!(expected_runtime_artifact("home/.cache/huggingface/x"));
         assert!(!expected_runtime_artifact("workspace/dropper.sh"));
+    }
+
+    const RESOURCE_TRACKER_EXEC: &str = r#"execve("/usr/bin/python3.11", ["python3", "-c", "from multiprocessing.resource_tracker import main;main(6)"], 0x7ffe /* 12 vars */) = 0"#;
+    const RESOURCE_TRACKER_UNLINK: &str = r#"unlink("/dev/shm/sem.mp-abc123") = 0"#;
+
+    #[test]
+    fn resource_tracker_semaphore_cleanup_is_not_a_filesystem_write_finding() {
+        let mut telemetry = SandboxTelemetry::default();
+        let actor = is_resource_tracker_actor(RESOURCE_TRACKER_EXEC);
+        assert!(actor);
+        classify_trace_line(RESOURCE_TRACKER_EXEC, &mut telemetry, actor);
+        classify_trace_line(RESOURCE_TRACKER_UNLINK, &mut telemetry, actor);
+        assert!(
+            telemetry.filesystem_write_attempts.is_empty(),
+            "expected resource_tracker's own semaphore cleanup to be suppressed: {:?}",
+            telemetry.filesystem_write_attempts
+        );
+    }
+
+    #[test]
+    fn unlink_outside_dev_shm_by_resource_tracker_actor_is_still_reported() {
+        // Even a process that genuinely is the resource_tracker helper must
+        // still be reported if it unlinks something outside its known
+        // housekeeping path — the path match is not optional.
+        let mut telemetry = SandboxTelemetry::default();
+        let actor = is_resource_tracker_actor(RESOURCE_TRACKER_EXEC);
+        assert!(actor);
+        classify_trace_line(
+            r#"unlink("/workspace/workspace/.env") = 0"#,
+            &mut telemetry,
+            actor,
+        );
+        assert_eq!(telemetry.filesystem_write_attempts.len(), 1);
+    }
+
+    #[test]
+    fn dev_shm_unlink_without_resource_tracker_actor_is_still_reported() {
+        // A process that unlinks a /dev/shm path but was never established
+        // as the resource_tracker helper (no matching exec observed in its
+        // own trace file) must not be suppressed just by path shape alone.
+        let mut telemetry = SandboxTelemetry::default();
+        classify_trace_line(RESOURCE_TRACKER_UNLINK, &mut telemetry, false);
+        assert_eq!(telemetry.filesystem_write_attempts.len(), 1);
+    }
+
+    #[test]
+    fn spoofed_resource_tracker_argv_without_python_is_not_trusted() {
+        // "GOOD" example from the housekeeping rule: an arbitrary child
+        // merely naming "resource_tracker" in its command line, without
+        // actually being the Python interpreter running that module, must
+        // not gain trusted status.
+        let spoofed = r#"execve("/bin/sh", ["sh", "-c", "echo resource_tracker && rm -rf /dev/shm/sem.fake"], 0x0) = 0"#;
+        assert!(!is_resource_tracker_actor(spoofed));
+
+        let mut telemetry = SandboxTelemetry::default();
+        classify_trace_line(spoofed, &mut telemetry, false);
+        classify_trace_line(RESOURCE_TRACKER_UNLINK, &mut telemetry, false);
+        assert_eq!(
+            telemetry.filesystem_write_attempts.len(),
+            1,
+            "unlink must still be reported when the actor was never confirmed as resource_tracker"
+        );
+    }
+
+    #[test]
+    fn genuine_arbitrary_writes_are_unaffected_by_the_housekeeping_rule() {
+        let mut telemetry = SandboxTelemetry::default();
+        let actor = is_resource_tracker_actor(RESOURCE_TRACKER_EXEC);
+        classify_trace_line(
+            r#"openat(AT_FDCWD, "/tmp/payload", O_WRONLY|O_CREAT) = 4"#,
+            &mut telemetry,
+            actor,
+        );
+        classify_trace_line(
+            r#"openat(AT_FDCWD, "/root/.ssh/authorized_keys", O_WRONLY|O_CREAT) = 4"#,
+            &mut telemetry,
+            actor,
+        );
+        assert_eq!(telemetry.filesystem_write_attempts.len(), 2);
+    }
+
+    #[test]
+    fn parse_trace_files_attributes_housekeeping_per_pid_file() -> Result<()> {
+        // `strace -ff` writes one file per traced pid. Model that layout: a
+        // model/probe process (pid 100) that writes an arbitrary file, and a
+        // separate resource_tracker helper process (pid 105) that only ever
+        // unlinks its own semaphore. Attribution must be established from
+        // each file's own content, independent of file processing order.
+        let root = std::env::temp_dir().join(format!(
+            "layerfault-trace-attribution-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root)?;
+        std::fs::write(
+            root.join("strace.100"),
+            r#"openat(AT_FDCWD, "/tmp/payload", O_WRONLY|O_CREAT) = 4
+"#,
+        )?;
+        std::fs::write(
+            root.join("strace.105"),
+            format!("{RESOURCE_TRACKER_EXEC}\n{RESOURCE_TRACKER_UNLINK}\n"),
+        )?;
+
+        let mut telemetry = SandboxTelemetry::default();
+        parse_trace_files(&root, &mut telemetry)?;
+
+        assert_eq!(
+            telemetry.filesystem_write_attempts.len(),
+            1,
+            "the probe's own write must still be reported while the helper's cleanup is suppressed: {:?}",
+            telemetry.filesystem_write_attempts
+        );
+        assert!(telemetry.filesystem_write_attempts[0].contains("/tmp/payload"));
+
+        let _ = std::fs::remove_dir_all(&root);
+        Ok(())
     }
 
     #[test]

@@ -135,6 +135,62 @@ impl CommandDeadline {
     pub(crate) fn elapsed_seconds(&self) -> u64 {
         self.started.elapsed().as_secs()
     }
+
+    /// A fresh deadline starting now, for a distinct phase (e.g. model
+    /// loading vs. probe execution) that must not inherit time already
+    /// spent by a prior phase, while still never exceeding what remains of
+    /// `self`. `profile_seconds` is that phase's own configured budget; the
+    /// narrower of the two always wins, so this can shrink but never
+    /// extend the outer deadline, and never grows unbounded regardless of
+    /// how much of the outer deadline happened to remain.
+    pub(crate) fn phase(&self, profile_seconds: u64) -> Self {
+        let outer_remaining = self.remaining().as_secs().max(1);
+        Self::new(profile_seconds.min(outer_remaining))
+    }
+}
+
+#[cfg(test)]
+mod deadline_tests {
+    use super::CommandDeadline;
+    use std::time::Duration;
+
+    #[test]
+    fn phase_shrinks_to_outer_remaining_when_narrower_than_the_profile_budget() {
+        let outer = CommandDeadline::new(2);
+        let inner = outer.phase(600);
+        assert!(
+            inner.remaining() <= Duration::from_secs(3),
+            "a phase deadline must not outlive the outer deadline it was carved from"
+        );
+    }
+
+    #[test]
+    fn phase_is_capped_by_its_own_profile_budget_even_with_ample_outer_time() {
+        let outer = CommandDeadline::new(600);
+        let inner = outer.phase(2);
+        assert!(
+            inner.remaining() <= Duration::from_secs(3),
+            "a phase deadline must not exceed its own configured budget just because the outer deadline has room"
+        );
+    }
+
+    #[test]
+    fn phase_starts_fresh_instead_of_inheriting_time_the_outer_deadline_already_spent() {
+        // Model this on the real bug: model loading (or any earlier phase)
+        // has already consumed part of the outer budget before the next
+        // phase (probe execution) begins. A 1-second probe phase that
+        // *reused* the outer deadline directly (the old, buggy behaviour)
+        // would already be expired here, 1.1s in. A phase deadline that
+        // correctly starts fresh from when probe execution began must not
+        // be.
+        let outer = CommandDeadline::new(5);
+        std::thread::sleep(Duration::from_millis(1100));
+        let probe_phase = outer.phase(1);
+        assert!(
+            !probe_phase.expired(),
+            "a phase deadline must start counting from when the phase began, not inherit time an earlier phase already spent"
+        );
+    }
 }
 
 pub(crate) struct ProgressHeartbeat {

@@ -156,6 +156,7 @@ fn parse_macho_thin(
     let mut sections_truncated = false;
     let mut imports_truncated = false;
     let mut exports_truncated = false;
+    let mut has_substantive_command = false;
 
     for _ in 0..ncmds {
         if cursor + 8 > commands_bytes.len() {
@@ -176,6 +177,7 @@ fn parse_macho_thin(
                 let is_seg64 = req_cmd == 0x19;
                 let min_len = if is_seg64 { 72 } else { 56 };
                 if cmd_data.len() >= min_len {
+                    has_substantive_command = true;
                     let seg_name_raw = &cmd_data[8..24];
                     let seg_end = seg_name_raw.iter().position(|&b| b == 0).unwrap_or(16);
                     let _seg_name = String::from_utf8_lossy(&seg_name_raw[..seg_end]).to_string();
@@ -253,6 +255,7 @@ fn parse_macho_thin(
             0xc | 0x18 | 0x1f => {
                 // LC_LOAD_DYLIB, LC_LOAD_WEAK_DYLIB, LC_REEXPORT_DYLIB
                 if cmd_data.len() >= 24 {
+                    has_substantive_command = true;
                     let str_off = read_u32(&cmd_data[8..12], little) as usize;
                     if str_off < cmd_data.len() {
                         let dylib_name = extract_cstr(&cmd_data[str_off..]);
@@ -268,6 +271,7 @@ fn parse_macho_thin(
             0x1c => {
                 // LC_RPATH
                 if cmd_data.len() >= 12 {
+                    has_substantive_command = true;
                     let str_off = read_u32(&cmd_data[8..12], little) as usize;
                     if str_off < cmd_data.len() {
                         let rpath = extract_cstr(&cmd_data[str_off..]);
@@ -280,15 +284,18 @@ fn parse_macho_thin(
             0x1d => {
                 // LC_CODE_SIGNATURE
                 code_signature = true;
+                has_substantive_command = true;
             }
             0x8000_0028 => {
                 // LC_MAIN
                 if cmd_data.len() >= 16 {
+                    has_substantive_command = true;
                     entry_point = Some(read_u64(&cmd_data[8..16], little));
                 }
             }
             0x2 if cmd_data.len() >= 24 => {
                 // LC_SYMTAB
+                has_substantive_command = true;
                 let symoff = read_u32(&cmd_data[8..12], little) as u64;
                 let nsyms = read_u32(&cmd_data[12..16], little) as u64;
                 let stroff = read_u32(&cmd_data[16..20], little) as u64;
@@ -299,6 +306,15 @@ fn parse_macho_thin(
         }
 
         cursor += cmdsize;
+    }
+
+    // Require at least one recognized, size-validated load command (a
+    // segment, a dylib/rpath reference, a symbol table, a code signature, or
+    // an entry point). A header whose load commands all fell outside the
+    // known set, or whose lone command was too small to read, is not enough
+    // structure to call the bytes an executable.
+    if !has_substantive_command {
+        return Ok(None);
     }
 
     if let Some((symoff, nsyms, stroff, strsize)) = symtab_info {
@@ -448,6 +464,31 @@ mod tests {
 
         assert!(parse_macho(&file, bytes.len() as u64, 0)
             .expect("parse self-referential Mach-O")
+            .is_none());
+    }
+
+    #[test]
+    fn fat_arch_entry_outside_input_is_rejected() {
+        // A single fat_arch entry whose offset+size claims to extend far
+        // past the actual file length must be skipped rather than followed.
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(b"\xca\xfe\xba\xbe");
+        bytes.extend_from_slice(&1_u32.to_be_bytes()); // nfat_arch
+        bytes.extend_from_slice(&0x0100_0007_u32.to_be_bytes()); // cputype
+        bytes.extend_from_slice(&3_u32.to_be_bytes()); // cpusubtype
+        bytes.extend_from_slice(&28_u32.to_be_bytes()); // offset
+        bytes.extend_from_slice(&0x7fff_ffff_u32.to_be_bytes()); // size: far past EOF
+        bytes.extend_from_slice(&0_u32.to_be_bytes()); // align
+        bytes.resize(28, 0);
+
+        let mut fixture = tempfile::NamedTempFile::new().expect("create Mach-O fixture");
+        fixture
+            .write_all(&bytes)
+            .expect("write out-of-range FAT Mach-O fixture");
+        let file = fixture.reopen().expect("reopen Mach-O fixture");
+
+        assert!(parse_macho(&file, bytes.len() as u64, 0)
+            .expect("parse out-of-range FAT Mach-O")
             .is_none());
     }
 }

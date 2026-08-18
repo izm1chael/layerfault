@@ -308,7 +308,12 @@ fn run_transformers_deadline(
     let mut request_id = 0_u64;
     let mut timed_out = false;
     let mut session_error: Option<String> = None;
-    match recv_protocol(&line_rx, deadline.remaining()) {
+    // Model loading gets its own budget, starting now rather than inheriting
+    // whatever this run has already spent on admission/staging/spawn. A slow
+    // load must not eat into the time probes get, and a probe must not be
+    // charged for time the model spent loading.
+    let startup_deadline = deadline.phase(limits.timeout_seconds);
+    match recv_protocol(&line_rx, startup_deadline.remaining()) {
         Ok(ready) => {
             if !ready
                 .get("ready")
@@ -330,6 +335,12 @@ fn run_transformers_deadline(
         }
     }
 
+    // Probe execution gets a fresh budget of its own, starting only once the
+    // model actually reported ready — this is what makes model-load time
+    // stop counting against probe time. Still bounded by whatever remains of
+    // the outer/overall behavioural deadline, so the two phases together
+    // can never exceed it.
+    let probe_deadline = deadline.phase(limits.timeout_seconds);
     if session_error.is_none() {
         heartbeat.update(format!("phase={phase_label} model-loaded"));
     }
@@ -346,7 +357,7 @@ fn run_transformers_deadline(
             for probe in suite.probes.iter().take(limits.max_prompts) {
                 let repeat = probe.repeat.max(1).min(limits.repeat_count.max(1));
                 for repeat_index in 0..repeat {
-                    if deadline.expired() {
+                    if probe_deadline.expired() {
                         timed_out = true;
                         session_error = Some("behaviour command hard total timeout expired before Transformers probe".to_owned());
                         break 'probes;
@@ -388,7 +399,7 @@ fn run_transformers_deadline(
                         break 'probes;
                     }
                     let request_started = Instant::now();
-                    let response = match recv_protocol(&line_rx, deadline.remaining()) {
+                    let response = match recv_protocol(&line_rx, probe_deadline.remaining()) {
                         Ok(value) => value,
                         Err(error) => {
                             timed_out = true;
@@ -794,3 +805,77 @@ for raw in sys.stdin:
     except Exception as exc:
         emit({"id": req.get("id") if isinstance(req, dict) else None, "error": str(exc), "trace": traceback.format_exc(limit=8)})
 "#;
+
+#[cfg(test)]
+mod protocol_tests {
+    use super::*;
+
+    fn spawn_feeder(lines: Vec<String>) -> mpsc::Receiver<Result<String>> {
+        let (tx, rx) = mpsc::channel();
+        std::thread::spawn(move || {
+            for line in lines {
+                if tx.send(Ok(line)).is_err() {
+                    break;
+                }
+            }
+            // Sender dropped here, matching a runner whose stdout closed
+            // (process exited) once every queued line has been delivered.
+        });
+        rx
+    }
+
+    #[test]
+    fn recv_protocol_skips_non_protocol_lines_and_returns_the_tagged_payload() {
+        // Human-readable Hugging Face progress/log noise on the same
+        // stream, ahead of the one machine-readable protocol line, must not
+        // be mistaken for the response.
+        let rx = spawn_feeder(vec![
+            "Downloading shards: 100%|##########| 2/2".to_owned(),
+            format!("{PROTOCOL_PREFIX}{{\"ready\":true}}"),
+        ]);
+        let value = recv_protocol(&rx, Duration::from_secs(2)).expect("parse ready");
+        assert_eq!(value.get("ready").and_then(|v| v.as_bool()), Some(true));
+    }
+
+    #[test]
+    fn recv_protocol_reports_a_response_matching_its_own_request_id() {
+        let rx = spawn_feeder(vec![format!(
+            "{PROTOCOL_PREFIX}{{\"id\":7,\"output\":\"hello\"}}"
+        )]);
+        let value = recv_protocol(&rx, Duration::from_secs(2)).expect("parse response");
+        assert_eq!(value.get("id").and_then(|v| v.as_u64()), Some(7));
+        assert_eq!(value.get("output").and_then(|v| v.as_str()), Some("hello"));
+    }
+
+    #[test]
+    fn recv_protocol_returns_a_structured_error_on_malformed_json() {
+        let rx = spawn_feeder(vec![format!("{PROTOCOL_PREFIX}{{not valid json")]);
+        let error = recv_protocol(&rx, Duration::from_secs(2))
+            .expect_err("malformed protocol payload must not parse as a response");
+        assert!(error
+            .to_string()
+            .contains("invalid Transformers runner protocol JSON"));
+    }
+
+    #[test]
+    fn recv_protocol_returns_a_structured_error_when_the_runner_exits_before_responding() {
+        // Sender thread finishes (simulating stdout EOF / runner process
+        // exit) without ever producing a protocol line.
+        let rx = spawn_feeder(vec!["some trailing log output".to_owned()]);
+        let error = recv_protocol(&rx, Duration::from_secs(2))
+            .expect_err("a runner that exits mid-probe without responding must be a structured error, not a hang or a fabricated success");
+        assert!(error.to_string().contains("timed out"));
+    }
+
+    #[test]
+    fn recv_protocol_times_out_rather_than_blocking_forever_on_a_stalled_runner() {
+        let (_tx, rx) = mpsc::channel::<Result<String>>();
+        // Nothing is ever sent; the channel just stays open with no data,
+        // modelling a runner that hung mid-probe.
+        let started = Instant::now();
+        let error = recv_protocol(&rx, Duration::from_millis(150))
+            .expect_err("a stalled runner must time out, not hang indefinitely");
+        assert!(error.to_string().contains("timed out"));
+        assert!(started.elapsed() < Duration::from_secs(2));
+    }
+}

@@ -623,15 +623,27 @@ mod tests {
     }
 
     fn minimal_macho64() -> Vec<u8> {
-        let mut bytes = vec![0_u8; 40];
+        // Mach-O 64-bit header (32 bytes) + one valid LC_SEGMENT_64 (72 bytes)
+        // with zero sections.
+        let header_size = 32u32;
+        let seg_size = 72u32;
+        let cmd_size = header_size + seg_size;
+        let mut bytes = vec![0_u8; cmd_size as usize];
         bytes[0..4].copy_from_slice(b"\xcf\xfa\xed\xfe");
         bytes[4..8].copy_from_slice(&0x01000007_u32.to_le_bytes());
         bytes[8..12].copy_from_slice(&3_u32.to_le_bytes());
         bytes[12..16].copy_from_slice(&2_u32.to_le_bytes());
-        bytes[16..20].copy_from_slice(&1_u32.to_le_bytes());
-        bytes[20..24].copy_from_slice(&8_u32.to_le_bytes());
-        bytes[32..36].copy_from_slice(&1_u32.to_le_bytes());
-        bytes[36..40].copy_from_slice(&8_u32.to_le_bytes());
+        bytes[16..20].copy_from_slice(&1_u32.to_le_bytes()); // ncmds = 1
+        bytes[20..24].copy_from_slice(&seg_size.to_le_bytes()); // sizeofcmds = 72
+                                                                // LC_SEGMENT_64 at offset 32
+        let seg = header_size as usize;
+        bytes[seg..seg + 4].copy_from_slice(&0x19_u32.to_le_bytes()); // cmd = LC_SEGMENT_64
+        bytes[seg + 4..seg + 8].copy_from_slice(&seg_size.to_le_bytes()); // cmdsize = 72
+                                                                          // segname[16] = all zeros (OK)
+                                                                          // vmaddr = 0, vmsize = 0, fileoff = 0, filesize = 0
+                                                                          // maxprot = 7, initprot = 3, nsects = 0, flags = 0
+        bytes[seg + 60..seg + 64].copy_from_slice(&7u32.to_le_bytes()); // maxprot
+        bytes[seg + 64..seg + 68].copy_from_slice(&3u32.to_le_bytes()); // initprot
         bytes
     }
 
@@ -684,6 +696,77 @@ mod tests {
     }
 
     #[test]
+    fn pe_mz_alone_plus_garbage_is_not_detected() -> Result<()> {
+        let mut bytes = vec![0_u8; 128];
+        bytes[0..2].copy_from_slice(b"MZ");
+        bytes[2..].copy_from_slice(&[0x41_u8; 126]);
+        let result = scan_fixture("pe-mz-only", &bytes)?;
+        assert_eq!(result.status, ScanStatus::Pass);
+        Ok(())
+    }
+
+    #[test]
+    fn pe_truncated_dos_header_is_not_detected() -> Result<()> {
+        // Fewer than the 64 bytes needed to read e_lfanew.
+        let mut bytes = vec![0_u8; 40];
+        bytes[0..2].copy_from_slice(b"MZ");
+        let result = scan_fixture("pe-truncated-dos", &bytes)?;
+        assert_eq!(result.status, ScanStatus::Pass);
+        Ok(())
+    }
+
+    #[test]
+    fn pe_e_lfanew_outside_data_is_not_detected() -> Result<()> {
+        let mut bytes = minimal_pe64();
+        // Point e_lfanew far outside the 1 MiB sanity bound.
+        bytes[0x3c..0x40].copy_from_slice(&0xffff_ffff_u32.to_le_bytes());
+        let result = scan_fixture("pe-bad-lfanew", &bytes)?;
+        assert_eq!(result.status, ScanStatus::Pass);
+        Ok(())
+    }
+
+    #[test]
+    fn pe_missing_signature_is_not_detected() -> Result<()> {
+        let mut bytes = minimal_pe64();
+        bytes[64..68].copy_from_slice(b"XXXX");
+        let result = scan_fixture("pe-bad-sig", &bytes)?;
+        assert_eq!(result.status, ScanStatus::Pass);
+        Ok(())
+    }
+
+    #[test]
+    fn pe_truncated_coff_header_is_not_detected() -> Result<()> {
+        // Cut the file off right after the PE signature, before the
+        // 24-byte COFF header can be fully read.
+        let full = minimal_pe64();
+        let bytes = full[..70].to_vec();
+        let result = scan_fixture("pe-truncated-coff", &bytes)?;
+        assert_eq!(result.status, ScanStatus::Pass);
+        Ok(())
+    }
+
+    #[test]
+    fn pe_impossible_section_count_is_not_detected() -> Result<()> {
+        let mut bytes = minimal_pe64();
+        let pe = 64_usize;
+        // num_sections must be within 1..=96.
+        bytes[pe + 6..pe + 8].copy_from_slice(&0_u16.to_le_bytes());
+        let result = scan_fixture("pe-zero-sections", &bytes)?;
+        assert_eq!(result.status, ScanStatus::Pass);
+        Ok(())
+    }
+
+    #[test]
+    fn pe_optional_header_bad_magic_is_not_detected() -> Result<()> {
+        let mut bytes = minimal_pe64();
+        let pe = 64_usize;
+        bytes[pe + 24..pe + 26].copy_from_slice(&0x1234_u16.to_le_bytes());
+        let result = scan_fixture("pe-bad-optional-magic", &bytes)?;
+        assert_eq!(result.status, ScanStatus::Pass);
+        Ok(())
+    }
+
+    #[test]
     fn structurally_valid_macho_is_detected() -> Result<()> {
         let result = scan_fixture("macho", &minimal_macho64())?;
         assert_eq!(result.status, ScanStatus::Fail);
@@ -692,10 +775,154 @@ mod tests {
     }
 
     #[test]
+    fn macho_magic_alone_is_not_detected() -> Result<()> {
+        let bytes = b"\xcf\xfa\xed\xfe".to_vec();
+        let result = scan_fixture("macho-magic-only", &bytes)?;
+        assert_eq!(result.status, ScanStatus::Pass);
+        Ok(())
+    }
+
+    #[test]
+    fn macho_truncated_header_is_not_detected() -> Result<()> {
+        // Fewer than the 32 bytes needed for a 64-bit Mach-O header.
+        let mut bytes = vec![0_u8; 20];
+        bytes[0..4].copy_from_slice(b"\xcf\xfa\xed\xfe");
+        let result = scan_fixture("macho-truncated-header", &bytes)?;
+        assert_eq!(result.status, ScanStatus::Pass);
+        Ok(())
+    }
+
+    #[test]
+    fn macho_impossible_sizeofcmds_is_not_detected() -> Result<()> {
+        let mut bytes = minimal_macho64();
+        // ncmds says 1 command but sizeofcmds claims far more data than the
+        // file actually has after the header.
+        bytes[20..24].copy_from_slice(&1_000_000_u32.to_le_bytes());
+        let result = scan_fixture("macho-impossible-sizeofcmds", &bytes)?;
+        assert_eq!(result.status, ScanStatus::Pass);
+        Ok(())
+    }
+
+    #[test]
+    fn macho_cmdsize_smaller_than_command_header_is_not_detected() -> Result<()> {
+        let mut bytes = minimal_macho64();
+        // cmdsize (bytes 4..8 of the load command at offset 32) below the
+        // 8-byte minimum load-command header.
+        bytes[32 + 4..32 + 8].copy_from_slice(&4_u32.to_le_bytes());
+        let result = scan_fixture("macho-cmdsize-too-small", &bytes)?;
+        assert_eq!(result.status, ScanStatus::Pass);
+        Ok(())
+    }
+
+    #[test]
+    fn macho_command_beyond_eof_is_not_detected() -> Result<()> {
+        let mut bytes = minimal_macho64();
+        // sizeofcmds still claims the full 72 bytes, but the command's own
+        // cmdsize now runs past the declared load-command region.
+        bytes[32 + 4..32 + 8].copy_from_slice(&1000_u32.to_le_bytes());
+        let result = scan_fixture("macho-command-beyond-eof", &bytes)?;
+        assert_eq!(result.status, ScanStatus::Pass);
+        Ok(())
+    }
+
+    fn fat_wrapping(thin: &[u8]) -> Vec<u8> {
+        // Big-endian FAT header (magic 0xcafebabe) with one 32-bit fat_arch
+        // entry pointing at `thin`, laid out immediately after the table.
+        let table_start = 8_u32;
+        let entry_size = 20_u32;
+        let arch_offset = table_start + entry_size;
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(b"\xca\xfe\xba\xbe");
+        bytes.extend_from_slice(&1_u32.to_be_bytes()); // nfat_arch
+        bytes.extend_from_slice(&0x0100_0007_u32.to_be_bytes()); // cputype x86_64
+        bytes.extend_from_slice(&3_u32.to_be_bytes()); // cpusubtype
+        bytes.extend_from_slice(&arch_offset.to_be_bytes()); // offset
+        bytes.extend_from_slice(&(thin.len() as u32).to_be_bytes()); // size
+        bytes.extend_from_slice(&0_u32.to_be_bytes()); // align
+        bytes.extend_from_slice(thin);
+        bytes
+    }
+
+    #[test]
+    fn structurally_valid_fat_macho_is_detected() -> Result<()> {
+        let bytes = fat_wrapping(&minimal_macho64());
+        let result = scan_fixture("macho-fat", &bytes)?;
+        assert_eq!(result.status, ScanStatus::Fail);
+        assert!(result.matches.iter().any(|m| m.contains("T12-003")));
+        Ok(())
+    }
+
+    fn minimal_wasm_with_section() -> Vec<u8> {
+        // Magic + version + one Type section (ID=1) with 0 function types.
+        let mut bytes = b"\0asm\x01\0\0\0".to_vec();
+        bytes.push(1u8); // section ID = 1 (Type)
+        bytes.push(1u8); // payload length = 1
+        bytes.push(0u8); // type count = 0
+        bytes
+    }
+
+    #[test]
     fn wasm_header_is_detected() -> Result<()> {
-        let result = scan_fixture("wasm", b"\0asm\x01\0\0\0")?;
+        let result = scan_fixture("wasm", &minimal_wasm_with_section())?;
         assert_eq!(result.status, ScanStatus::Fail);
         assert!(result.matches.iter().any(|m| m.contains("T12-004")));
+        Ok(())
+    }
+
+    #[test]
+    fn wasm_magic_alone_is_not_detected() -> Result<()> {
+        // Bare magic + version bytes with no sections should be rejected.
+        let result = scan_fixture("wasm-bare", b"\0asm\x01\0\0\0")?;
+        assert_eq!(result.status, ScanStatus::Pass);
+        Ok(())
+    }
+
+    #[test]
+    fn wasm_only_custom_sections_are_not_detected() -> Result<()> {
+        // A WASM with only custom sections (ID=0) should be rejected.
+        let mut bytes = b"\0asm\x01\0\0\0".to_vec();
+        // Custom section (ID=0) with name "name" + 0 extra payload
+        bytes.push(0u8); // section ID = 0 (Custom)
+        bytes.push(6u8); // payload length = 6
+        bytes.push(4u8); // name length = 4
+        bytes.extend_from_slice(b"name"); // name = "name"
+        bytes.push(0u8); // no extra data
+        let result = scan_fixture("wasm-custom", &bytes)?;
+        assert_eq!(result.status, ScanStatus::Pass);
+        Ok(())
+    }
+
+    #[test]
+    fn wasm_section_payload_beyond_eof_is_not_detected() -> Result<()> {
+        let mut bytes = b"\0asm\x01\0\0\0".to_vec();
+        bytes.push(1u8); // section ID = 1 (Type)
+        bytes.push(200u8); // payload length claims 200 bytes; file has none
+        let result = scan_fixture("wasm-section-oob", &bytes)?;
+        assert_eq!(result.status, ScanStatus::Pass);
+        Ok(())
+    }
+
+    #[test]
+    fn wasm_malformed_leb128_section_size_is_not_detected() -> Result<()> {
+        let mut bytes = b"\0asm\x01\0\0\0".to_vec();
+        bytes.push(1u8); // section ID = 1 (Type)
+                         // Five continuation bytes with no terminator: an unterminated
+                         // LEB128 varint.
+        bytes.extend_from_slice(&[0x80, 0x80, 0x80, 0x80, 0x80]);
+        let result = scan_fixture("wasm-bad-leb128", &bytes)?;
+        assert_eq!(result.status, ScanStatus::Pass);
+        Ok(())
+    }
+
+    #[test]
+    fn wasm_magic_inside_junk_without_a_complete_module_is_not_detected() -> Result<()> {
+        let mut bytes = b"random prefix bytes ".to_vec();
+        bytes.extend_from_slice(b"\0asm\x01\0\0\0");
+        bytes.extend_from_slice(
+            b"more junk after magic that is not a valid section stream \xff\xff",
+        );
+        let result = scan_fixture("wasm-embedded-magic", &bytes)?;
+        assert_eq!(result.status, ScanStatus::Pass);
         Ok(())
     }
 

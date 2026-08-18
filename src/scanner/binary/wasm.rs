@@ -20,6 +20,7 @@ pub fn parse_wasm(file: &File, file_len: u64, offset: u64) -> Result<Option<Bina
     let mut imports_truncated = false;
     let mut exports_truncated = false;
     let mut sections_truncated = false;
+    let mut has_non_custom_section = false;
 
     while cursor < file_len {
         let id_bytes = match super::read_at(file, cursor, 1)? {
@@ -53,6 +54,10 @@ pub fn parse_wasm(file: &File, file_len: u64, offset: u64) -> Result<Option<Bina
             });
         } else {
             sections_truncated = true;
+        }
+
+        if section_id != 0 {
+            has_non_custom_section = true;
         }
 
         match section_id {
@@ -189,6 +194,12 @@ pub fn parse_wasm(file: &File, file_len: u64, offset: u64) -> Result<Option<Bina
         }
 
         cursor = payload_end;
+    }
+
+    // Reject WASM binaries that only contain custom sections (section ID 0)
+    // or no sections at all – magic + version bytes alone are not enough.
+    if !has_non_custom_section {
+        return Ok(None);
     }
 
     Ok(Some(BinaryMetadata {

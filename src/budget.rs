@@ -139,6 +139,7 @@ fn reasonable_max(dimension: BudgetDimension) -> u64 {
         BudgetDimension::RetainedEvidenceBytes => 512 * 1024 * 1024,
         BudgetDimension::ScheduledMemoryBytes => 64 * 1024 * 1024 * 1024,
         BudgetDimension::WallClock => 24 * 60 * 60 * 1000,
+        BudgetDimension::ParserWorkUnits => 500_000_000,
         _ => 100_000_000,
     }
 }
@@ -603,6 +604,45 @@ mod tests {
         let mut limits = ScanBudgetProfile::Default.limits();
         limits.source_bytes = 0;
         assert!(limits.validate().is_err());
+    }
+
+    #[test]
+    fn every_builtin_profile_passes_validation() {
+        for profile in [
+            ScanBudgetProfile::Constrained,
+            ScanBudgetProfile::Default,
+            ScanBudgetProfile::Deep,
+            ScanBudgetProfile::Research,
+        ] {
+            let limits = profile.limits();
+            limits
+                .validate()
+                .unwrap_or_else(|err| panic!("{profile:?} budget failed validation: {err}"));
+        }
+    }
+
+    #[test]
+    fn profiles_are_monotonically_increasing() {
+        let constrained = ScanBudgetProfile::Constrained.limits();
+        let default = ScanBudgetProfile::Default.limits();
+        let deep = ScanBudgetProfile::Deep.limits();
+        let research = ScanBudgetProfile::Research.limits();
+
+        // Every dimension should be >= for progressively more thorough profiles.
+        for dim in BudgetDimension::ALL {
+            let c = constrained.value(dim);
+            let d = default.value(dim);
+            let dp = deep.value(dim);
+            let r = research.value(dim);
+            assert!(
+                d >= c,
+                "Default.{:?} ({d}) < Constrained.{:?} ({c})",
+                dim,
+                dim
+            );
+            assert!(dp >= d, "Deep.{:?} ({dp}) < Default.{:?} ({d})", dim, dim);
+            assert!(r >= dp, "Research.{:?} ({r}) < Deep.{:?} ({dp})", dim, dim);
+        }
     }
 
     #[test]

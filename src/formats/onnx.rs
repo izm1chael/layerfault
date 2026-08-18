@@ -956,6 +956,30 @@ mod tests {
         model
     }
 
+    fn model_with_two_tensors_sharing_external(location: &str) -> Vec<u8> {
+        let mut tensor_a = Vec::new();
+        push_varint(&mut tensor_a, 2, 2);
+        push_len(&mut tensor_a, 8, b"weight_a");
+        push_len(&mut tensor_a, 13, &external_entry("location", location));
+        push_varint(&mut tensor_a, 14, 1);
+
+        let mut tensor_b = Vec::new();
+        push_varint(&mut tensor_b, 2, 2);
+        push_len(&mut tensor_b, 8, b"weight_b");
+        push_len(&mut tensor_b, 13, &external_entry("location", location));
+        push_varint(&mut tensor_b, 14, 1);
+
+        let mut graph = Vec::new();
+        push_len(&mut graph, 2, b"graph");
+        push_len(&mut graph, 5, &tensor_a);
+        push_len(&mut graph, 5, &tensor_b);
+
+        let mut model = Vec::new();
+        push_varint(&mut model, 1, 10);
+        push_len(&mut model, 7, &graph);
+        model
+    }
+
     fn write_fixture(label: &str, bytes: &[u8]) -> std::path::PathBuf {
         let path =
             std::env::temp_dir().join(format!("layerfault-onnx-{label}-{}", std::process::id()));
@@ -1113,6 +1137,49 @@ mod tests {
         assert_eq!(finding.status, crate::scanner::ScanStatus::Fail);
         assert!(compound.is_none());
         let _ = fs::remove_dir_all(root);
+        Ok(())
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn two_tensors_referencing_the_same_hardlinked_file_produce_one_warning() -> Result<()> {
+        let root = std::env::temp_dir().join(format!(
+            "layerfault-onnx-hardlink-dedup-{}",
+            std::process::id()
+        ));
+        let outside = std::env::temp_dir().join(format!(
+            "layerfault-onnx-hardlink-dedup-outside-{}",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&root);
+        let _ = fs::remove_file(&outside);
+        fs::create_dir_all(root.join("data"))?;
+        fs::write(&outside, b"tensor-bytes")?;
+        fs::hard_link(&outside, root.join("data/weights.bin"))?;
+        let model = model_with_two_tensors_sharing_external("data/weights.bin");
+        let model_path = root.join("model.onnx");
+        fs::write(&model_path, &model)?;
+        let file = File::open(&model_path)?;
+        let (finding, _compound) = scan(
+            &model_path,
+            &file,
+            model.len() as u64,
+            "sha256:model",
+            "application/x-onnx",
+        )?;
+        assert_eq!(finding.status, crate::scanner::ScanStatus::Warn);
+        let hardlink_matches: Vec<_> = finding
+            .matches
+            .iter()
+            .filter(|value| value.contains("LF-ONNX-EXTERNAL-HARDLINK"))
+            .collect();
+        assert_eq!(
+            hardlink_matches.len(),
+            1,
+            "two tensors pointing at the same hardlinked file must be deduplicated into one warning: {hardlink_matches:?}"
+        );
+        let _ = fs::remove_dir_all(root);
+        let _ = fs::remove_file(outside);
         Ok(())
     }
 }

@@ -109,6 +109,8 @@ fn conflicts(
 ) {
     let mut by_token: BTreeMap<&str, &Option<String>> = BTreeMap::new();
     let mut by_id: BTreeMap<u64, &str> = BTreeMap::new();
+    let mut by_token_id: BTreeMap<&str, u64> = BTreeMap::new();
+    let mut by_role_token_special: BTreeMap<(&str, &str), bool> = BTreeMap::new();
     for x in t {
         if let Some(prev) = by_token.insert(&x.token, &x.role) {
             if prev != &x.role {
@@ -133,6 +135,147 @@ fn conflicts(
                     break;
                 }
             }
+            // A role-boundary token declared with two different ids is a
+            // contradiction about what that control token actually
+            // resolves to, even when the literal token string agrees.
+            if let Some(prev_id) = by_token_id.insert(&x.token, id) {
+                if prev_id != id {
+                    out.push(simple(
+                        r,
+                        "LF-TOKENIZER-SPECIAL-TOKEN-CONFLICT",
+                        ScanStatus::Warn,
+                        "same special token is assigned conflicting ids",
+                    ));
+                    break;
+                }
+            }
         }
+        // The same (role, token) pair registered as special in one source
+        // and not-special in another changes whether it is actually
+        // enforced as a control boundary.
+        if let Some(role) = &x.role {
+            if let Some(prev_special) =
+                by_role_token_special.insert((role.as_str(), &x.token), x.special)
+            {
+                if prev_special != x.special {
+                    out.push(simple(
+                        r,
+                        "LF-TOKENIZER-SPECIAL-TOKEN-CONFLICT",
+                        ScanStatus::Warn,
+                        "same role-boundary token has conflicting special registration",
+                    ));
+                    break;
+                }
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod conflict_tests {
+    use super::*;
+    use crate::finding_evidence::EvidenceSubject;
+
+    fn report() -> TokenizerSecurityReport {
+        TokenizerSecurityReport {
+            subject: EvidenceSubject::identity(
+                "test-identity",
+                "application/vnd.layerfault.tokenizer+json",
+            ),
+            files: Vec::new(),
+            special_tokens: Vec::new(),
+            chat_template: None,
+            unicode_controls: Vec::new(),
+            special_token_collisions: Vec::new(),
+            findings: Vec::new(),
+            coverage: crate::coverage::Coverage::complete(0, 0),
+        }
+    }
+
+    fn record(
+        token: &str,
+        role: &str,
+        special: bool,
+        id: Option<u64>,
+        source: &str,
+    ) -> SpecialTokenRecord {
+        SpecialTokenRecord {
+            token: token.to_owned(),
+            role: Some(role.to_owned()),
+            special,
+            id,
+            source: source.to_owned(),
+        }
+    }
+
+    fn conflict_ids(t: &[SpecialTokenRecord]) -> Vec<LayerScanResult> {
+        let mut out = Vec::new();
+        conflicts(&report(), t, &mut out);
+        out
+    }
+
+    #[test]
+    fn consistent_trusted_declaration_yields_no_conflict() {
+        let tokens = vec![
+            record("</s>", "eos", true, Some(1), "tokenizer_config.json"),
+            record("</s>", "eos", true, Some(1), "special_tokens_map.json"),
+            record("<|im_start|>", "assistant", true, Some(0), "tokenizer.json"),
+        ];
+        assert!(conflict_ids(&tokens).is_empty());
+    }
+
+    #[test]
+    fn same_role_token_with_two_different_ids_conflicts() {
+        // "EOS role assigned two incompatible IDs": same literal token,
+        // same role, but the id disagrees between sources.
+        let tokens = vec![
+            record("</s>", "eos", true, Some(1), "tokenizer_config.json"),
+            record("</s>", "eos", true, Some(2), "special_tokens_map.json"),
+        ];
+        let findings = conflict_ids(&tokens);
+        assert_eq!(findings.len(), 1);
+        assert_eq!(
+            findings[0].rule_id.as_deref(),
+            Some("LF-TOKENIZER-SPECIAL-TOKEN-CONFLICT")
+        );
+    }
+
+    #[test]
+    fn same_id_with_two_different_token_strings_conflicts() {
+        // "same control token ID represented by different incompatible
+        // content": id 5 claimed by two unrelated token strings.
+        let tokens = vec![
+            record("</s>", "eos", true, Some(5), "tokenizer_config.json"),
+            record("<pad>", "pad", true, Some(5), "special_tokens_map.json"),
+        ];
+        let findings = conflict_ids(&tokens);
+        assert_eq!(findings.len(), 1);
+        assert_eq!(
+            findings[0].rule_id.as_deref(),
+            Some("LF-TOKENIZER-SPECIAL-TOKEN-CONFLICT")
+        );
+    }
+
+    #[test]
+    fn same_role_token_with_conflicting_special_flag_conflicts() {
+        // "conflicting special flag/registration that changes semantics":
+        // one source claims it is enforced as a control boundary, another
+        // claims it is not.
+        let tokens = vec![
+            record("<|im_start|>", "assistant", true, Some(0), "tokenizer.json"),
+            record(
+                "<|im_start|>",
+                "assistant",
+                false,
+                Some(0),
+                "tokenizer_config.json",
+            ),
+        ];
+        let findings = conflict_ids(&tokens);
+        assert_eq!(findings.len(), 1);
+        assert_eq!(
+            findings[0].rule_id.as_deref(),
+            Some("LF-TOKENIZER-SPECIAL-TOKEN-CONFLICT")
+        );
     }
 }

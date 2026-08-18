@@ -21,6 +21,25 @@ pub struct GcPlan {
 
 pub fn plan(base_dir: &Path) -> Result<GcPlan> {
     let audit = audit::audit_store(base_dir)?;
+    if audit.invalid_model_count > 0 {
+        // A manifest that failed to parse could reference blobs we have no
+        // way to see. Treating its descriptors as absent would make those
+        // blobs look orphaned and eligible for deletion, so refuse to plan
+        // at all rather than risk destroying data a broken-but-legitimate
+        // manifest still points at.
+        let broken = audit
+            .models
+            .iter()
+            .filter(|model| !model.valid)
+            .map(|model| model.model.as_str())
+            .collect::<Vec<_>>()
+            .join(", ");
+        return Err(anyhow!(
+            "Refusing to plan garbage collection: {} manifest(s) could not be parsed ({broken}); \
+             their referenced blobs cannot be confirmed and would be misidentified as orphaned",
+            audit.invalid_model_count
+        ));
+    }
     let protected = baseline_descriptors()?;
     let mut candidates = Vec::new();
     let mut protected_orphans = Vec::new();
