@@ -72,8 +72,7 @@ pub fn discover_safetensors_weight_set(path: &Path) -> Result<Option<WeightSetDe
         "adapter_model.safetensors",
         "adapter.safetensors",
     ] {
-        let candidate = crate::safeio::canonical_regular_file_within(&root, name, false)?;
-        if candidate.exists() {
+        if let Some(candidate) = crate::safeio::optional_regular_file_within(&root, name, false)? {
             return Ok(Some(WeightSetDescriptor {
                 layout: if name.starts_with("adapter") {
                     "LORA_ADAPTER_SAFETENSORS".to_owned()

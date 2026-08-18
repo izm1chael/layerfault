@@ -111,12 +111,24 @@ impl StreamObserver for HasherObserver {
 /// Observer wrapping `BinaryStreamScanner` to scan executable magic and object headers.
 pub struct BinaryStreamObserver {
     scanner: Option<BinaryStreamScanner>,
+    file: Option<(File, u64)>,
 }
 
 impl BinaryStreamObserver {
     pub fn new() -> Self {
         Self {
             scanner: Some(BinaryStreamScanner::new()),
+            file: None,
+        }
+    }
+
+    /// Same as `new`, but keeps a random-access file handle so magic-number
+    /// matches can be confirmed against the format's full structural header
+    /// (e.g. WASM's version field) instead of the 4-byte magic alone.
+    pub fn with_file(file: File, file_len: u64) -> Self {
+        Self {
+            scanner: Some(BinaryStreamScanner::new()),
+            file: Some((file, file_len)),
         }
     }
 }
@@ -134,7 +146,12 @@ impl StreamObserver for BinaryStreamObserver {
 
     fn observe(&mut self, offset: u64, chunk: &[u8]) -> Result<()> {
         if let Some(s) = &mut self.scanner {
-            s.observe_at_offset(offset, chunk)?;
+            match &self.file {
+                Some((file, file_len)) => {
+                    s.observe_with_file(Some((file, *file_len)), offset, chunk)?;
+                }
+                None => s.observe_at_offset(offset, chunk)?,
+            }
         }
         Ok(())
     }

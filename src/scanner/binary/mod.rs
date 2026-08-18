@@ -1041,4 +1041,15 @@ mod tests {
         assert_eq!(result.status, ScanStatus::Pass);
         Ok(())
     }
+
+    #[test]
+    fn wasm_bad_version_inside_large_buffer_is_not_detected() -> Result<()> {
+        let mut bytes = vec![0xAAu8; 4096];
+        bytes.extend_from_slice(b"\x00asm\x02\x00\x00\x00"); // magic + version=2, not 1
+        bytes.extend(vec![0xBBu8; 4096]);
+
+        let result = scan_fixture("wasm-bad-version", &bytes)?;
+        assert_eq!(result.status, ScanStatus::Pass);
+        Ok(())
+    }
 }

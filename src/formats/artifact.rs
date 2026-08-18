@@ -253,7 +253,10 @@ fn inspect_opened(
             None => {
                 let mut observers: Vec<Box<dyn crate::scanner::StreamObserver>> = Vec::new();
                 if fuse_binary {
-                    observers.push(Box::new(crate::scanner::BinaryStreamObserver::new()));
+                    observers.push(Box::new(crate::scanner::BinaryStreamObserver::with_file(
+                        file.try_clone()?,
+                        size,
+                    )));
                 }
                 let (digest_val, obs_results) = session.run(media, observers)?;
                 digest_cache_state = if session.metrics.borrow().cache_hits > 0 {

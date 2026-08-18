@@ -145,7 +145,10 @@ pub(super) fn analyze_member(
         &file_prefix[..file_prefix.len().min(8)],
     );
     if executable_candidate {
-        observers.push(Box::new(crate::scanner::BinaryStreamObserver::new()));
+        observers.push(Box::new(crate::scanner::BinaryStreamObserver::with_file(
+            file.try_clone()?,
+            header.size,
+        )));
     }
 
     let is_text = is_text_candidate(&ext, &lower) && !is_tokenizer_vocabulary_path(&header.rel);

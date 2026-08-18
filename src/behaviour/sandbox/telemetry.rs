@@ -435,22 +435,41 @@ fn trace_syscall_succeeded(lower: &str) -> bool {
     !result.trim_start().starts_with("-1")
 }
 
+/// Like `str::contains`, but requires the byte before each match to not be
+/// an identifier character, so a short call name like `"link("` cannot
+/// match inside a longer, unrelated call name such as `"readlink("`.
+fn contains_syscall_call(haystack: &str, name: &str) -> bool {
+    if name.is_empty() {
+        return false;
+    }
+    let bytes = haystack.as_bytes();
+    haystack.match_indices(name).any(|(idx, _)| {
+        idx == 0 || !(bytes[idx - 1].is_ascii_alphanumeric() || bytes[idx - 1] == b'_')
+    })
+}
+
 fn is_internet_network_attempt(lower: &str) -> bool {
     (lower.contains("connect(") || lower.contains("sendto(") || lower.contains("sendmsg("))
         && (lower.contains("af_inet6") || lower.contains("af_inet"))
 }
 
 /// True when a trace file's own process exec identifies it as CPython's
-/// `multiprocessing.resource_tracker` helper: the interpreter path contains
-/// "python" and its command line names the `resource_tracker` module, which
-/// is how the standard library actually launches it
-/// (`python -c "from multiprocessing.resource_tracker import main;..."`).
-/// This is the actor half of trusted-runtime-housekeeping attribution — see
+/// `multiprocessing.resource_tracker` helper: its command line is the exact
+/// module invocation the standard library uses to launch it (`<interpreter>
+/// -c "from multiprocessing.resource_tracker import main;..."`).
+/// Deliberately does not also require "python" in the interpreter path: the
+/// sandbox is free to bind-mount/rename that binary (e.g. to `/runtime`)
+/// for isolation reasons unrelated to this check. Matching the full import
+/// statement rather than a bare "resource_tracker" substring is what keeps
+/// this safe to relax: a spoofing child cannot get trusted status merely by
+/// echoing the word "resource_tracker" somewhere in its own argv. This is
+/// the actor half of trusted-runtime-housekeeping attribution — see
 /// `is_trusted_resource_tracker_cleanup`.
 fn is_resource_tracker_actor(text: &str) -> bool {
     text.lines().any(|line| {
         let lower = line.to_ascii_lowercase();
-        lower.contains("execve(") && lower.contains("python") && lower.contains("resource_tracker")
+        lower.contains("execve(")
+            && lower.contains("from multiprocessing.resource_tracker import main")
     })
 }
 
@@ -569,7 +588,7 @@ fn classify_trace_line(
         "linkat(",
     ]
     .iter()
-    .any(|call| lower.contains(call));
+    .any(|call| contains_syscall_call(&lower, call));
     let trusted_housekeeping =
         is_trusted_resource_tracker_cleanup(&lower, actor_is_resource_tracker)
             || is_trusted_wrapper_setup(&lower, actor_is_trusted_wrapper)
@@ -1083,5 +1102,23 @@ mod tests {
         assert!(snapshot.entries.len() <= MAX_SNAPSHOT_FILES);
         let _ = std::fs::remove_dir_all(root);
         Ok(())
+    }
+
+    #[test]
+    fn plain_readlink_is_not_a_mutation() {
+        let mut telemetry = SandboxTelemetry::default();
+        classify_trace_line(
+            r#"readlink("/proc/self", "412704", 1023) = 6"#,
+            &mut telemetry,
+            false,
+            false,
+        );
+        assert_eq!(telemetry.filesystem_write_attempts.len(), 0);
+    }
+
+    #[test]
+    fn resource_tracker_exec_via_renamed_runtime_path_is_still_the_actor() {
+        let line = r#"execve("/runtime", ["/runtime", "-B", "-s", "-c", "from multiprocessing.resource_tracker import main;main(4)"], 0x1434dd50 /* 13 vars */) = 0"#;
+        assert!(is_resource_tracker_actor(line));
     }
 }
