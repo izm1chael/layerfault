@@ -341,7 +341,13 @@ impl RuntimeSession<'_> {
                 .max(Duration::from_millis(250)),
             64 * 1024,
         );
-        let telemetry = self.workspace.collect_telemetry(self.trace_enabled)?;
+        let telemetry = self.workspace.collect_telemetry(
+            self.trace_enabled,
+            self.adapter
+                .wrapper
+                .as_ref()
+                .map(|(path, _)| path.as_path()),
+        )?;
         match response {
             Ok((200, bytes)) => {
                 if !matches!(reset, Ok((200, _))) {
@@ -403,7 +409,13 @@ impl RuntimeSession<'_> {
 
     pub fn close(mut self) -> Result<super::sandbox::SandboxTelemetry> {
         self.shutdown()?;
-        let mut telemetry = self.workspace.collect_telemetry(self.trace_enabled)?;
+        let mut telemetry = self.workspace.collect_telemetry(
+            self.trace_enabled,
+            self.adapter
+                .wrapper
+                .as_ref()
+                .map(|(path, _)| path.as_path()),
+        )?;
         if let Some(mut guard) = self.cgroup_guard.take() {
             let mut cg_telemetry = guard.collect_telemetry();
             cg_telemetry.cleanup_state = guard.teardown();

@@ -454,8 +454,20 @@ pub(crate) fn run_gc(args: GcArgs) -> Result<()> {
 fn run_blob_gc(args: &GcArgs) -> Result<()> {
     let base_dir = app::resolve_base_dir(args.ollama_dir.as_deref())?;
     let plan = gc::plan(&base_dir)?;
+    let deleted_bytes = if args.execute {
+        Some(gc::execute(&base_dir, &plan)?)
+    } else {
+        None
+    };
     if args.json {
-        println!("{}", serde_json::to_string_pretty(&plan)?);
+        let mut value = serde_json::to_value(&plan)?;
+        if let Some(deleted_bytes) = deleted_bytes {
+            value["executed"] = serde_json::json!(true);
+            value["deleted_bytes"] = serde_json::json!(deleted_bytes);
+        } else {
+            value["executed"] = serde_json::json!(false);
+        }
+        println!("{}", serde_json::to_string_pretty(&value)?);
     } else {
         println!("GC candidates: {}", plan.candidates.len());
         println!("Recoverable bytes: {}", plan.recoverable_bytes);
@@ -466,26 +478,32 @@ fn run_blob_gc(args: &GcArgs) -> Result<()> {
         for entry in &plan.candidates {
             println!("ORPHAN {}  {} bytes", entry.digest, entry.bytes);
         }
-    }
-    if args.execute {
-        let deleted = gc::execute(&base_dir, &plan)?;
-        println!("Deleted {deleted} bytes of demonstrably unreferenced Ollama blobs");
+        if let Some(deleted_bytes) = deleted_bytes {
+            println!("Deleted {deleted_bytes} bytes of demonstrably unreferenced Ollama blobs");
+        }
     }
     Ok(())
 }
 
 fn run_content_cache_gc(args: &GcArgs) -> Result<()> {
     let plan = content_cache::gc::plan()?;
+    let removed = if args.execute {
+        Some(content_cache::gc::execute(&plan)?)
+    } else {
+        None
+    };
     if args.json {
-        println!(
-            "{}",
-            serde_json::json!({
-                "total_entries": plan.total_entries,
-                "total_bytes": plan.total_bytes,
-                "evict_candidates": plan.evict.len(),
-                "bytes_reclaimable": plan.bytes_reclaimed,
-            })
-        );
+        let mut value = serde_json::json!({
+            "total_entries": plan.total_entries,
+            "total_bytes": plan.total_bytes,
+            "evict_candidates": plan.evict.len(),
+            "bytes_reclaimable": plan.bytes_reclaimed,
+            "executed": removed.is_some(),
+        });
+        if let Some(removed) = removed {
+            value["removed_records"] = serde_json::json!(removed);
+        }
+        println!("{value}");
     } else {
         println!("Content cache entries: {}", plan.total_entries);
         println!("Content cache bytes: {}", plan.total_bytes);
@@ -494,28 +512,34 @@ fn run_content_cache_gc(args: &GcArgs) -> Result<()> {
             plan.evict.len(),
             plan.bytes_reclaimed
         );
-    }
-    if args.execute {
-        let removed = content_cache::gc::execute(&plan)?;
-        println!("Removed {removed} content-cache records");
+        if let Some(removed) = removed {
+            println!("Removed {removed} content-cache records");
+        }
     }
     Ok(())
 }
 
 fn run_object_cache_gc(args: &GcArgs) -> Result<()> {
     let plan = layerfault::object_cache::gc::plan()?;
+    let removed_bytes = if args.execute {
+        Some(layerfault::object_cache::gc::execute(&plan)?)
+    } else {
+        None
+    };
     if args.json {
-        println!(
-            "{}",
-            serde_json::json!({
-                "total_entries": plan.total_entries,
-                "total_bytes": plan.total_bytes,
-                "free_disk_bytes": plan.free_disk_bytes,
-                "evict_candidates": plan.candidates.len(),
-                "bytes_reclaimable": plan.bytes_to_reclaim,
-                "stale_part_files": plan.stale_part_files.len(),
-            })
-        );
+        let mut value = serde_json::json!({
+            "total_entries": plan.total_entries,
+            "total_bytes": plan.total_bytes,
+            "free_disk_bytes": plan.free_disk_bytes,
+            "evict_candidates": plan.candidates.len(),
+            "bytes_reclaimable": plan.bytes_to_reclaim,
+            "stale_part_files": plan.stale_part_files.len(),
+            "executed": removed_bytes.is_some(),
+        });
+        if let Some(removed_bytes) = removed_bytes {
+            value["removed_bytes"] = serde_json::json!(removed_bytes);
+        }
+        println!("{value}");
     } else {
         println!("Object cache entries: {}", plan.total_entries);
         println!("Object cache bytes: {}", plan.total_bytes);
@@ -530,10 +554,9 @@ fn run_object_cache_gc(args: &GcArgs) -> Result<()> {
                 plan.stale_part_files.len()
             );
         }
-    }
-    if args.execute {
-        let removed = layerfault::object_cache::gc::execute(&plan)?;
-        println!("Removed {removed} bytes of object-cache records");
+        if let Some(removed_bytes) = removed_bytes {
+            println!("Removed {removed_bytes} bytes of object-cache records");
+        }
     }
     Ok(())
 }

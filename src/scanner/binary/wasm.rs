@@ -20,7 +20,15 @@ pub fn parse_wasm(file: &File, file_len: u64, offset: u64) -> Result<Option<Bina
     let mut imports_truncated = false;
     let mut exports_truncated = false;
     let mut sections_truncated = false;
-    let mut has_non_custom_section = false;
+    let mut non_custom_section_count = 0u32;
+    let mut has_nontrivial_code_section = false;
+    // The core WASM binary format requires known section ids (0..=11) and,
+    // for every id other than custom (0), a strictly increasing id order.
+    // Both are cheap, spec-mandated structural checks that a coincidental
+    // magic-byte collision inside unrelated binary data (e.g. deep in a
+    // multi-hundred-MB tensor file) essentially never satisfies by chance,
+    // unlike "some byte followed by a small LEB128 length" alone.
+    let mut last_non_custom_id: u8 = 0;
 
     while cursor < file_len {
         let id_bytes = match super::read_at(file, cursor, 1)? {
@@ -28,6 +36,15 @@ pub fn parse_wasm(file: &File, file_len: u64, offset: u64) -> Result<Option<Bina
             _ => break,
         };
         let section_id = id_bytes[0];
+        if section_id > 11 {
+            break;
+        }
+        if section_id != 0 {
+            if section_id <= last_non_custom_id {
+                break;
+            }
+            last_non_custom_id = section_id;
+        }
         cursor += 1;
 
         let (payload_len, leb_bytes) = match read_leb128_u32(file, cursor, file_len)? {
@@ -57,7 +74,13 @@ pub fn parse_wasm(file: &File, file_len: u64, offset: u64) -> Result<Option<Bina
         }
 
         if section_id != 0 {
-            has_non_custom_section = true;
+            non_custom_section_count += 1;
+        }
+        // A Code section (id 10) with a non-trivial payload has at least a
+        // function-body-count LEB128 plus real body bytes; a bare/near-empty
+        // payload here is not meaningful evidence on its own.
+        if section_id == 10 && payload_len > 4 {
+            has_nontrivial_code_section = true;
         }
 
         match section_id {
@@ -196,9 +219,18 @@ pub fn parse_wasm(file: &File, file_len: u64, offset: u64) -> Result<Option<Bina
         cursor = payload_end;
     }
 
-    // Reject WASM binaries that only contain custom sections (section ID 0)
-    // or no sections at all – magic + version bytes alone are not enough.
-    if !has_non_custom_section {
+    // A single isolated non-custom section is not enough to call this a
+    // genuine embedded module: in a large file, one section header (a byte
+    // in 1..=11 followed by a small LEB128 length that happens to stay in
+    // bounds) is exactly the kind of coincidental match a real embedded
+    // module can be confused with. Require either multiple validly-ordered
+    // sections, or a single section whose content is itself substantive
+    // (a real import, a real export, or a non-trivial code body).
+    let substantive = non_custom_section_count >= 2
+        || !imports.is_empty()
+        || !exports.is_empty()
+        || has_nontrivial_code_section;
+    if !substantive {
         return Ok(None);
     }
 

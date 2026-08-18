@@ -177,7 +177,6 @@ fn parse_macho_thin(
                 let is_seg64 = req_cmd == 0x19;
                 let min_len = if is_seg64 { 72 } else { 56 };
                 if cmd_data.len() >= min_len {
-                    has_substantive_command = true;
                     let seg_name_raw = &cmd_data[8..24];
                     let seg_end = seg_name_raw.iter().position(|&b| b == 0).unwrap_or(16);
                     let _seg_name = String::from_utf8_lossy(&seg_name_raw[..seg_end]).to_string();
@@ -205,6 +204,7 @@ fn parse_macho_thin(
 
                     let sect_size = if is_seg64 { 80 } else { 68 };
                     let mut sect_cursor = sect_offset;
+                    let mut sections_parsed_here = 0u32;
                     for _ in 0..nsects {
                         if sect_cursor + sect_size > cmd_data.len() {
                             break;
@@ -247,8 +247,20 @@ fn parse_macho_thin(
                             writable,
                             readable: true,
                         });
+                        sections_parsed_here += 1;
 
                         sect_cursor += sect_size;
+                    }
+                    // A segment whose declared `nsects` was actually backed
+                    // by at least one in-bounds, parseable section struct is
+                    // real structural content. A bare `nsects` claim with no
+                    // section data behind it (or zero sections) is the same
+                    // weak "one plausible header, nothing corroborating it"
+                    // shape that makes a coincidental match in a large
+                    // binary weight file indistinguishable from a real
+                    // embedded object.
+                    if sections_parsed_here > 0 {
+                        has_substantive_command = true;
                     }
                 }
             }
@@ -295,9 +307,11 @@ fn parse_macho_thin(
             }
             0x2 if cmd_data.len() >= 24 => {
                 // LC_SYMTAB
-                has_substantive_command = true;
                 let symoff = read_u32(&cmd_data[8..12], little) as u64;
                 let nsyms = read_u32(&cmd_data[12..16], little) as u64;
+                if nsyms > 0 {
+                    has_substantive_command = true;
+                }
                 let stroff = read_u32(&cmd_data[16..20], little) as u64;
                 let strsize = read_u32(&cmd_data[20..24], little) as u64;
                 symtab_info = Some((symoff, nsyms, stroff, strsize));

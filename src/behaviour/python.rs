@@ -18,6 +18,41 @@ use std::time::{Duration, Instant};
 const PROTOCOL_PREFIX: &str = "LAYERFAULT_JSON:";
 const MAX_RUNNER_LOG_BYTES: usize = 2 * 1024 * 1024;
 
+/// When `recv_protocol` fails, the reader thread's channel disconnecting and
+/// a genuine wall-clock timeout look identical from the channel's side alone
+/// — both surface as "no line arrived in time". A process that was killed
+/// (OOM, a host resource limit, a crash) closes its stdout immediately, so
+/// the reader thread's sender drops right away rather than after the full
+/// timeout window. Checking whether the child has *already* exited at the
+/// moment of failure distinguishes "genuinely still running but slow" from
+/// "already dead", which is exactly the ambiguity that previously made a
+/// resource-limit kill get reported as an indistinguishable generic
+/// timeout with no evidence of what actually happened.
+fn describe_if_child_already_exited(child: &mut std::process::Child) -> Option<String> {
+    let status = child.try_wait().ok().flatten()?;
+    if status.success() {
+        return None;
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::ExitStatusExt;
+        if let Some(signal) = status.signal() {
+            let hint = if signal == 9 {
+                " (SIGKILL — commonly an OOM kill or a host resource limit, not a wall-clock timeout)"
+            } else {
+                ""
+            };
+            return Some(format!(
+                "sandboxed Transformers runtime process already exited, killed by signal {signal}{hint}, before a response arrived"
+            ));
+        }
+    }
+    Some(format!(
+        "sandboxed Transformers runtime process already exited ({:?}) before a response arrived",
+        status.code()
+    ))
+}
+
 pub fn run_transformers(
     model: &Path,
     base: Option<&Path>,
@@ -329,10 +364,15 @@ fn run_transformers_deadline(
                 );
             }
         }
-        Err(error) => {
-            timed_out = true;
-            session_error = Some(format!("Transformers loader protocol failed: {error}"));
-        }
+        Err(error) => match describe_if_child_already_exited(&mut child) {
+            Some(exit_reason) => {
+                session_error = Some(exit_reason);
+            }
+            None => {
+                timed_out = true;
+                session_error = Some(format!("Transformers loader protocol failed: {error}"));
+            }
+        },
     }
 
     // Probe execution gets a fresh budget of its own, starting only once the
@@ -402,10 +442,19 @@ fn run_transformers_deadline(
                     let response = match recv_protocol(&line_rx, probe_deadline.remaining()) {
                         Ok(value) => value,
                         Err(error) => {
-                            timed_out = true;
-                            session_error = Some(format!(
-                                "sandboxed Transformers inference timed out/failed: {error}"
-                            ));
+                            match describe_if_child_already_exited(&mut child) {
+                                Some(exit_reason) => {
+                                    session_error =
+                                        Some(format!("{exit_reason} (probe '{}')", probe.id));
+                                }
+                                None => {
+                                    timed_out = true;
+                                    session_error = Some(format!(
+                                        "sandboxed Transformers inference timed out/failed on probe '{}': {error}",
+                                        probe.id
+                                    ));
+                                }
+                            }
                             break 'probes;
                         }
                     };
@@ -487,16 +536,37 @@ fn run_transformers_deadline(
             status.code()
         ));
     }
-    let mut telemetry = workspace.collect_telemetry(trace_enabled)?;
+    let mut telemetry = workspace.collect_telemetry(
+        trace_enabled,
+        wrapper.as_ref().map(|(path, _)| path.as_path()),
+    )?;
     if let Some(mut guard) = cgroup_guard {
         let mut cg_telemetry = guard.collect_telemetry();
         cg_telemetry.cleanup_state = guard.teardown();
+        // Kernel-attributed resource-limit evidence is authoritative and
+        // strictly more specific than a generic "protocol timed out"
+        // guess. When the runner's stdout pipe closes because the kernel
+        // killed the process (OOM or pids.max), `recv_protocol` cannot
+        // distinguish that from a genuine wall-clock timeout — both
+        // surface as the reader thread's channel disconnecting — so a
+        // real OOM/pids kill was previously being reported and recorded
+        // as `timed_out=true` with no memory-limit evidence at all. Once
+        // the cgroup confirms a resource-limit kill, that replaces any
+        // earlier generic timeout/exit-failure guess and `timed_out` is
+        // corrected: the run did not exceed its time budget, it was
+        // killed by a resource limit.
         if cg_telemetry.oom_kill_events > 0 || cg_telemetry.oom_events > 0 {
-            if session_error.is_none() {
-                session_error = Some("cgroup v2 memory limit exceeded (OOM killed)".to_owned());
-            }
-        } else if cg_telemetry.pids_events_max > 0 && session_error.is_none() {
-            session_error = Some("cgroup v2 process limit exceeded (pids.max)".to_owned());
+            session_error = Some(format!(
+                "cgroup v2 memory limit exceeded (OOM killed); {} oom_kill event(s), {} oom event(s)",
+                cg_telemetry.oom_kill_events, cg_telemetry.oom_events
+            ));
+            timed_out = false;
+        } else if cg_telemetry.pids_events_max > 0 {
+            session_error = Some(format!(
+                "cgroup v2 process limit exceeded (pids.max); {} event(s)",
+                cg_telemetry.pids_events_max
+            ));
+            timed_out = false;
         }
         telemetry.cgroup = Some(cg_telemetry);
     }
@@ -877,5 +947,70 @@ mod protocol_tests {
             .expect_err("a stalled runner must time out, not hang indefinitely");
         assert!(error.to_string().contains("timed out"));
         assert!(started.elapsed() < Duration::from_secs(2));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn describe_if_child_already_exited_returns_none_while_the_process_is_still_running() {
+        let mut child = std::process::Command::new("sleep")
+            .arg("5")
+            .spawn()
+            .expect("spawn sleep");
+        assert!(
+            describe_if_child_already_exited(&mut child).is_none(),
+            "a still-running process must not be reported as already exited"
+        );
+        let _ = child.kill();
+        let _ = child.wait();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn describe_if_child_already_exited_identifies_a_sigkilled_process_by_signal() {
+        // Model the real bug: a process killed out-of-band (OOM, a host
+        // resource limit) closes its stdout immediately, well before any
+        // timeout elapses. `recv_protocol` alone cannot tell that apart
+        // from a slow-but-alive process; checking whether the child has
+        // already exited — and by which signal — can.
+        let mut child = std::process::Command::new("sleep")
+            .arg("30")
+            .spawn()
+            .expect("spawn sleep");
+        // SIGKILL it directly, bypassing our own graceful-termination path,
+        // to model an external kill (e.g. the kernel OOM killer).
+        let pid = child.id();
+        let _ = std::process::Command::new("kill")
+            .args(["-KILL", &pid.to_string()])
+            .status();
+        // Give the kernel a moment to deliver the signal before checking.
+        for _ in 0..50 {
+            if child.try_wait().ok().flatten().is_some() {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        let description = describe_if_child_already_exited(&mut child)
+            .expect("a SIGKILLed process must be reported as already exited");
+        assert!(description.contains("signal 9"));
+        assert!(description.contains("OOM"));
+        let _ = child.wait();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn describe_if_child_already_exited_reports_a_clean_exit_without_an_oom_hint() {
+        let mut child = std::process::Command::new("true")
+            .spawn()
+            .expect("spawn true");
+        for _ in 0..50 {
+            if child.try_wait().ok().flatten().is_some() {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        // `true` exits 0 successfully; that is not evidence of a runner
+        // failure, so this must not be reported as an exit reason at all.
+        assert!(describe_if_child_already_exited(&mut child).is_none());
+        let _ = child.wait();
     }
 }

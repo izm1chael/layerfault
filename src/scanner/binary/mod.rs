@@ -623,10 +623,15 @@ mod tests {
     }
 
     fn minimal_macho64() -> Vec<u8> {
-        // Mach-O 64-bit header (32 bytes) + one valid LC_SEGMENT_64 (72 bytes)
-        // with zero sections.
+        // Mach-O 64-bit header (32 bytes) + one valid LC_SEGMENT_64 (72-byte
+        // header + 80-byte section) with one real section. A segment with
+        // zero sections is not treated as substantive evidence (see
+        // `has_substantive_command` in macho.rs), so a genuine positive
+        // fixture needs an actual declared section.
         let header_size = 32u32;
-        let seg_size = 72u32;
+        let seg_header_size = 72u32;
+        let sect_size = 80u32;
+        let seg_size = seg_header_size + sect_size;
         let cmd_size = header_size + seg_size;
         let mut bytes = vec![0_u8; cmd_size as usize];
         bytes[0..4].copy_from_slice(b"\xcf\xfa\xed\xfe");
@@ -634,16 +639,21 @@ mod tests {
         bytes[8..12].copy_from_slice(&3_u32.to_le_bytes());
         bytes[12..16].copy_from_slice(&2_u32.to_le_bytes());
         bytes[16..20].copy_from_slice(&1_u32.to_le_bytes()); // ncmds = 1
-        bytes[20..24].copy_from_slice(&seg_size.to_le_bytes()); // sizeofcmds = 72
+        bytes[20..24].copy_from_slice(&seg_size.to_le_bytes()); // sizeofcmds
                                                                 // LC_SEGMENT_64 at offset 32
         let seg = header_size as usize;
         bytes[seg..seg + 4].copy_from_slice(&0x19_u32.to_le_bytes()); // cmd = LC_SEGMENT_64
-        bytes[seg + 4..seg + 8].copy_from_slice(&seg_size.to_le_bytes()); // cmdsize = 72
+        bytes[seg + 4..seg + 8].copy_from_slice(&seg_size.to_le_bytes()); // cmdsize
                                                                           // segname[16] = all zeros (OK)
                                                                           // vmaddr = 0, vmsize = 0, fileoff = 0, filesize = 0
-                                                                          // maxprot = 7, initprot = 3, nsects = 0, flags = 0
+                                                                          // initprot = 3, maxprot = 7, nsects = 1, flags = 0
+        bytes[seg + 56..seg + 60].copy_from_slice(&3u32.to_le_bytes()); // initprot
         bytes[seg + 60..seg + 64].copy_from_slice(&7u32.to_le_bytes()); // maxprot
-        bytes[seg + 64..seg + 68].copy_from_slice(&3u32.to_le_bytes()); // initprot
+        bytes[seg + 64..seg + 68].copy_from_slice(&1u32.to_le_bytes()); // nsects = 1
+                                                                        // One 64-bit section struct immediately after the segment header.
+        let sect = seg + seg_header_size as usize;
+        bytes[sect..sect + 4].copy_from_slice(b"__text\0\0"[..4].as_ref()); // sectname prefix
+        bytes[sect + 40..sect + 48].copy_from_slice(&64u64.to_le_bytes()); // size = 64
         bytes
     }
 
@@ -775,6 +785,26 @@ mod tests {
     }
 
     #[test]
+    fn macho_segment_with_zero_sections_is_not_detected() -> Result<()> {
+        // Regression: a lone LC_SEGMENT_64 that declares zero sections (or
+        // claims sections it doesn't actually back with in-bounds section
+        // data) is not, by itself, substantive evidence of a genuine
+        // embedded Mach-O object — the same weak "one plausible header,
+        // nothing corroborating it" shape a coincidental magic-byte
+        // collision in a large binary weight file can produce.
+        let mut bytes = minimal_macho64();
+        // nsects lives at seg(32) + 64..68 in the 64-bit segment header.
+        bytes[32 + 64..32 + 68].copy_from_slice(&0u32.to_le_bytes());
+        let result = scan_fixture("macho-zero-sections", &bytes)?;
+        assert_eq!(
+            result.status,
+            ScanStatus::Pass,
+            "a segment with zero sections must not be substantive evidence on its own"
+        );
+        Ok(())
+    }
+
+    #[test]
     fn macho_magic_alone_is_not_detected() -> Result<()> {
         let bytes = b"\xcf\xfa\xed\xfe".to_vec();
         let result = scan_fixture("macho-magic-only", &bytes)?;
@@ -853,11 +883,20 @@ mod tests {
     }
 
     fn minimal_wasm_with_section() -> Vec<u8> {
-        // Magic + version + one Type section (ID=1) with 0 function types.
+        // Magic + version + a Type section (ID=1, one `() -> ()` function
+        // type) + a Function section (ID=3, declaring one function of that
+        // type). Two validly-ordered, non-empty non-custom sections is
+        // substantive structural evidence, unlike a single bare/empty
+        // section.
         let mut bytes = b"\0asm\x01\0\0\0".to_vec();
         bytes.push(1u8); // section ID = 1 (Type)
-        bytes.push(1u8); // payload length = 1
-        bytes.push(0u8); // type count = 0
+        bytes.push(4u8); // payload length = 4
+        bytes.push(1u8); // type count = 1
+        bytes.extend_from_slice(&[0x60, 0x00, 0x00]); // func type, 0 params, 0 results
+        bytes.push(3u8); // section ID = 3 (Function)
+        bytes.push(2u8); // payload length = 2
+        bytes.push(1u8); // function count = 1
+        bytes.push(0u8); // type index 0
         bytes
     }
 
@@ -929,6 +968,76 @@ mod tests {
     #[test]
     fn short_magic_coincidences_are_not_failures() -> Result<()> {
         let result = scan_fixture("false", b"noise\x7fELFnoiseMZ\x90\x00")?;
+        assert_eq!(result.status, ScanStatus::Pass);
+        Ok(())
+    }
+
+    #[test]
+    fn wasm_single_isolated_empty_section_deep_in_a_large_buffer_is_not_detected() -> Result<()> {
+        // Regression: a magic-byte collision followed by exactly one
+        // structurally-parseable-but-empty section (a Type section
+        // declaring zero function types) must not be enough for a strong
+        // positive, even though it satisfies "at least one non-custom
+        // section parsed without error". This is the realistic shape of a
+        // coincidental match deep inside a large binary weight file: one
+        // isolated section, no imports/exports/code, nothing corroborating
+        // it as a genuine embedded module.
+        let mut bytes = vec![0_u8; 4096];
+        let offset = 2048;
+        bytes[offset..offset + 8].copy_from_slice(b"\0asm\x01\0\0\0");
+        bytes[offset + 8] = 1u8; // section ID = 1 (Type)
+        bytes[offset + 9] = 1u8; // payload length = 1
+        bytes[offset + 10] = 0u8; // type count = 0
+        let result = scan_fixture("wasm-isolated-empty-section", &bytes)?;
+        assert_eq!(
+            result.status,
+            ScanStatus::Pass,
+            "a single empty section must not be substantive evidence of an embedded module"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn wasm_two_validly_ordered_nonempty_sections_are_substantive() -> Result<()> {
+        // The positive counterpart: two real, correctly-ordered sections
+        // (not just one) is enough structural corroboration.
+        let result = scan_fixture("wasm-two-sections", &minimal_wasm_with_section())?;
+        assert_eq!(result.status, ScanStatus::Fail);
+        assert!(result.matches.iter().any(|m| m.contains("T12-004")));
+        Ok(())
+    }
+
+    #[test]
+    fn wasm_out_of_order_non_custom_sections_are_not_detected() -> Result<()> {
+        // Real WASM modules always emit non-custom sections in strictly
+        // increasing id order. A Function section (3) before a Type
+        // section (1) cannot occur in a genuine module, so this stream is
+        // rejected as malformed rather than treated as two corroborating
+        // sections.
+        let mut bytes = b"\0asm\x01\0\0\0".to_vec();
+        bytes.push(3u8); // section ID = 3 (Function) — out of order first
+        bytes.push(2u8);
+        bytes.push(1u8);
+        bytes.push(0u8);
+        bytes.push(1u8); // section ID = 1 (Type) — decreasing, invalid order
+        bytes.push(4u8);
+        bytes.push(1u8);
+        bytes.extend_from_slice(&[0x60, 0x00, 0x00]);
+        let result = scan_fixture("wasm-out-of-order-sections", &bytes)?;
+        assert_eq!(result.status, ScanStatus::Pass);
+        Ok(())
+    }
+
+    #[test]
+    fn wasm_unknown_section_id_is_not_detected() -> Result<()> {
+        // Section ids above 11 do not exist in the core WASM binary format;
+        // treating one as valid structural evidence would make random
+        // bytes far too easy to satisfy.
+        let mut bytes = b"\0asm\x01\0\0\0".to_vec();
+        bytes.push(200u8); // not a valid WASM section id
+        bytes.push(1u8);
+        bytes.push(0u8);
+        let result = scan_fixture("wasm-unknown-section-id", &bytes)?;
         assert_eq!(result.status, ScanStatus::Pass);
         Ok(())
     }

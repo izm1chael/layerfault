@@ -4,6 +4,61 @@ use layerfault::json_stream::write_stdout_json;
 use std::path::Path;
 
 use layerfault::decision::SecurityDecision;
+
+/// A structured `BehaviourReport` for the case where behaviour never
+/// actually executed (static admission blocked it, the runner/sandbox was
+/// unavailable, it failed to start, or it timed out before producing a
+/// result). `--json` callers must still get a valid, parseable document on
+/// stdout describing why, not an empty stream with the reason only on
+/// stderr as plain text.
+fn not_run_behaviour_report(
+    model_path: &Path,
+    limits: &layerfault::behaviour::BehaviourLimits,
+    reason: &str,
+) -> layerfault::behaviour::BehaviourReport {
+    layerfault::behaviour::BehaviourReport {
+        schema_version: "1.0".to_owned(),
+        model_identity: String::new(),
+        model_path: model_path.display().to_string(),
+        runtime: layerfault::behaviour::RuntimeIdentity {
+            backend: "not-run".to_owned(),
+            executable: String::new(),
+            executable_sha256: String::new(),
+            version: None,
+            sandbox: Default::default(),
+            closure: None,
+        },
+        probe_suite_id: String::new(),
+        probe_suite_version: 0,
+        seed: 0,
+        limits: limits.clone(),
+        executions: Vec::new(),
+        dynamic_observations: Default::default(),
+        state: layerfault::transformation::BehaviourState::NotRun,
+        findings: vec![format!("LF-BEHAV-NOT-RUN: {reason}")],
+        boundary: format!(
+            "Behavioural execution did not occur: {reason}. This is not evidence the model is safe or unsafe; it means no dynamic observation was made."
+        ),
+    }
+}
+
+/// The differential-comparison counterpart of `not_run_behaviour_report`,
+/// for `compare-behaviour --json` when the comparison never ran.
+fn not_run_differential_report(
+    base_path: &Path,
+    derived_path: &Path,
+    limits: &layerfault::behaviour::BehaviourLimits,
+    reason: &str,
+) -> layerfault::behaviour::DifferentialReport {
+    layerfault::behaviour::DifferentialReport {
+        schema_version: "1.0".to_owned(),
+        base: not_run_behaviour_report(base_path, limits, reason),
+        derived: not_run_behaviour_report(derived_path, limits, reason),
+        rows: Vec::new(),
+        state: layerfault::transformation::DifferentialBehaviourState::NotRun,
+        findings: vec![format!("LF-BEHAV-DIFF-NOT-RUN: {reason}")],
+    }
+}
 pub(crate) fn run_behaviour(args: BehaviourArgs) -> Result<()> {
     let closure_level = layerfault::behaviour::closure::ClosureLevel::parse(&args.closure_level)?;
     if let Some(replay_path) = args.replay.as_deref() {
@@ -74,7 +129,8 @@ pub(crate) fn run_behaviour(args: BehaviourArgs) -> Result<()> {
         require_cgroup: require_cgroup_from_env_or_arg(args.require_cgroup),
         telemetry_backend: args.telemetry_backend,
     };
-    let mut report = match args.runtime.as_str() {
+    let report_limits = limits.clone();
+    let result: Result<layerfault::behaviour::BehaviourReport> = match args.runtime.as_str() {
         "llama-cpp" => {
             if args.execute_custom_code {
                 bail!("--execute-custom-code is only supported by --runtime transformers");
@@ -86,7 +142,7 @@ pub(crate) fn run_behaviour(args: BehaviourArgs) -> Result<()> {
                 args.seed,
                 limits,
                 active,
-            )?
+            )
         }
         "transformers" | "transformers-python" => layerfault::behaviour::python::run_transformers(
             &args.model,
@@ -96,7 +152,7 @@ pub(crate) fn run_behaviour(args: BehaviourArgs) -> Result<()> {
             args.seed,
             limits,
             active,
-        )?,
+        ),
         "embedded" => {
             if args.allow_static_blocked || args.execute_custom_code {
                 bail!("--allow-static-blocked/--execute-custom-code require an external strong-sandbox runtime, not --runtime embedded");
@@ -110,11 +166,28 @@ pub(crate) fn run_behaviour(args: BehaviourArgs) -> Result<()> {
                 args.probe_suite.as_deref(),
                 args.seed,
                 limits,
-            )?
+            )
         }
         other => {
             bail!("unsupported behaviour runtime '{other}'; supported values: llama-cpp, transformers, embedded")
         }
+    };
+    // Under --json, a runtime-execution failure (static admission block,
+    // unavailable sandbox/runner, startup/timeout error) must still produce
+    // a structured, machine-readable result on stdout, not an empty stream
+    // with the reason only on stderr as plain text. Non-JSON invocations
+    // keep the normal error path — propagate via `?` so the message lands
+    // on stderr and the process exits non-zero, matching every other
+    // Layerfault CLI error.
+    let mut report = match result {
+        Ok(report) => report,
+        Err(error) if args.json => {
+            return emit_behaviour(
+                &not_run_behaviour_report(&args.model, &report_limits, &error.to_string()),
+                args.json,
+            );
+        }
+        Err(error) => return Err(error),
     };
     apply_watch_strings(&mut report, &args.watch_string);
     if let Some(path) = args.run_manifest_out.as_deref() {
@@ -162,7 +235,8 @@ pub(crate) fn run_compare_behaviour(args: CompareBehaviourArgs) -> Result<()> {
         require_cgroup: args.require_cgroup,
         telemetry_backend: args.telemetry_backend,
     };
-    let report = match args.runtime.as_str() {
+    let report_limits = limits.clone();
+    let result: Result<layerfault::behaviour::DifferentialReport> = match args.runtime.as_str() {
         "llama-cpp" => {
             if args.execute_custom_code {
                 bail!("--execute-custom-code is only supported by --runtime transformers");
@@ -175,7 +249,7 @@ pub(crate) fn run_compare_behaviour(args: CompareBehaviourArgs) -> Result<()> {
                 args.seed,
                 limits,
                 active,
-            )?
+            )
         }
         "transformers" | "transformers-python" => {
             layerfault::behaviour::python::compare_transformers(
@@ -186,7 +260,7 @@ pub(crate) fn run_compare_behaviour(args: CompareBehaviourArgs) -> Result<()> {
                 args.seed,
                 limits,
                 active,
-            )?
+            )
         }
         "embedded" => {
             if args.allow_static_blocked || args.execute_custom_code {
@@ -202,14 +276,34 @@ pub(crate) fn run_compare_behaviour(args: CompareBehaviourArgs) -> Result<()> {
                 args.probe_suite.as_deref(),
                 args.seed,
                 limits,
-            )?
+            )
         }
         other => {
             bail!("unsupported behaviour runtime '{other}'; supported values: llama-cpp, transformers, embedded")
         }
     };
-    if args.json {
-        write_stdout_json(&report, true)?;
+    // Same contract as `run_behaviour`: under --json, a comparison that
+    // never executed (static admission block, unavailable runtime,
+    // startup/timeout error) must still emit a structured document. A
+    // non-JSON invocation keeps the normal stderr error path.
+    let report = match result {
+        Ok(report) => report,
+        Err(error) if args.json => not_run_differential_report(
+            &args.base,
+            &args.derived,
+            &report_limits,
+            &error.to_string(),
+        ),
+        Err(error) => return Err(error),
+    };
+    emit_differential(&report, args.json)
+}
+fn emit_differential(
+    report: &layerfault::behaviour::DifferentialReport,
+    json_output: bool,
+) -> Result<()> {
+    if json_output {
+        write_stdout_json(report, true)?;
     } else {
         println!(
             "DIFFERENTIAL BEHAVIOUR\n{:?}\n\n{} comparison row(s)",
