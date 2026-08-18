@@ -3,7 +3,7 @@ use super::{
 };
 use crate::finding_evidence::{EvidenceKind, FindingBuilder, FindingEvidence};
 use crate::scanner::{CheckType, Confidence, FindingClass, LayerScanResult, ScanStatus};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 /// Standard HF practice: models without a dedicated pad token commonly
 /// reuse eos/bos/unk as pad (e.g. SmolLM2's `<|im_end|>` as both eos_token
@@ -12,10 +12,21 @@ use std::collections::BTreeMap;
 /// separately below.
 const SAFE_ROLE_OVERLAP_PAIRS: &[(&str, &str)] = &[("eos", "pad"), ("bos", "pad"), ("unk", "pad")];
 
+/// The "assistant" role is never declared — `special_tokens::canonical_role`
+/// only ever assigns it by pattern-matching a token's own literal content
+/// for "im_start"/"im_end" (ChatML role-boundary markers). A token earning
+/// that tag is therefore always *also* whatever authoritative role it was
+/// separately declared with (eos_token, pad_token, ...): ChatML templates
+/// routinely reuse the model's own eos/pad token as the turn delimiter, so
+/// the same string carrying both is not a contradiction. Since the tag is
+/// derived from fixed token content rather than chosen, an attacker cannot
+/// use it to launder an unrelated declared-role conflict.
 fn is_safe_role_overlap(a: &str, b: &str) -> bool {
-    SAFE_ROLE_OVERLAP_PAIRS
-        .iter()
-        .any(|(x, y)| (*x == a && *y == b) || (*x == b && *y == a))
+    a == "assistant"
+        || b == "assistant"
+        || SAFE_ROLE_OVERLAP_PAIRS
+            .iter()
+            .any(|(x, y)| (*x == a && *y == b) || (*x == b && *y == a))
 }
 
 pub(crate) fn build(report: &TokenizerSecurityReport) -> Vec<LayerScanResult> {
@@ -121,25 +132,21 @@ fn conflicts(
     t: &[SpecialTokenRecord],
     out: &mut Vec<LayerScanResult>,
 ) {
-    let mut by_token: BTreeMap<&str, &Option<String>> = BTreeMap::new();
+    // Roles are collected as a set per token, not compared pairwise against
+    // whichever record happened to be seen last: a sequence like
+    // eos, assistant, bos would otherwise let the middle "assistant" record
+    // (always safe to overlap with anything, see `is_safe_role_overlap`)
+    // mask a genuine eos/bos conflict on either side of it.
+    let mut roles_by_token: BTreeMap<&str, BTreeSet<&str>> = BTreeMap::new();
     let mut by_id: BTreeMap<u64, &str> = BTreeMap::new();
     let mut by_token_id: BTreeMap<&str, u64> = BTreeMap::new();
     let mut by_role_token_special: BTreeMap<(&str, &str), bool> = BTreeMap::new();
     for x in t {
-        if let Some(prev) = by_token.insert(&x.token, &x.role) {
-            let is_safe_overlap = match (prev, &x.role) {
-                (Some(prev_role), Some(new_role)) => is_safe_role_overlap(prev_role, new_role),
-                _ => false,
-            };
-            if prev != &x.role && !is_safe_overlap {
-                out.push(simple(
-                    r,
-                    "LF-TOKENIZER-SPECIAL-TOKEN-CONFLICT",
-                    ScanStatus::Warn,
-                    "same special token is assigned conflicting roles",
-                ));
-                break;
-            }
+        if let Some(role) = &x.role {
+            roles_by_token
+                .entry(x.token.as_str())
+                .or_default()
+                .insert(role.as_str());
         }
         if let Some(id) = x.id {
             if let Some(prev) = by_id.insert(id, &x.token) {
@@ -185,6 +192,27 @@ fn conflicts(
                     break;
                 }
             }
+        }
+    }
+    for roles in roles_by_token.values() {
+        let authoritative: Vec<&str> = roles
+            .iter()
+            .copied()
+            .filter(|r| *r != "assistant")
+            .collect();
+        let conflicting = authoritative.iter().enumerate().any(|(i, a)| {
+            authoritative[i + 1..]
+                .iter()
+                .any(|b| !is_safe_role_overlap(a, b))
+        });
+        if conflicting {
+            out.push(simple(
+                r,
+                "LF-TOKENIZER-SPECIAL-TOKEN-CONFLICT",
+                ScanStatus::Warn,
+                "same special token is assigned conflicting roles",
+            ));
+            break;
         }
     }
 }
@@ -341,6 +369,51 @@ mod conflict_tests {
         // token is not one of them and must still be flagged.
         let tokens = vec![
             record("<|im_end|>", "eos", true, Some(2), "tokenizer_config.json"),
+            record(
+                "<|im_end|>",
+                "bos",
+                true,
+                Some(2),
+                "special_tokens_map.json",
+            ),
+        ];
+        let findings = conflict_ids(&tokens);
+        assert_eq!(findings.len(), 1);
+        assert_eq!(
+            findings[0].rule_id.as_deref(),
+            Some("LF-TOKENIZER-SPECIAL-TOKEN-CONFLICT")
+        );
+    }
+
+    #[test]
+    fn eos_pad_and_content_inferred_assistant_role_on_the_same_token_is_not_a_conflict() {
+        // SmolLM2 real shape: <|im_end|> is eos_token and pad_token
+        // (field-based, authoritative) and *also* gets tagged "assistant"
+        // by canonical_role's im_start/im_end content-pattern inference
+        // when it shows up in additional_special_tokens. Three role
+        // records for one token, none of them actually contradictory.
+        let tokens = vec![
+            record("<|im_end|>", "eos", true, Some(2), "tokenizer_config.json"),
+            record(
+                "<|im_end|>",
+                "pad",
+                true,
+                Some(2),
+                "special_tokens_map.json",
+            ),
+            record("<|im_end|>", "assistant", true, Some(2), "tokenizer.json"),
+        ];
+        assert!(conflict_ids(&tokens).is_empty());
+    }
+
+    #[test]
+    fn assistant_role_does_not_mask_a_genuine_conflict_between_its_neighbours() {
+        // Order-dependence regression: eos and bos genuinely conflict on
+        // the same token; an "assistant"-tagged record sitting between
+        // them in declaration order must not hide that.
+        let tokens = vec![
+            record("<|im_end|>", "eos", true, Some(2), "tokenizer_config.json"),
+            record("<|im_end|>", "assistant", true, Some(2), "tokenizer.json"),
             record(
                 "<|im_end|>",
                 "bos",

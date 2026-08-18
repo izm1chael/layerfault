@@ -53,15 +53,41 @@ fn describe_if_child_already_exited(child: &mut std::process::Child) -> Option<S
     ))
 }
 
+/// CPU-only Transformers inference (no CUDA/ROCm tooling detected) is
+/// meaningfully slower than the profile timeouts were sized for, and that
+/// is expected computation, not a hang — a probe genuinely still inside
+/// `generate()`'s forward pass, confirmed via `faulthandler` stack dumps,
+/// should not be killed as if it were stuck. Scale the wall-clock budget up
+/// on CPU-only hosts rather than raising every profile's timeout globally.
+/// `LAYERFAULT_BEHAVIOUR_CPU_TIMEOUT_MULTIPLIER` overrides the default for
+/// operators who know their own hardware.
+fn effective_timeout_seconds(base_seconds: u64) -> u64 {
+    let multiplier: f64 = std::env::var("LAYERFAULT_BEHAVIOUR_CPU_TIMEOUT_MULTIPLIER")
+        .ok()
+        .and_then(|value| value.parse().ok())
+        .map(|value: f64| value.clamp(1.0, 10.0))
+        .unwrap_or_else(|| {
+            let has_gpu = crate::sources::find_executable("nvidia-smi").is_some()
+                || crate::sources::find_executable("rocm-smi").is_some();
+            if has_gpu {
+                1.0
+            } else {
+                3.0
+            }
+        });
+    ((base_seconds as f64) * multiplier).round() as u64
+}
+
 pub fn run_transformers(
     model: &Path,
     base: Option<&Path>,
     runtime_path: Option<&Path>,
     suite_path: Option<&Path>,
     seed: u64,
-    limits: super::BehaviourLimits,
+    mut limits: super::BehaviourLimits,
     active: super::ActiveExecutionOptions,
 ) -> Result<super::BehaviourReport> {
+    limits.timeout_seconds = effective_timeout_seconds(limits.timeout_seconds);
     let deadline = super::CommandDeadline::new(limits.timeout_seconds);
     run_transformers_deadline(
         model,
@@ -632,9 +658,10 @@ pub fn compare_transformers(
     runtime_path: Option<&Path>,
     suite_path: Option<&Path>,
     seed: u64,
-    limits: super::BehaviourLimits,
+    mut limits: super::BehaviourLimits,
     active: super::ActiveExecutionOptions,
 ) -> Result<super::DifferentialReport> {
+    limits.timeout_seconds = effective_timeout_seconds(limits.timeout_seconds);
     let deadline = super::CommandDeadline::new(limits.timeout_seconds);
     let base_report = run_transformers_deadline(
         base,
@@ -1019,5 +1046,31 @@ mod protocol_tests {
         // failure, so this must not be reported as an exit reason at all.
         assert!(describe_if_child_already_exited(&mut child).is_none());
         let _ = child.wait();
+    }
+
+    const TIMEOUT_MULTIPLIER_ENV: &str = "LAYERFAULT_BEHAVIOUR_CPU_TIMEOUT_MULTIPLIER";
+
+    // Both cases live in one test: the env var is process-global, and Rust
+    // runs tests in parallel by default, so two tests mutating it
+    // independently would race each other.
+    #[test]
+    fn timeout_multiplier_override_is_applied_clamped_and_falls_back_on_invalid_input() {
+        std::env::set_var(TIMEOUT_MULTIPLIER_ENV, "2");
+        assert_eq!(effective_timeout_seconds(100), 200);
+
+        std::env::set_var(TIMEOUT_MULTIPLIER_ENV, "1000");
+        assert_eq!(
+            effective_timeout_seconds(100),
+            1000,
+            "multiplier must clamp to 10x, not apply unbounded"
+        );
+
+        std::env::set_var(TIMEOUT_MULTIPLIER_ENV, "not-a-number");
+        let scaled = effective_timeout_seconds(100);
+        // Falls back to the 1x (GPU) or 3x (CPU-only) host-detected default,
+        // never silently ignores the base entirely.
+        assert!(scaled == 100 || scaled == 300);
+
+        std::env::remove_var(TIMEOUT_MULTIPLIER_ENV);
     }
 }
