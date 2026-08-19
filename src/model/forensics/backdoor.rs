@@ -58,10 +58,30 @@ pub struct BackdoorStaticReport {
     pub limitations: Vec<String>,
 }
 fn finding(subject: &str, id: &str, detail: &str, evidence: serde_json::Value) -> LayerScanResult {
+    finding_with_confidence(subject, id, detail, evidence, Confidence::High)
+}
+/// A weaker-signal counterpart to [`finding`]: same shape, lower confidence,
+/// for indicators that are plausible but expected to also occur under
+/// ordinary fine-tuning (see `LF-BACKDOOR-STATIC-DELTA-NOTABLE`).
+fn notable_finding(
+    subject: &str,
+    id: &str,
+    detail: &str,
+    evidence: serde_json::Value,
+) -> LayerScanResult {
+    finding_with_confidence(subject, id, detail, evidence, Confidence::Medium)
+}
+fn finding_with_confidence(
+    subject: &str,
+    id: &str,
+    detail: &str,
+    evidence: serde_json::Value,
+    confidence: Confidence,
+) -> LayerScanResult {
     let sub = EvidenceSubject::identity(subject, "application/vnd.layerfault.model+json");
     FindingBuilder::new(id, CheckType::BackdoorForensics, ScanStatus::Warn)
         .class(FindingClass::ContentIndicator)
-        .confidence(Confidence::High)
+        .confidence(confidence)
         .subject(sub.clone())
         .detail(detail)
         .evidence(
@@ -84,6 +104,9 @@ pub fn analyze_backdoor_static(i: BackdoorStaticInput) -> BackdoorStaticReport {
         if delta::suspicious(d) {
             categories += 1;
             findings.push(finding(&i.subject,"LF-BACKDOOR-STATIC-DELTA-CONCENTRATION","sampled model deltas are highly localized; this is a research indicator, not proof of a backdoor",serde_json::json!(d)));
+        } else if delta::notable(d) {
+            categories += 1;
+            findings.push(notable_finding(&i.subject,"LF-BACKDOOR-STATIC-DELTA-NOTABLE","the embedding table changed alongside a real cluster of other tensors; deltas are diffuse rather than concentrated, which is the shape a gradient fine-tuned backdoor typically takes",serde_json::json!(d)));
         }
     }
     if !embedding_anomalies.is_empty() {
@@ -135,5 +158,58 @@ pub fn analyze_backdoor_static(i: BackdoorStaticInput) -> BackdoorStaticReport {
         findings,
         completeness,
         limitations,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Same diffuse-fine-tune-with-embedding-delta shape as the real
+    /// `pls-suffix`/`sent-sleeper` corpus fixtures: ~120 changed tensors,
+    /// no small cluster dominating total delta mass.
+    fn diffuse_finetune_delta_masses() -> Vec<TensorDeltaMass> {
+        let mut masses = vec![TensorDeltaMass {
+            tensor: "model.embed_tokens.weight".to_owned(),
+            absolute_delta: 5.0,
+        }];
+        for i in 0..121 {
+            masses.push(TensorDeltaMass {
+                tensor: format!("model.layers.{i}.mlp.down_proj.weight"),
+                absolute_delta: 1.0,
+            });
+        }
+        masses
+    }
+
+    #[test]
+    fn diffuse_finetuned_backdoor_shape_surfaces_a_notable_finding() {
+        let report = analyze_backdoor_static(BackdoorStaticInput {
+            subject: "test-subject".to_owned(),
+            reference: Some("test-base".to_owned()),
+            profile: BackdoorProfile::Research,
+            tensor_anomalies: Vec::new(),
+            embedding_candidates: Vec::new(),
+            ordinary_embedding_norms: Vec::new(),
+            delta_masses: diffuse_finetune_delta_masses(),
+            nonfinite: Vec::new(),
+            dataset_findings: Vec::new(),
+            adapter_findings: Vec::new(),
+        });
+        assert!(
+            report
+                .findings
+                .iter()
+                .any(|f| f.rule_id.as_deref() == Some("LF-BACKDOOR-STATIC-DELTA-NOTABLE")),
+            "diffuse embedding-plus-cluster deltas that miss the strict concentration gate must still surface a finding: {:?}",
+            report.findings.iter().map(|f| &f.rule_id).collect::<Vec<_>>()
+        );
+        assert!(
+            !report
+                .findings
+                .iter()
+                .any(|f| f.rule_id.as_deref() == Some("LF-BACKDOOR-STATIC-DELTA-CONCENTRATION")),
+            "this shape must not also trip the strict concentration gate"
+        );
     }
 }

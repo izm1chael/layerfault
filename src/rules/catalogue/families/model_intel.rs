@@ -191,6 +191,18 @@
         requirement_reason: "",
     },
     RuleMetadata {
+        rule_id: "LF-BACKDOOR-STATIC-DELTA-NOTABLE",
+        rule_version: 1,
+        detector_family: "backdoor_forensics",
+        title: "Backdoor Static Delta Notable",
+        meaning: "The embedding table changed alongside a real cluster of other tensors, without clearing the stricter concentrated-tampering bar used by LF-BACKDOOR-STATIC-DELTA-CONCENTRATION.",
+        why_it_matters: "Gradient-based fine-tuning diffuses a trigger backdoor's changes across many tensors instead of concentrating them in one place, so a genuine fine-tuned backdoor can land here without ever tripping the stricter concentration check.",
+        remediation: "Review the listed tensors (especially the embedding table) for this change against the model's documented training history before treating it as ordinary fine-tuning drift.",
+        limitations: "This is a weaker, diffuse-shaped indicator, not proof of malicious intent — ordinary fine-tuning and continued pretraining can produce a similar diffuse pattern.",
+        evidence_requirement: EvidenceRequirement::Required,
+        requirement_reason: "",
+    },
+    RuleMetadata {
         rule_id: "LF-BACKDOOR-STATIC-EMBEDDING-OUTLIER",
         rule_version: 1,
         detector_family: "backdoor_forensics",
