@@ -228,8 +228,15 @@ pub(crate) fn run_sources(args: OutputArgs) -> Result<()> {
 }
 
 pub(crate) fn run_explain(args: ExplainArgs) -> Result<()> {
-    let explanation = explain::risk_lookup(&args.rule_id);
-    let metadata = explain::lookup(&args.rule_id);
+    if args.list {
+        return run_explain_list(args.json);
+    }
+    let rule_id = args
+        .rule_id
+        .as_deref()
+        .ok_or_else(|| anyhow!("a RULE_ID is required unless --list is given"))?;
+    let explanation = explain::risk_lookup(rule_id);
+    let metadata = explain::lookup(rule_id);
     let mapping = if args.mappings {
         let pack = match args.intelligence_pack.as_deref() {
             Some(path) => {
@@ -252,7 +259,7 @@ pub(crate) fn run_explain(args: ExplainArgs) -> Result<()> {
                 layerfault::intelligence::builtin_pack()?
             }
         };
-        layerfault::intelligence::mapping_for_rule(&pack, &args.rule_id)
+        layerfault::intelligence::mapping_for_rule(&pack, rule_id)
     } else {
         None
     };
@@ -310,6 +317,38 @@ pub(crate) fn run_explain(args: ExplainArgs) -> Result<()> {
                 }
             }
         }
+    }
+    Ok(())
+}
+
+fn run_explain_list(json: bool) -> Result<()> {
+    let ids = explain::all_rule_ids();
+    if json {
+        let rows: Vec<_> = ids
+            .iter()
+            .filter_map(|id| explain::lookup(id))
+            .map(|entry| {
+                serde_json::json!({
+                    "rule_id": entry.rule_id,
+                    "rule_version": entry.rule_version,
+                    "detector_family": entry.detector_family,
+                    "title": entry.title,
+                    "evidence_requirement": entry.evidence_requirement,
+                })
+            })
+            .collect();
+        println!("{}", serde_json::to_string_pretty(&rows)?);
+    } else {
+        for id in &ids {
+            let Some(entry) = explain::lookup(id) else {
+                continue;
+            };
+            println!(
+                "{:<40} {:<20} {}",
+                entry.rule_id, entry.detector_family, entry.title
+            );
+        }
+        println!("\n{} rule(s)", ids.len());
     }
     Ok(())
 }

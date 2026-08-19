@@ -1111,7 +1111,11 @@ pub(crate) struct OutputArgs {
 
 #[derive(clap::Args, Debug)]
 pub(crate) struct ExplainArgs {
-    pub(crate) rule_id: String,
+    /// Required unless --list is given.
+    pub(crate) rule_id: Option<String>,
+    /// List every rule in the catalogue instead of explaining one.
+    #[arg(long, default_value_t = false, conflicts_with_all = ["mappings", "intelligence_pack", "intelligence_signature", "intelligence_public_key"])]
+    pub(crate) list: bool,
     #[arg(long, default_value_t = false)]
     pub(crate) mappings: bool,
     #[arg(long)]

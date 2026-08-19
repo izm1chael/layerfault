@@ -5,8 +5,8 @@
 //! title, meaning, why it matters, remediation and limitations.
 
 pub use crate::rules::{
-    build_id, lookup, ruleset_sha256, scanner_revision, EvidenceRequirement, RuleExplanation,
-    RuleMetadata, CATALOGUE,
+    all_rule_ids, build_id, lookup, ruleset_sha256, scanner_revision, EvidenceRequirement,
+    RuleExplanation, RuleMetadata, CATALOGUE,
 };
 
 pub struct FindingDescriptor {
