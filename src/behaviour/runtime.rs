@@ -148,7 +148,10 @@ impl RuntimeAdapter {
                 .arg("--parallel")
                 .arg("1")
                 .arg("--no-cache-prompt")
-                .arg("--no-webui");
+                .arg("--no-webui")
+                // /slots is off by default in llama.cpp; this instance is
+                // private and single-tenant, and infer()'s reset needs it.
+                .arg("--slots");
             let started = Instant::now();
             runtime_binding.revalidate()?;
             let host_fs = std::sync::Arc::new(super::cgroup::HostCgroupFs::new());

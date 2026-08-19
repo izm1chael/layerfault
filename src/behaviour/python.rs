@@ -59,8 +59,8 @@ fn describe_if_child_already_exited(child: &mut std::process::Child) -> Option<S
 /// `generate()`'s forward pass, confirmed via `faulthandler` stack dumps,
 /// should not be killed as if it were stuck. Scale the wall-clock budget up
 /// on CPU-only hosts rather than raising every profile's timeout globally.
-/// `LAYERFAULT_BEHAVIOUR_CPU_TIMEOUT_MULTIPLIER` overrides the default for
-/// operators who know their own hardware.
+/// CPU-only hosts scale from available cores. The environment override takes
+/// precedence when hardware-specific tuning is needed.
 fn effective_timeout_seconds(base_seconds: u64) -> u64 {
     let multiplier: f64 = std::env::var("LAYERFAULT_BEHAVIOUR_CPU_TIMEOUT_MULTIPLIER")
         .ok()
@@ -72,7 +72,11 @@ fn effective_timeout_seconds(base_seconds: u64) -> u64 {
             if has_gpu {
                 1.0
             } else {
-                3.0
+                let cores = std::thread::available_parallelism()
+                    .map(|value| value.get())
+                    .unwrap_or(1) as f64;
+                // Avoid scaling above 1x on hosts with at least eight cores.
+                (8.0 / cores).clamp(1.0, 6.0)
             }
         });
     ((base_seconds as f64) * multiplier).round() as u64
@@ -1079,9 +1083,8 @@ mod protocol_tests {
 
         std::env::set_var(TIMEOUT_MULTIPLIER_ENV, "not-a-number");
         let scaled = effective_timeout_seconds(100);
-        // Falls back to the 1x (GPU) or 3x (CPU-only) host-detected default,
-        // never silently ignores the base entirely.
-        assert!(scaled == 100 || scaled == 300);
+        // Falls back to the host-detected default without ignoring the base.
+        assert!((100..=600).contains(&scaled));
 
         std::env::remove_var(TIMEOUT_MULTIPLIER_ENV);
     }
