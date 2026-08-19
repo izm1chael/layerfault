@@ -351,7 +351,17 @@ impl RuntimeSession<'_> {
         match response {
             Ok((200, bytes)) => {
                 if !matches!(reset, Ok((200, _))) {
-                    bail!("llama-server completed a probe but context reset failed; refusing stateful continuation");
+                    let reason = match reset {
+                        Ok((status, body)) => format!(
+                            "HTTP {status}: {}",
+                            String::from_utf8_lossy(&body)
+                                .chars()
+                                .take(256)
+                                .collect::<String>()
+                        ),
+                        Err(error) => format!("{error:#}"),
+                    };
+                    bail!("llama-server completed a probe but context reset failed; refusing stateful continuation ({reason})");
                 }
                 let value: serde_json::Value = serde_json::from_slice(&bytes)
                     .context("invalid llama-server completion JSON")?;
