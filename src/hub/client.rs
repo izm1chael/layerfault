@@ -413,7 +413,11 @@ pub fn verify_webhook_secret(received: Option<&str>, expected: &str) -> bool {
 }
 
 fn read_response_capped(mut response: Response, cap: usize) -> Result<Vec<u8>> {
-    let mut output = Vec::new();
+    let hint = response
+        .content_length()
+        .map(|length| usize::try_from(length).unwrap_or(cap).min(cap))
+        .unwrap_or(0);
+    let mut output = Vec::with_capacity(hint);
     let mut buffer = [0_u8; 64 * 1024];
     loop {
         let read = response.read(&mut buffer)?;
