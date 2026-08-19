@@ -699,5 +699,1779 @@
         ]
       }
     }
+  ],
+  "waivers": [
+    {
+      "rule_id": "LF-ADAPTER-ANALYSIS-INCOMPLETE",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-ADAPTER-BASE-MISMATCH",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-ADAPTER-BASE-UNVERIFIED",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-ADAPTER-MODULES-TO-SAVE",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-ADAPTER-NORM-OUTLIER",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-ADAPTER-RANK-ANOMALY",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-ADAPTER-SCALING-ANOMALY",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-ADAPTER-SPECTRAL-CONCENTRATION",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-ADAPTER-UNEXPECTED-MODULE",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-ADAPTER-WEIGHT-ANOMALY",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-ADMISSION-RECEIPT-AGENT-MISMATCH",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-ADMISSION-RECEIPT-ARTIFACT-MISMATCH",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-ADMISSION-RECEIPT-CAPABILITY-MISMATCH",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-ADMISSION-RECEIPT-COMPOSITION-MISMATCH",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-ADMISSION-RECEIPT-INTELLIGENCE-MISMATCH",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-ADMISSION-RECEIPT-MCP-MISMATCH",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-ADMISSION-RECEIPT-RULESET-MISMATCH",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-ADMISSION-RECEIPT-RUNTIME-CONFIG-MISMATCH",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-ADMISSION-RECEIPT-RUNTIME-MISMATCH",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-AGENT-CAPABILITY-EXPANSION",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-AGENT-CAPABILITY-INCOMPLETE",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-AGENT-DANGEROUS-CAPABILITY-CHAIN",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-ARCHIVE-BOMB",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-ARCHIVE-DUPLICATE",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-ARCHIVE-ENCRYPTED",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-ARCHIVE-FORMAT-MISMATCH",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-ARCHIVE-LIMIT",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-ARCHIVE-LINK",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-ARCHIVE-MALFORMED",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-ARCHIVE-NESTED",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-ARCHIVE-SECURITY-MEMBER",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-ARCHIVE-TRAVERSAL",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-ASSURANCE-PICKLE-DIFFERENTIAL",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-ASSURANCE-PICKLE-UNRESOLVED-EXECUTION",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-BACKDOOR-BEHAVIOUR-DIVERGENCE",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-BACKDOOR-HUNT-INCOMPLETE",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-BACKDOOR-STATIC-DELTA-CONCENTRATION",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-BACKDOOR-STATIC-DELTA-NOTABLE",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-BACKDOOR-STATIC-EMBEDDING-OUTLIER",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-BACKDOOR-STATIC-NONFINITE",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-BACKDOOR-TRIGGER-REPRODUCIBLE",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-BEHAV-CANARY-ACCESS",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-BEHAV-DANGEROUS-EXEC",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-BEHAV-EMPTY-RESPONSE",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-BEHAV-FILESYSTEM-MUTATION",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-BEHAV-FILESYSTEM-WRITE-ATTEMPT",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-BEHAV-NETWORK-ATTEMPT",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-BEHAV-PERSONA-PERSISTENCE",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-BEHAV-PRIVILEGE-BOUNDARY",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-BEHAV-RUNTIME-FAILURE",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-BEHAV-SECRET-DISCLOSURE",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-BEHAV-SECURE-CODE-REGRESSION",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-BEHAV-SENSITIVE-PATH-ACCESS",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-BEHAV-TARGETED-CONTENT",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-BEHAV-TOOL-EXFIL",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-BEHAV-TRACE-TRUNCATED",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-BEHAV-UNEXPECTED-EXEC",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-BINDING-PACKAGE-MUTATED",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-BINDING-REVALIDATION-FAILED",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-BINDING-SYMLINK-REFUSED",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-BINDING-UNBOUND-RESOURCE",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-BUDGET-EVIDENCE",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-CODE-CTYPES",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-CODE-EVAL",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-CODE-EXEC",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-CODE-IMPORT-SIDE-EFFECT",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-CODE-NETWORK",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-CODE-OS-SYSTEM",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-CODE-REMOTE-TRUST",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-COMPOSITION-DUPLICATE-ADAPTER",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-COMPOSITION-INCOMPLETE",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-CONFIG-ACTIVATION-IMPORT",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-CONFIG-CUSTOM-CLASS",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-CONFIG-DYNAMIC-IMPORT",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-CONFIG-EXECUTION-EDGE-INCOMPLETE",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-COREML-CUSTOM",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-COREML-PACKAGE-MISSING-MANIFEST",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-COREML-PACKAGE-UNSAFE",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-COREML-PACKAGE-VALID",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-COREML-PATH-TRAVERSAL",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-COREML-STRUCTURAL",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-CORR-BACKDOOR-MULTI-SIGNAL",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-CORR-CUSTOM-LOADER-NATIVE",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-CORR-HF-LOADER-CREDENTIALS",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-CORR-HF-LOADER-DYNAMIC-CODE",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-CORR-HF-LOADER-FILESYSTEM",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-CORR-HF-LOADER-INSTALL",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-CORR-HF-LOADER-NATIVE-LOAD",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-CORR-HF-LOADER-NETWORK",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-CORR-NUMPY-ALLOW-PICKLE",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-DATASET-COVERAGE-LIMIT",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-DATASET-CREDENTIAL-LIKE",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-DATASET-DUPLICATE-CONCENTRATION",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-DATASET-RARE-TRIGGER-CORRELATION",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-DATASET-UNSAFE-CODE-PATTERN",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-DATASET-URL-CONCENTRATION",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-DATASET-ZERO-WIDTH",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-DEP-ALT-INDEX",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-DEP-ANALYSIS-INCOMPLETE",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-DEP-BUILD-BACKEND",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-DEP-DIRECT-URL",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-DEP-FLOATING",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-DEP-INCLUDE-MISSING",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-DEP-INSECURE-TRANSPORT",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-DEP-INSTALL-HOOK",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-DEP-LOCAL-PATH",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-DEP-PATH-ESCAPE",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-DEP-RUNTIME-INSTALL",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-DEP-VCS",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-DEP-VCS-MUTABLE-REF",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-DERIVE-SCHEMA-CROSS-FORMAT",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-DERIVE-SCHEMA-MISMATCH",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-DIFF-EMPTY-RESPONSE",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-DIFF-INCOMPLETE",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-DIFF-LOCALIZED-DIVERGENCE",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-DIFF-SAFETY-BOUNDARY-FLIP",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-DIFF-SECURITY-REGRESSION",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-DIFF-SUSPICIOUS-TRIGGER",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-DRIFT-EXECUTABLE-ADDED",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-DRIFT-TEMPLATE-CHANGED",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-DRIFT-TOKENIZER-CHANGED",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-DRIFT-WEIGHTS-CHANGED",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-EXECUTORCH-BOUNDS",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-EXECUTORCH-INVALID-MAGIC",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-EXECUTORCH-STRUCTURAL",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-EXECUTORCH-TRUNCATED",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-FORENSIC-COVERAGE-INCOMPLETE",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-FORENSIC-TENSOR-EMBEDDED-OBJECT",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-FORENSIC-UNCLAIMED-ARCHIVE",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-FORENSIC-UNCLAIMED-EXECUTABLE",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-FORMAT-APPENDED-ARCHIVE",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-FORMAT-APPENDED-SERIALIZATION",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-FORMAT-CLAIM-MISMATCH",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-FORMAT-CONTENT-SMUGGLING",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-FORMAT-POLYGLOT",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-FORMAT-TRAILING-DATA",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-FORMAT-UNKNOWN",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-GGUF-STRUCT-VALID",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-GGUF-TEXT-LIMIT",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-HEUR-CLEAR",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-HEUR-DECODED-MATCH",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-HF-LFS-DIGEST-MISMATCH",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-HF-LFS-INTEGRITY",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-HF-LFS-METADATA-INVALID",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-HF-LFS-SIZE-MISMATCH",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-HF-REMOTE-HASH-UNAVAILABLE",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-IDENTITY-CLAIM-INCONSISTENT",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-IDENTITY-INCOMPLETE",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-IDENTITY-STRUCTURAL-DIVERGENCE",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-INTEGRITY-DIGEST-MISMATCH",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-INTEGRITY-SIZE-MISMATCH",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-INTEGRITY-VERIFIED",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-INTEL-ADAPTER-INDICATOR",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-INTEL-BUILDER-INDICATOR",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-INTEL-IDENTITY-REVOKED",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-INTEL-PACK-EXPIRED",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-INTEL-PACK-ROLLBACK",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-INTEL-PACK-SIGNATURE",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-INTEL-PACK-STALE",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-INVENTORY-APPROVAL-STALE",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-INVENTORY-MODIFIED",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-INVENTORY-NEW-UNAPPROVED",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-INVENTORY-PREVIOUSLY-BLOCKED",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-JS-CHILD-PROCESS",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-JS-REQUIRE-CHILD-PROCESS",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-JS-SEMANTIC-CREDENTIAL-ACCESS",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-JS-SEMANTIC-DYNAMIC-CODE",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-JS-SEMANTIC-FILESYSTEM-WRITE",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-JS-SEMANTIC-NATIVE-LOAD",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-JS-SEMANTIC-NETWORK",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-KERAS-ARCHIVE",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-KERAS-CUSTOM-OBJECT",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-KERAS-HDF5-LIMIT",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-KERAS-STRUCT-VALID",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-LAYERPOLICY",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-LINEAGE-ARCH-MISMATCH",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-LINEAGE-CHAIN-BROKEN",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-LINEAGE-CHAIN-CYCLE",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-LINEAGE-CHAIN-SIGNATURE",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-LINEAGE-CHAIN-UNTRUSTED-SIGNER",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-LINEAGE-CLAIM-IDENTITY-MISMATCH",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-LINEAGE-CLAIM-NO-EVIDENCE",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-LINEAGE-CLAIM-STRUCTURAL-CONTRADICTION",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-LINEAGE-CLAIM-TOKENIZER-CONTRADICTION",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-LINEAGE-CLAIM-TRANSFORMATION-CONTRADICTED",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-LINEAGE-CLAIM-TRANSFORMATION-UNVERIFIED",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-LINEAGE-IDENTITY-CONTRADICTION",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-LINEAGE-MANIFEST-CLAIM",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-LINEAGE-MANIFEST-ENDPOINT",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-LINEAGE-QUANTIZATION-CROSS-FORMAT",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-LINEAGE-QUANTIZATION-METADATA-INCOMPARABLE",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-LINEAGE-QUANTIZATION-TEMPLATE",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-LINEAGE-QUANTIZATION-TOKENIZER",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-LINEAGE-REPACKAGE-CONTENT",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-LINEAGE-TRANSFORMATION-UNVERIFIED",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-LINEAGE-UNEXPLAINED-COMPONENT",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-MCP-AUTH-ABSENT",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-MCP-AUTH-METADATA-MISSING",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-MCP-CREDENTIAL-ENV-EXPOSURE",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-MCP-CREDENTIAL-IN-URL",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-MCP-DISCOVERY-INCOMPLETE",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-MCP-ORIGIN-UNRESTRICTED",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-MCP-SCOPE-OVERBROAD",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-MCP-TLS-ABSENT",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-MCP-TOKEN-AUDIENCE-UNBOUND",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-MCP-TOKEN-PASSTHROUGH-RISK",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-MLX-CUSTOM-CODE",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-MLX-PROFILE-INCOMPLETE",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-MLX-PROFILE-VALID",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-NATIVE-DYNAMIC-LOAD",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-NATIVE-EXEC-CAPABILITY",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-NATIVE-NETWORK-CAPABILITY",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-NATIVE-RPATH",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-NATIVE-WX-SECTION",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-NPY-DTYPE-UNSUPPORTED",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-NPY-OBJECT-DTYPE",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-NPY-PICKLE",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-NPY-STRUCT",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-ONNX-CUSTOM-OP",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-ONNX-EXTERNAL-DATA",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-ONNX-EXTERNAL-HARDLINK",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-ONNX-EXTERNAL-INTEGRITY",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-ONNX-EXTERNAL-RANGE",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-ONNX-STRUCT",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-ONNX-STRUCT-VALID",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-OPENVINO-MALFORMED",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-OPENVINO-SIDECAR-MISSING",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-OPENVINO-SIDECAR-UNSAFE",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-OPENVINO-SIDECAR-VALID",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-OPENVINO-STRUCTURAL",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-OPENVINO-XXE",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-PACKAGE-ARTIFACT",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-PACKAGE-FILE",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-PACKAGE-JSON-INVALID",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-PACKAGE-MEMBER-ERROR",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-PACKAGE-MEMBER-PANIC",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-PACKAGE-RACE",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-PACKAGE-SYMLINK",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-PACKAGE-TEXT-LIMIT",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-PARAM-CLEAR",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-PARAM-NUM-CTX",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-PARAM-NUM-PREDICT",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-PARAM-REPEAT-PENALTY",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-PARAM-SEED",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-PARAM-STOP-DELIMITER",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-PARAM-TEMPERATURE",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-PARAM-TOP-K",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-PARAM-TOP-P",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-PASSPORT-INCOMPLETE",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-PICKLE-MALFORMED",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-PICKLE-OPAQUE-COMPRESSED",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-PICKLE-OPAQUE-CONTAINER",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-PICKLE-PARSER-ASSURANCE-INCOMPLETE",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-PICKLE-PARSER-DISAGREEMENT",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-PICKLE-PERSISTENT-ID",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-PICKLE-SAFE-GLOBALS",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-PICKLE-UNKNOWN-GLOBAL",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-PREFLIGHT-INCOMPLETE",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-PREFLIGHT-INTEGRITY-UNAVAILABLE",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-PREFLIGHT-REVISION-RESOLVED",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-PREFLIGHT-UNPINNED-REVISION",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-PROV-BINDING",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-PROV-INACTIVE",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-PROV-LEGACY",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-PROV-LOCAL",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-PROV-LOCAL-VERIFIED",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-PROV-MULTI",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-PROV-NAMESPACE",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-PROV-REVOKED",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-PROV-SIGNATURE",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-PROV-SIGSTORE",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-PROV-SIGSTORE-INVALID",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-PROV-TRUSTED",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-PROV-UNSIGNED",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-PROV-UNTRUSTED",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-PS-DOWNLOAD",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-PS-ENCODED-COMMAND",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-PS-INVOKE-EXPRESSION",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-PS-SEMANTIC-CREDENTIAL-ACCESS",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-PS-SEMANTIC-DYNAMIC-CODE",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-PS-SEMANTIC-NATIVE-LOAD",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-PS-SEMANTIC-NETWORK",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-PS-SEMANTIC-PROCESS",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-PY-CALL-DYNAMIC-CODE",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-PY-CALL-NETWORK",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-PY-CREDENTIAL-ACCESS",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-PY-FILESYSTEM-MUTATION",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-PY-FLOW-CREDENTIAL-NETWORK",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-PY-FLOW-FILE-NETWORK",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-PY-FLOW-INPUT-EXEC",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-PY-FLOW-NETWORK-EXEC",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-PY-NATIVE-LOAD",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-PY-NUMPY-ALLOW-PICKLE",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-PY-PACKAGE-INSTALL",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-PY-TAINT-INCOMPLETE",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-PYTORCH-CORRUPT-ENTRY",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-PYTORCH-MALFORMED",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-PYTORCH-ZIP-STRUCTURAL",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-RUNTIME-ADVISORY-CLEAR",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-RUNTIME-ADVISORY-MATCH",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-RUNTIME-ADVISORY-STALE",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-RUNTIME-COMPAT-CONDITIONAL",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-RUNTIME-COMPAT-INCOMPATIBLE",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-RUNTIME-COMPAT-UNKNOWN",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-RUNTIME-EXPLOIT-INCOMPLETE",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-RUNTIME-EXPLOIT-PRECONDITIONS-MET",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-RUNTIME-EXPLOIT-PRECONDITIONS-POSSIBLE",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-RUNTIME-POSTURE-AUTH-ABSENT",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-RUNTIME-POSTURE-CORS-WILDCARD",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-RUNTIME-POSTURE-CROSS-TENANT-STATE-EXPOSURE",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-RUNTIME-POSTURE-CUSTOM-CHAT-TEMPLATE",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-RUNTIME-POSTURE-CUSTOM-CODE-EXTENSION",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-RUNTIME-POSTURE-INCOMPLETE",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-RUNTIME-POSTURE-LOCAL-MEDIA-ACCESS",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-RUNTIME-POSTURE-NETWORK-EXPOSED",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-RUNTIME-POSTURE-PICKLE-WEIGHT-LOADING",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-RUNTIME-POSTURE-PYTHON-OPTIMIZED",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-RUNTIME-POSTURE-REVISION-UNPINNED",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-RUNTIME-POSTURE-TLS-ABSENT",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-RUNTIME-VERSION-UNKNOWN",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-SAFE-DTYPE",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-SAFE-INDEX",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-SAFE-INDEX-INVALID",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-SAFE-STRUCT-VALID",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-SCAN-ERROR",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-SERIALIZATION-BIN",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-SERIALIZATION-UNSAFE",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-SHELL-CURL-PIPE",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-SHELL-DOT-SOURCE",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-SHELL-EVAL",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-SHELL-EXEC",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-SHELL-SEMANTIC-CREDENTIAL-ACCESS",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-SHELL-SEMANTIC-DYNAMIC-CODE",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-SHELL-SEMANTIC-FILESYSTEM-WRITE",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-SHELL-SEMANTIC-NATIVE-LOAD",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-SHELL-SEMANTIC-PROCESS",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-TEMPLATE-CHANGED",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-TEMPLATE-DYNAMIC-INCLUDE",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-TEMPLATE-SSTI",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-TENSORRT-INVALID-MAGIC",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-TENSORRT-OPAQUE",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-TENSORRT-TRUNCATED",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-TF-CHECKPOINT-LIMIT",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-TF-CHECKPOINT-STRUCT",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-TF-EXECUTION-OP",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-TF-FILESYSTEM-WRITE",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-TF-SCAN-LIMIT",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-TF-STRUCT",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-TF-STRUCT-VALID",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-TFLITE-ASSOCIATED-FILE",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-TFLITE-STRUCT",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-TFLITE-STRUCT-VALID",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-TOKENIZER-CHANGED",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-TOKENIZER-EOS-BOS-CONFLICT",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-TOKENIZER-HIDDEN-PROMPT",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-TOKENIZER-ROLE-BOUNDARY-CONTROL",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-TOKENIZER-ROLE-REMAP",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-TOKENIZER-SECURITY-DELTA",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-TOKENIZER-SPECIAL-TOKEN-CONFLICT",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-TOKENIZER-SPECIAL-TOKEN-SPOOFABLE",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-TOKENIZER-TOOL-TEMPLATE-RISK",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-TOKENIZER-UNICODE-CONTROL",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-TOOL-HIGH-IMPACT-UNCONFIRMED",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-TORCHPACKAGE-EXEC",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-TORCHPACKAGE-STRUCTURAL",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-TORCHSCRIPT-CODE",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-TORCHSCRIPT-STRUCTURAL",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-TRUST-EVIDENCE-STALE",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-TRUST-SECURITY-DRIFT",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-UNCLASSIFIED",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "LF-WHEEL-RECORD-MISMATCH",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "T1-001",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "T1-002",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "T1-003",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "T1-004",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "T1-005",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "T1-006",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "T1-007",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "T1-008",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "T1-009",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "T1-010",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "T10-001",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "T10-002",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "T11-001",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "T11-002",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "T12-001",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "T12-002",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "T12-003",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "T12-004",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "T12-CLEAR",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "T13-001",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "T13-002",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "T14-001",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "T14-002",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "T14-003",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "T15-STRUCT",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "T2-001",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "T2-002",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "T2-003",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "T2-004",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "T2-005",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "T2-006",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "T2-007",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "T2-008",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "T3-001",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "T3-002",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "T3-003",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "T3-004",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "T3-005",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "T3-006",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "T3-007",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "T3-008",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "T3-009",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "T3-010",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "T3-011",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "T3-012",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "T4-001",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "T4-002",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "T4-003",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "T4-004",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "T4-005",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "T4-006",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "T4-007",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "T4-008",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "T4-009",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "T4-010",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "T5-001",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "T5-002",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "T5-003",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "T5-004",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "T5-005",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "T6-001",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "T6-002",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "T6-003",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "T6-004",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "T6-005",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "T9-001",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "T9-002",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "T9-003",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "T9-004",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "T9-005",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "T9-006",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    },
+    {
+      "rule_id": "T9-007",
+      "reason": "Pre-existing coverage gap: predates the detector-quality-gate rule-coverage check added 2026-08-19. Not yet backed by a dedicated positive/negative fixture. Tracked as follow-up corpus-build work, not a justification for permanent exclusion -- replace with a real fixture and remove this waiver as families are covered."
+    }
   ]
 }

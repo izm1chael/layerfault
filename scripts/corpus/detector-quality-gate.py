@@ -3,7 +3,7 @@
 
 Gates semantic detector evolution independently of parser fuzzing and structural
 compatibility tests. Validates that Layerfault detects security conditions and
-avoids benign false positives.
+avoids benign false positives, and that every registered rule has corpus coverage.
 """
 from __future__ import annotations
 import argparse
@@ -11,11 +11,19 @@ import json
 import pathlib
 import subprocess
 import sys
-from typing import Any, Dict, List, Set
+from typing import Any, Dict, List, Set, Tuple
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 DEFAULT_MANIFEST = ROOT / "tests" / "detector_quality" / "manifest.json"
 DEFAULT_BINARY = ROOT / "target" / "debug" / "layerfault"
+
+KNOWN_EVIDENCE_PREDICATES = {
+    "no_secret_leak",
+    "subject_path",
+    "correlation_id",
+    "coverage_complete",
+    "source_sink_type",
+}
 
 def extract_rule_ids(data: Any) -> Set[str]:
     """Recursively discover all emitted detector rule IDs from Layerfault output."""
@@ -39,6 +47,21 @@ def extract_rule_ids(data: Any) -> Set[str]:
             rules.update(extract_rule_ids(item))
     return rules
 
+def extract_evidence_kinds(data: Any) -> Set[str]:
+    """Recursively collect every evidence[].kind (source/sink type) emitted."""
+    kinds = set()
+    if isinstance(data, dict):
+        if "evidence" in data and isinstance(data["evidence"], list):
+            for ev in data["evidence"]:
+                if isinstance(ev, dict) and isinstance(ev.get("kind"), str):
+                    kinds.add(ev["kind"])
+        for value in data.values():
+            kinds.update(extract_evidence_kinds(value))
+    elif isinstance(data, list):
+        for item in data:
+            kinds.update(extract_evidence_kinds(item))
+    return kinds
+
 def extract_disposition(data: Dict[str, Any], exit_code: int) -> str:
     """Determine the overall disposition (PASS, WARN, BLOCK) from output and exit code."""
     if "policy" in data and isinstance(data["policy"], dict) and "action" in data["policy"]:
@@ -60,7 +83,80 @@ def extract_disposition(data: Dict[str, Any], exit_code: int) -> str:
         return "PASS"
     return "UNKNOWN"
 
-def validate_fixture(binary: pathlib.Path, fixture: Dict[str, Any], verbose: bool) -> List[str]:
+def get_registered_rule_ids(binary: pathlib.Path) -> Set[str]:
+    """Query the binary for the full canonical rule catalogue."""
+    proc = subprocess.run(
+        [str(binary), "explain", "--list", "--json"],
+        text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+    )
+    try:
+        rows = json.loads(proc.stdout)
+    except Exception as exc:
+        sys.exit(
+            f"ERROR: Could not parse rule catalogue from `{binary} explain --list --json`: {exc}. "
+            f"Stderr: {proc.stderr.strip()}"
+        )
+    ids = set()
+    for row in rows:
+        if isinstance(row, dict) and isinstance(row.get("rule_id"), str):
+            ids.add(row["rule_id"])
+    return ids
+
+def fixture_covered_rule_ids(fixtures: List[Dict[str, Any]]) -> Set[str]:
+    """Rule IDs a manifest's fixtures actually assert coverage for.
+
+    A rule is considered covered if it appears in `must_include_rules` (it must
+    fire) or as a `correlation_id` evidence predicate (a composite rule proven
+    to trigger). `must_not_include_rules` does NOT count as coverage — asserting
+    a rule must stay silent on a benign fixture is a negative control, not
+    proof the rule can ever fire.
+    """
+    covered = set()
+    for fixture in fixtures:
+        expected = fixture.get("expected", {})
+        covered.update(expected.get("must_include_rules", []))
+        predicates = expected.get("evidence_predicates", {})
+        corr = predicates.get("correlation_id")
+        if isinstance(corr, str):
+            covered.add(corr)
+    return covered
+
+def check_rule_coverage(
+    binary: pathlib.Path,
+    manifests: List[Tuple[str, Dict[str, Any]]],
+) -> Tuple[Set[str], Set[str], List[str]]:
+    """Compare the registered rule catalogue against corpus coverage + waivers.
+
+    Returns (missing, orphaned, waiver_errors). `missing` is registered rules
+    with no fixture and no justified waiver. `orphaned` is rule IDs referenced
+    by fixtures/waivers that the registry no longer knows about (stale or
+    renamed rules — corpus coverage claims are now lying).
+    """
+    registered = get_registered_rule_ids(binary)
+
+    covered: Set[str] = set()
+    waived: Set[str] = set()
+    waiver_errors: List[str] = []
+    for suite_name, manifest_data in manifests:
+        covered.update(fixture_covered_rule_ids(manifest_data.get("fixtures", [])))
+        for waiver in manifest_data.get("waivers", []):
+            rule_id = waiver.get("rule_id")
+            reason = waiver.get("reason", "")
+            if not isinstance(rule_id, str) or not rule_id:
+                waiver_errors.append(f"[{suite_name}] waiver entry missing a string 'rule_id': {waiver}")
+                continue
+            if not isinstance(reason, str) or not reason.strip():
+                waiver_errors.append(
+                    f"[{suite_name}] waiver for '{rule_id}' has no justification in its 'reason' field"
+                )
+                continue
+            waived.add(rule_id)
+
+    missing = registered - covered - waived
+    orphaned = (covered | waived) - registered
+    return missing, orphaned, waiver_errors
+
+def validate_fixture(binary: pathlib.Path, fixture: Dict[str, Any], root: pathlib.Path, verbose: bool) -> List[str]:
     """Validate a single corpus fixture against Layerfault output."""
     errors = []
     fid = fixture.get("id", "unknown")
@@ -69,7 +165,7 @@ def validate_fixture(binary: pathlib.Path, fixture: Dict[str, Any], verbose: boo
 
     kind = cmd_spec.get("kind", "verify-package")
     rel_path = cmd_spec.get("path", "")
-    target_path = ROOT / rel_path
+    target_path = root / rel_path
 
     if not target_path.exists():
         return [f"Fixture path '{rel_path}' does not exist"]
@@ -116,6 +212,15 @@ def validate_fixture(binary: pathlib.Path, fixture: Dict[str, Any], verbose: boo
 
     # 5. Evidence predicates
     predicates = expected.get("evidence_predicates", {})
+
+    unknown_predicates = set(predicates) - KNOWN_EVIDENCE_PREDICATES
+    for unknown in sorted(unknown_predicates):
+        errors.append(
+            f"Unknown evidence_predicate '{unknown}': the runner does not validate this key, "
+            f"so this fixture is not testing what its manifest entry claims. "
+            f"Known predicates: {sorted(KNOWN_EVIDENCE_PREDICATES)}"
+        )
+
     if "no_secret_leak" in predicates:
         secret = predicates["no_secret_leak"]
         if secret in stdout:
@@ -135,22 +240,76 @@ def validate_fixture(binary: pathlib.Path, fixture: Dict[str, Any], verbose: boo
         if req_corr not in emitted_rules and req_corr not in stdout:
             errors.append(f"Required correlation ID '{req_corr}' not found in findings/evidence")
 
+    if "source_sink_type" in predicates:
+        req_kind = predicates["source_sink_type"]
+        emitted_kinds = extract_evidence_kinds(report)
+        if req_kind not in emitted_kinds:
+            errors.append(
+                f"Evidence source/sink type mismatch: required evidence kind '{req_kind}' "
+                f"not found among emitted evidence. Emitted kinds: {sorted(emitted_kinds)}"
+            )
+
     if "coverage_complete" in predicates:
         req_cov = predicates["coverage_complete"]
-        cov_complete = report.get("coverage", {}).get("complete", True)
-        if cov_complete != req_cov:
-            errors.append(f"Coverage completeness mismatch: expected complete={req_cov}, got complete={cov_complete}")
+        coverage = report.get("coverage")
+        if not isinstance(coverage, dict) or "complete" not in coverage:
+            errors.append(
+                f"Coverage completeness unknown: report has no 'coverage.complete' field "
+                f"(fixture requires complete={req_cov}). Absent coverage information is never "
+                f"treated as complete — it is an unknown, and an unknown fails this check."
+            )
+        elif coverage["complete"] != req_cov:
+            errors.append(f"Coverage completeness mismatch: expected complete={req_cov}, got complete={coverage['complete']}")
 
     if verbose and not errors:
         print(f"  [OK] {fid} ({fixture.get('category')}): {disposition} (Exit {exit_code})")
 
     return errors
 
+def run_suite(binary: pathlib.Path, suite_label: str, manifest_data: Dict[str, Any], root: pathlib.Path, verbose: bool) -> Tuple[Dict[str, Dict[str, int]], List[Dict[str, Any]], int, int]:
+    fixtures = manifest_data.get("fixtures", [])
+    category_counts: Dict[str, Dict[str, int]] = {}
+    failures: List[Dict[str, Any]] = []
+    total_passed = 0
+    total_failed = 0
+
+    if verbose:
+        print(f"Running {suite_label}: {manifest_data.get('suite', 'unknown')} ({len(fixtures)} fixtures)")
+
+    for fixture in fixtures:
+        cat = fixture.get("category", "uncategorized")
+        if cat not in category_counts:
+            category_counts[cat] = {"pass": 0, "fail": 0}
+
+        errors = validate_fixture(binary, fixture, root, verbose)
+        if errors:
+            category_counts[cat]["fail"] += 1
+            total_failed += 1
+            failures.append({
+                "id": fixture.get("id"),
+                "suite": suite_label,
+                "category": cat,
+                "errors": errors,
+            })
+        else:
+            category_counts[cat]["pass"] += 1
+            total_passed += 1
+
+    return category_counts, failures, total_passed, total_failed
+
+def merge_counts(dst: Dict[str, Dict[str, int]], src: Dict[str, Dict[str, int]]) -> None:
+    for cat, counts in src.items():
+        if cat not in dst:
+            dst[cat] = {"pass": 0, "fail": 0}
+        dst[cat]["pass"] += counts["pass"]
+        dst[cat]["fail"] += counts["fail"]
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Detector Quality Gate Runner")
     parser.add_argument("--binary", type=pathlib.Path, default=DEFAULT_BINARY, help="Path to Layerfault binary")
     parser.add_argument("--manifest", type=pathlib.Path, default=DEFAULT_MANIFEST, help="Path to corpus manifest JSON")
-    parser.add_argument("--private-corpus", type=pathlib.Path, default=None, help="Optional path to private local corpus")
+    parser.add_argument("--private-corpus", type=pathlib.Path, default=None, help="Optional path to a private local corpus directory containing its own manifest.json")
+    parser.add_argument("--skip-rule-coverage", action="store_true", help="Skip the registered-rule-vs-corpus-coverage gate (diagnostic use only)")
     parser.add_argument("--json", action="store_true", help="Emit full execution report as JSON")
     parser.add_argument("--verbose", "-v", action="store_true", help="Enable verbose per-fixture logging")
     args = parser.parse_args()
@@ -170,67 +329,104 @@ def main() -> None:
     if not fixtures:
         sys.exit(f"ERROR: Manifest '{args.manifest}' contains no fixtures.")
 
-    category_counts: Dict[str, Dict[str, int]] = {}
-    failures: List[Dict[str, Any]] = []
-    total_passed = 0
-    total_failed = 0
+    manifests_for_coverage: List[Tuple[str, Dict[str, Any]]] = [("committed_pr", manifest_data)]
 
-    if args.verbose:
-        print(f"Running Detector Quality Corpus Suite: {manifest_data.get('suite', 'unknown')} ({len(fixtures)} fixtures)")
+    category_counts, failures, total_passed, total_failed = run_suite(
+        args.binary, "committed_pr", manifest_data, ROOT, args.verbose
+    )
 
-    for fixture in fixtures:
-        cat = fixture.get("category", "uncategorized")
-        if cat not in category_counts:
-            category_counts[cat] = {"pass": 0, "fail": 0}
+    private_corpus_ran = False
+    if args.private_corpus:
+        if not args.private_corpus.exists():
+            sys.exit(f"ERROR: --private-corpus path '{args.private_corpus}' does not exist.")
+        private_manifest_path = args.private_corpus / "manifest.json"
+        if not private_manifest_path.exists():
+            sys.exit(
+                f"ERROR: --private-corpus '{args.private_corpus}' has no manifest.json "
+                f"(expected '{private_manifest_path}')."
+            )
+        try:
+            private_manifest_data = json.loads(private_manifest_path.read_text())
+        except Exception as exc:
+            sys.exit(f"ERROR: Failed to parse private corpus manifest '{private_manifest_path}': {exc}")
 
-        errors = validate_fixture(args.binary, fixture, args.verbose)
-        if errors:
-            category_counts[cat]["fail"] += 1
+        if args.verbose:
+            print(f"Scanning private corpus at '{args.private_corpus}'...")
+
+        private_counts, private_failures, private_passed, private_failed = run_suite(
+            args.binary, "private_corpus", private_manifest_data, args.private_corpus, args.verbose
+        )
+        merge_counts(category_counts, private_counts)
+        failures.extend(private_failures)
+        total_passed += private_passed
+        total_failed += private_failed
+        manifests_for_coverage.append(("private_corpus", private_manifest_data))
+        private_corpus_ran = True
+
+    # Rule-completeness gate: every registered rule must have a fixture or a
+    # justified waiver, across whichever manifests were actually run.
+    rule_coverage: Dict[str, Any] = {"checked": False}
+    if not args.skip_rule_coverage:
+        missing, orphaned, waiver_errors = check_rule_coverage(args.binary, manifests_for_coverage)
+        rule_coverage = {
+            "checked": True,
+            "missing": sorted(missing),
+            "orphaned": sorted(orphaned),
+            "waiver_errors": waiver_errors,
+        }
+        if missing or orphaned or waiver_errors:
             total_failed += 1
             failures.append({
-                "id": fixture.get("id"),
-                "category": cat,
-                "errors": errors
+                "id": "RULE-COVERAGE-GATE",
+                "suite": "rule_coverage",
+                "category": "rule_coverage",
+                "errors": (
+                    [f"Registered rule has no fixture and no waiver: '{r}'" for r in sorted(missing)]
+                    + [f"Fixture/waiver references unregistered rule ID: '{r}'" for r in sorted(orphaned)]
+                    + waiver_errors
+                ),
             })
         else:
-            category_counts[cat]["pass"] += 1
             total_passed += 1
-
-    # Optional private corpus check
-    if args.private_corpus and args.private_corpus.exists():
-        if args.verbose:
-            print(f"Scanning optional private corpus at '{args.private_corpus}'...")
 
     if args.json:
         report = {
             "suite": manifest_data.get("suite"),
-            "total": len(fixtures),
+            "total": len(fixtures) + (len(private_manifest_data.get("fixtures", [])) if private_corpus_ran else 0),
             "passed": total_passed,
             "failed": total_failed,
             "category_counts": category_counts,
-            "failures": failures
+            "failures": failures,
+            "rule_coverage": rule_coverage,
         }
         print(json.dumps(report, indent=2))
         sys.exit(0 if total_failed == 0 else 1)
 
     print("\n================ DETECTOR QUALITY CORPUS SUMMARY ================")
     print(f"Suite: {manifest_data.get('suite')} | Total Fixtures: {len(fixtures)}")
+    if private_corpus_ran:
+        print(f"Private corpus: {args.private_corpus} | Fixtures: {len(private_manifest_data.get('fixtures', []))}")
     print("----------------------------------------------------------------")
     for cat, counts in sorted(category_counts.items()):
         status_str = f"PASS: {counts['pass']} | FAIL: {counts['fail']}"
         print(f"  Category '{cat}': {status_str}")
     print("----------------------------------------------------------------")
+    if rule_coverage.get("checked"):
+        n_missing = len(rule_coverage["missing"])
+        n_orphaned = len(rule_coverage["orphaned"])
+        print(f"  Rule coverage: {n_missing} registered rule(s) missing a fixture/waiver, {n_orphaned} orphaned reference(s)")
+    print("----------------------------------------------------------------")
 
     if failures:
         print("\nACTIONABLE DETECTOR QUALITY REGRESSION DIFFS:")
         for fail in failures:
-            print(f"\n[FAIL] Fixture: {fail['id']} (Category: {fail['category']})")
+            print(f"\n[FAIL] Fixture: {fail['id']} (Suite: {fail.get('suite', 'committed_pr')}, Category: {fail['category']})")
             for err in fail["errors"]:
                 print(f"  - {err}")
-        print("\nRESULT: FAILED (Semantic detector regressions or unexpected false-positive noise detected)")
+        print("\nRESULT: FAILED (Semantic detector regressions, false-positive noise, or rule-coverage gaps detected)")
         sys.exit(1)
     else:
-        print("\nRESULT: PASS (All semantic detector conditions and false-positive regressions validated)")
+        print("\nRESULT: PASS (All semantic detector conditions, false-positive regressions, and rule coverage validated)")
         sys.exit(0)
 
 if __name__ == "__main__":
