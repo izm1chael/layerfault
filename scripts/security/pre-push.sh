@@ -13,68 +13,27 @@ log() { printf '\n==> %s\n' "$*"; }
 fail() { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
 
 log "Repository publication invariants"
-python3 - <<'PY'
-from pathlib import Path
-import re
-owner_typo = 'izm1c' + 'xhael'
-fake_key = 'AKIA' + 'ABCDEFGHIJKLMNOP'
-for path in [Path('Cargo.toml'), Path('README.md'), Path('SECURITY.md')]:
-    if owner_typo in path.read_text():
-        raise SystemExit(f'{path}: stale repository-owner typo found')
-for path in list(Path('src').rglob('*.rs')) + list(Path('tests').rglob('*.rs')) + [Path('scripts/fixtures/create-poisoned-ollama-model.sh')]:
-    if fake_key in path.read_text(errors='replace'):
-        raise SystemExit(f'{path}: credential-shaped fixture literal found; construct detector fixtures at runtime')
-
-dockerfile = Path('Dockerfile').read_text()
-external_asset_roots = set()
-for source in Path('src').rglob('*.rs'):
-    for relative in re.findall(r'include_(?:str|bytes)!\("([^"]+)"\)', source.read_text()):
-        asset = (source.parent / relative).resolve()
-        try:
-            repository_relative = asset.relative_to(Path.cwd().resolve())
-        except ValueError:
-            raise SystemExit(f'{source}: compile-time asset escapes the repository: {relative}')
-        if repository_relative.parts[0] != 'src':
-            external_asset_roots.add(repository_relative.parts[0])
-for root in sorted(external_asset_roots):
-    if not re.search(rf'^COPY\s+{re.escape(root)}\s+\./{re.escape(root)}\s*$', dockerfile, re.M):
-        raise SystemExit(
-            f'Dockerfile must copy compile-time asset root {root!r} referenced by Rust include macros'
-        )
-PY
-
-python3 - <<'PY'
-from pathlib import Path
-import re
-for path in Path('.github/workflows').glob('*.yml'):
-    text = path.read_text()
-    for lineno, line in enumerate(text.splitlines(), 1):
-        m = re.search(r'uses:\s*[^\s@]+@([^\s#]+)', line)
-        if m and not re.fullmatch(r'[0-9a-fA-F]{40}', m.group(1)):
-            raise SystemExit(f'{path}:{lineno}: action is not pinned to a full 40-character SHA: {m.group(1)}')
-
-dep = Path('.github/dependabot.yml').read_text()
-entries = dep.count('package-ecosystem:')
-if dep.count('default-days: 7') != entries:
-    raise SystemExit('every Dependabot package-ecosystem entry must have cooldown.default-days: 7')
-
-suppressions = 0
-for path in Path('src').rglob('*.rs'):
-    suppressions += path.read_text().count('nosemgrep:')
-if suppressions != 34:
-    raise SystemExit(f'expected exactly 34 reviewed nosemgrep annotations, found {suppressions}; review docs/STATIC_ANALYSIS.md before changing the exception surface')
-PY
+bash scripts/security/repo-invariants.sh
 
 log "Repository architecture substance gate"
 bash scripts/security/architecture-gates.sh "$ROOT"
 
-log "Rust formatting / compile / Clippy"
+# Clippy type-checks everything `cargo check` does on top of its own lints,
+# so running both back to back pays the compile cost twice for no extra
+# coverage; Clippy alone is the exhaustive one.
+log "Rust formatting / Clippy"
 cargo fmt --all -- --check
-cargo check --locked --all-targets --jobs "$BUILD_JOBS"
 cargo clippy --locked --all-targets --all-features --jobs "$BUILD_JOBS" -- -D warnings
 
-log "All-target fuzz smoke"
-bash fuzz/smoke.sh
+# Full CI (fuzz-smoke.yml) already runs every target for the full 60s on a
+# schedule; this local gate only needs to catch a target that's freshly
+# broken, not find new crashes, so it runs much shorter and with a fixed
+# seed so a failure is reproducible run to run instead of you fighting
+# libFuzzer's own randomness on top of debugging the actual failure.
+log "All-target fuzz smoke (shortened, deterministic seed)"
+FUZZ_SMOKE_SECONDS_PER_TARGET="${FUZZ_SMOKE_SECONDS_PER_TARGET:-8}" \
+FUZZ_SMOKE_SEED="${FUZZ_SMOKE_SEED:-1}" \
+  bash fuzz/smoke.sh
 
 # Run timing-sensitive regression checks before the exhaustive test suite can
 # leave the host under sustained CPU or disk pressure.
@@ -178,8 +137,22 @@ else
 fi
 
 if cargo audit --version >/dev/null 2>&1; then
-  log "cargo-audit"
-  cargo audit
+  # `cargo audit` re-fetches the whole RustSec advisory-db git repo on every
+  # invocation by default. The advisory set doesn't change push-to-push, so
+  # cache it locally and only re-fetch once the cache is older than the TTL
+  # (still always re-fetched fresh on a cold cache, e.g. in CI).
+  AUDIT_DB_DIR="${CARGO_AUDIT_DB_PATH:-${CARGO_HOME:-$HOME/.cargo}/advisory-db}"
+  AUDIT_DB_MARKER="$AUDIT_DB_DIR/.layerfault-last-fetch"
+  AUDIT_DB_TTL_SECONDS="${LAYERFAULT_AUDIT_DB_TTL_SECONDS:-86400}"
+  if [[ -f "$AUDIT_DB_MARKER" ]] \
+    && [[ $(( $(date +%s) - $(date -r "$AUDIT_DB_MARKER" +%s 2>/dev/null || echo 0) )) -lt "$AUDIT_DB_TTL_SECONDS" ]]; then
+    log "cargo-audit (advisory DB cached; skipping fetch)"
+    cargo audit --no-fetch
+  else
+    log "cargo-audit (refreshing advisory DB)"
+    cargo audit
+    touch "$AUDIT_DB_MARKER"
+  fi
 else
   echo "WARN: cargo-audit is not installed; skipping local RustSec gate" >&2
 fi

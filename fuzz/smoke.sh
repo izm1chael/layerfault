@@ -8,6 +8,9 @@ SMOKE_JOBS="${FUZZ_SMOKE_JOBS:-10}"
 MAX_LEN="${FUZZ_MAX_LEN:-2097152}"
 TIMEOUT="${FUZZ_INPUT_TIMEOUT:-10}"
 RSS_MB="${FUZZ_RSS_LIMIT_MB:-4096}"
+# 0 means "let libFuzzer pick its own seed" (current default, nondeterministic
+# across runs). Set to a nonzero value for reproducible local smoke runs.
+SMOKE_SEED="${FUZZ_SMOKE_SEED:-0}"
 SMOKE_CORPUS_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/layerfault-fuzz-smoke.XXXXXX")"
 trap 'rm -rf -- "$SMOKE_CORPUS_ROOT"' EXIT
 
@@ -37,28 +40,49 @@ if ! [[ "$SMOKE_JOBS" =~ ^[1-9][0-9]*$ ]]; then
   exit 1
 fi
 
+# `cargo +nightly fuzz run <target>` re-does Cargo's own build-graph
+# coordination on every single invocation even when nothing needs
+# rebuilding, which dominates wall time across dozens of targets. The build
+# above already produced real libFuzzer binaries; invoke those directly and
+# skip Cargo entirely for the actual fuzzing runs.
+HOST_TRIPLE="$(rustc -vV | sed -n 's/^host: //p')"
+BIN_DIR="$FUZZ_DIR/target/$HOST_TRIPLE/release"
+[[ -d "$BIN_DIR" ]] || {
+  echo "ERROR: expected built fuzz binaries under $BIN_DIR" >&2
+  exit 1
+}
+
 run_target() {
   local target="$1"
   local target_corpus="$SMOKE_CORPUS_ROOT/$target"
   local log_file="$SMOKE_CORPUS_ROOT/$target.log"
+  local bin="$BIN_DIR/$target"
+
+  [[ -x "$bin" ]] || {
+    echo "ERROR: no built binary for fuzz target '$target' at $bin" >&2
+    return 1
+  }
 
   mkdir -p "$target_corpus"
   printf 'target=%s\n' "$target" >"$log_file"
   if [[ -d "corpus/$target" ]]; then
     cp -a "corpus/$target/." "$target_corpus/"
   fi
-  local -a dict_args=()
+  local -a extra_args=()
   if [[ -f "dictionaries/$target.dict" ]]; then
-    dict_args+=("-dict=dictionaries/$target.dict")
+    extra_args+=("-dict=dictionaries/$target.dict")
+  fi
+  if [[ "$SMOKE_SEED" != "0" ]]; then
+    extra_args+=("-seed=$SMOKE_SEED")
   fi
 
-  cargo +nightly fuzz run "$target" "$target_corpus" -- \
+  "$bin" "$target_corpus" \
     -max_total_time="$SECONDS_PER_TARGET" \
     -max_len="$MAX_LEN" \
     -timeout="$TIMEOUT" \
     -rss_limit_mb="$RSS_MB" \
     -use_value_profile=1 \
-    "${dict_args[@]}" \
+    "${extra_args[@]}" \
     -print_final_stats=1 >>"$log_file" 2>&1
 }
 

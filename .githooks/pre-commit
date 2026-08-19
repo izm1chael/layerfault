@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT="$(git rev-parse --show-toplevel)"
+cd "$ROOT"
+
+log() { printf '\n==> %s\n' "$*"; }
+
+# Kept deliberately fast (fmt check + static, build-free checks only): the
+# heavy compile/clippy/fuzz/test gates live in pre-push instead, so commits
+# stay quick even when they're not push-ready yet.
+log "Rust formatting"
+cargo fmt --all -- --check
+
+log "Repository publication invariants"
+bash scripts/security/repo-invariants.sh
+
+log "Pre-commit checks passed"
