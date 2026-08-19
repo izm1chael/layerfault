@@ -719,6 +719,13 @@ pub(crate) enum PolicyCommand {
     Diff {
         left: PathBuf,
         right: PathBuf,
+        /// Diff the raw override documents instead of each side's resolved
+        /// (profile-defaults-applied) policy. Two policy files that only set
+        /// a profile name and no overrides will show no differences under
+        /// this flag even if their resolved behavior differs; use `policy
+        /// explain` or omit this flag to see the actual enforced difference.
+        #[arg(long, default_value_t = false)]
+        raw: bool,
     },
 }
 

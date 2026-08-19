@@ -54,12 +54,10 @@ pub(crate) fn run_policy(args: PolicyArgs) -> Result<()> {
             emit_admission(&result, json)?;
             std::process::exit(admission::exit_code(&[result]));
         }
-        PolicyCommand::Diff { left, right } => {
+        PolicyCommand::Diff { left, right, raw } => {
             let a = PolicyDocument::load(&left)?;
             let b = PolicyDocument::load(&right)?;
-            let av = serde_json::to_value(&a)?;
-            let bv = serde_json::to_value(&b)?;
-            let changes = top_level_json_diff(&av, &bv);
+            let changes = policy_diff_json(&a, &b, raw)?;
             println!("{}", serde_json::to_string_pretty(&changes)?);
             if !changes.as_object().is_none_or(|value| value.is_empty()) {
                 std::process::exit(1);
@@ -67,6 +65,28 @@ pub(crate) fn run_policy(args: PolicyArgs) -> Result<()> {
         }
     }
     Ok(())
+}
+
+fn policy_diff_json(
+    a: &PolicyDocument,
+    b: &PolicyDocument,
+    raw: bool,
+) -> Result<serde_json::Value> {
+    let (av, bv) = if raw {
+        (serde_json::to_value(a)?, serde_json::to_value(b)?)
+    } else {
+        // Two policy files commonly differ only by `profile` name with no
+        // explicit overrides; diffing the raw override documents in that
+        // case shows nothing useful even when the profiles enforce very
+        // different behavior. Diff each side's resolved policy (same
+        // computation `policy explain` uses) so this reflects what actually
+        // gets enforced.
+        (
+            serde_json::to_value(a.effective())?,
+            serde_json::to_value(b.effective())?,
+        )
+    };
+    Ok(top_level_json_diff(&av, &bv))
 }
 
 pub(crate) fn run_doctor(args: OutputArgs) -> Result<()> {
@@ -335,4 +355,33 @@ pub(crate) fn run_version(args: VersionArgs) -> Result<()> {
         );
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod policy_diff_tests {
+    use super::policy_diff_json;
+    use layerfault::policy::{PolicyDocument, PolicyProfile};
+
+    #[test]
+    fn resolved_diff_surfaces_real_enforcement_differences() {
+        let workstation = PolicyDocument::builtin(PolicyProfile::Workstation);
+        let strict = PolicyDocument::builtin(PolicyProfile::Strict);
+
+        let raw_changes = policy_diff_json(&workstation, &strict, true).expect("raw diff");
+        let raw_object = raw_changes.as_object().expect("object");
+        assert_eq!(
+            raw_object.keys().collect::<Vec<_>>(),
+            vec!["profile"],
+            "two builtin-profile documents with no explicit overrides only differ by name in raw form"
+        );
+
+        let resolved_changes =
+            policy_diff_json(&workstation, &strict, false).expect("resolved diff");
+        let resolved_object = resolved_changes.as_object().expect("object");
+        assert!(
+            resolved_object.len() > 1,
+            "resolved diff must surface the profiles' actual enforcement differences, not just the profile name"
+        );
+        assert!(resolved_object.contains_key("require_trusted_attestation"));
+    }
 }
