@@ -2,6 +2,7 @@
 //!
 //! Layerfault never executes model code, imports untrusted Python, or invokes `torch.jit.load`.
 
+use crate::archive::normalize_member_path;
 use crate::finding_evidence::{
     file_member, serialization_opcode, structural_invariant, EvidenceSubject, FindingBuilder,
 };
@@ -18,6 +19,7 @@ use zip::ZipArchive;
 const MAX_ZIP_MEMBERS: usize = 16_384;
 const MAX_MEMBER_BYTES: u64 = 64 * 1024 * 1024;
 const MAX_TOTAL_DECOMPRESSED_BYTES: u64 = 256 * 1024 * 1024;
+const MAX_MEMBER_PATH_BYTES: usize = 4096;
 
 /// Inspect a PyTorch ZIP container, TorchScript model, or torch.package archive.
 pub fn scan(
@@ -117,7 +119,7 @@ pub fn scan(
         };
 
         let raw_name = entry.name().replace('\\', "/");
-        if raw_name.contains("../") || raw_name.starts_with('/') {
+        if let Err(err) = normalize_member_path(&raw_name, MAX_MEMBER_PATH_BYTES) {
             let subject = EvidenceSubject::member(&raw_name);
             results.push(
                 FindingBuilder::new(
@@ -131,7 +133,7 @@ pub fn scan(
                 .media_type(media)
                 .subject(subject.clone())
                 .detail(format!(
-                    "Unsafe path traversal entry in PyTorch ZIP: {raw_name}"
+                    "Unsafe path traversal entry in PyTorch ZIP: {raw_name}: {err}"
                 ))
                 .evidence(file_member(
                     subject,

@@ -780,6 +780,21 @@ impl Proto {
         if end > self.end {
             bail!("length-delimited protobuf field extends beyond message");
         }
+        let buffered_end = self.buffer_start.saturating_add(self.buffer_len as u64);
+        if self.pos >= self.buffer_start && end <= buffered_end {
+            let start_index = usize::try_from(self.pos - self.buffer_start)
+                .context("protobuf buffer offset does not fit usize")?;
+            let len_usize = usize::try_from(len).context("protobuf field too large")?;
+            let end_index = start_index
+                .checked_add(len_usize)
+                .context("protobuf buffer slice overflow")?;
+            if end_index > self.buffer_len || end_index > self.buffer.len() {
+                bail!("protobuf field exceeds buffered data");
+            }
+            let bytes = self.buffer[start_index..end_index].to_vec();
+            self.pos = end;
+            return Ok(bytes);
+        }
         self.file.seek(SeekFrom::Start(self.pos))?;
         let mut bytes = vec![0u8; usize::try_from(len).context("protobuf field too large")?];
         self.file.read_exact(&mut bytes)?;
