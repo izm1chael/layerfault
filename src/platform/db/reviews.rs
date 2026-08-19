@@ -124,22 +124,16 @@ impl PlatformDb {
                 )
             }
             Self::Postgres(c) => {
-                let q = |c: &mut postgres::Client, sql: &str| -> Result<i64> {
-                    Ok(c.query_one(sql, &[])?.get(0))
-                };
-                (
-                    q(c, "SELECT COUNT(*) FROM models")?,
-                    q(c, "SELECT COUNT(*) FROM model_revisions")?,
-                    q(c, "SELECT COUNT(*) FROM reviews")?,
-                    q(
-                        c,
-                        "SELECT COUNT(*) FROM reviews WHERE final_decision='BLOCK'",
-                    )?,
-                    q(
-                        c,
-                        "SELECT COUNT(*) FROM reviews WHERE final_decision='WARN'",
-                    )?,
-                )
+                let row = c.query_one(
+                    "SELECT \
+                        (SELECT COUNT(*) FROM models), \
+                        (SELECT COUNT(*) FROM model_revisions), \
+                        (SELECT COUNT(*) FROM reviews), \
+                        (SELECT COUNT(*) FROM reviews WHERE final_decision='BLOCK'), \
+                        (SELECT COUNT(*) FROM reviews WHERE final_decision='WARN')",
+                    &[],
+                )?;
+                (row.get(0), row.get(1), row.get(2), row.get(3), row.get(4))
             }
         };
         Ok(

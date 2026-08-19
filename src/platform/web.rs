@@ -16,7 +16,11 @@ const HTTP_QUEUE_DEPTH: usize = 1024;
 struct State {
     db: Mutex<super::db::PlatformDb>,
     config: super::PlatformConfig,
-    limiter: Mutex<HashMap<String, RateWindow>>,
+    limiter: Mutex<Limiter>,
+}
+struct Limiter {
+    minute: u64,
+    windows: HashMap<String, RateWindow>,
 }
 struct RateWindow {
     minute: u64,
@@ -31,7 +35,10 @@ pub fn serve(config: super::PlatformConfig) -> Result<()> {
     let state = Arc::new(State {
         db: Mutex::new(db),
         config,
-        limiter: Mutex::new(HashMap::new()),
+        limiter: Mutex::new(Limiter {
+            minute: 0,
+            windows: HashMap::new(),
+        }),
     });
     let workers = std::thread::available_parallelism()
         .map(|value| value.get())
@@ -379,7 +386,7 @@ fn webhook(mut request: Request, state: &State) -> Result<()> {
 fn home(request: Request, state: &State) -> Result<()> {
     let mut db = lock_db(state)?;
     let agg = db.aggregate()?;
-    let body=format!("<!doctype html><html><head><meta charset=\"utf-8\"><meta http-equiv=\"Content-Security-Policy\" content=\"default-src 'none'; style-src 'unsafe-inline'\"><title>Layerfault</title></head><body><h1>Layerfault Open Model Security Review</h1><p>Models: {} · Revisions: {} · Reviews: {}</p><p><a href=\"/models\">Models</a> · <a href=\"/weekly\">Weekly reviews</a></p><p>Layerfault reports evidence from checks performed; it does not prove a model is free of hidden behaviour.</p></body></html>",n(&agg,"models"),n(&agg,"revisions"),n(&agg,"reviews"));
+    let body=format!("<!doctype html><html><head><meta charset=\"utf-8\"><meta http-equiv=\"Content-Security-Policy\" content=\"default-src 'none'; style-src 'none'\"><title>Layerfault</title></head><body><h1>Layerfault Open Model Security Review</h1><p>Models: {} · Revisions: {} · Reviews: {}</p><p><a href=\"/models\">Models</a> · <a href=\"/weekly\">Weekly reviews</a></p><p>Layerfault reports evidence from checks performed; it does not prove a model is free of hidden behaviour.</p></body></html>",n(&agg,"models"),n(&agg,"revisions"),n(&agg,"reviews"));
     respond_html(request, 200, &body)
 }
 fn models_page(request: Request, state: &State) -> Result<()> {
@@ -597,19 +604,24 @@ fn lock_db(state: &State) -> Result<std::sync::MutexGuard<'_, super::db::Platfor
         .lock()
         .map_err(|_| anyhow!("platform database lock is poisoned"))
 }
-fn allow_request(limiter: &Mutex<HashMap<String, RateWindow>>, client: &str) -> Result<bool> {
+fn allow_request(limiter: &Mutex<Limiter>, client: &str) -> Result<bool> {
     let minute = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
         .as_secs()
         / 60;
-    let mut rates = limiter
+    let mut limiter = limiter
         .lock()
         .map_err(|_| anyhow!("rate limiter lock is poisoned"))?;
     // Bound memory as well as request rate. Stale client buckets are discarded
-    // every minute; if a source-address spray exceeds the cap, collapse new
-    // callers into a shared overflow bucket rather than growing indefinitely.
-    rates.retain(|_, value| value.minute == minute);
+    // once per minute rollover (not on every request); if a source-address
+    // spray exceeds the cap, collapse new callers into a shared overflow
+    // bucket rather than growing indefinitely.
+    if limiter.minute != minute {
+        limiter.minute = minute;
+        limiter.windows.retain(|_, value| value.minute == minute);
+    }
+    let rates = &mut limiter.windows;
     let key = if rates.contains_key(client) || rates.len() < 16_384 {
         client.to_owned()
     } else {
@@ -690,7 +702,7 @@ fn respond(request: Request, status: u16, body: String, content_type: &str) -> R
         ("Referrer-Policy", "no-referrer"),
         (
             "Content-Security-Policy",
-            "default-src 'none'; style-src 'unsafe-inline'; frame-ancestors 'none'",
+            "default-src 'none'; style-src 'none'; frame-ancestors 'none'",
         ),
     ] {
         response = response.with_header(
