@@ -132,7 +132,7 @@ impl HubFile {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HubModel {
-    #[serde(alias = "modelId", alias = "id")]
+    #[serde(alias = "modelId")]
     pub id: String,
     #[serde(default)]
     pub sha: Option<String>,
