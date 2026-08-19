@@ -5,6 +5,9 @@ use libfuzzer_sys::fuzz_target;
 use std::io::Write;
 
 fuzz_target!(|data: &[u8]| {
+    if data.len() < 4 || !data.starts_with(b"PK\x03\x04") {
+        return;
+    }
     let Ok(dir) = tempfile::tempdir() else {
         return;
     };

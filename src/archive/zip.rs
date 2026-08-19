@@ -268,7 +268,14 @@ pub fn inspect_zip(
         let mut link_target = None;
         if is_symlink {
             let mut target_buf = Vec::new();
-            if zip_entry.read_to_end(&mut target_buf).is_ok() {
+            let target_limit = budget.limits.max_path_bytes.saturating_add(1) as u64;
+            if zip_entry
+                .by_ref()
+                .take(target_limit)
+                .read_to_end(&mut target_buf)
+                .is_ok()
+                && target_buf.len() <= budget.limits.max_path_bytes
+            {
                 link_target = Some(String::from_utf8_lossy(&target_buf).to_string());
             }
             findings.push(make_finding(
