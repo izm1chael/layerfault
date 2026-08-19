@@ -10,6 +10,7 @@ use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 
 const MAX_CONFIG_BYTES: u64 = 64 * 1024 * 1024;
+const MAX_NORMALIZED_TEMPLATE_BYTES: usize = 64 * 1024;
 const MAX_COMPONENTS: usize = 100_000;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -54,6 +55,11 @@ pub struct TemplateSummary {
     pub exact_hash: Option<String>,
     pub present: bool,
     pub source: Option<String>,
+    /// Whitespace-collapsed template text, capped at `MAX_NORMALIZED_TEMPLATE_BYTES`.
+    /// Lets cross-format lineage comparison distinguish reformatting from content
+    /// injection; `None` when the template exceeded the cap or had no text.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub normalized_text: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -513,10 +519,12 @@ fn tokenizer_from_gguf(inv: &gguf::GgufInventory) -> Option<TokenizerSummary> {
 
 fn template_from_gguf(inv: &gguf::GgufInventory) -> Option<TemplateSummary> {
     let value = inv.metadata.get("tokenizer.chat_template")?;
+    let text = value.as_str();
     Some(TemplateSummary {
-        exact_hash: value.as_str().map(hash_text),
+        exact_hash: text.map(hash_text),
         present: true,
         source: Some("gguf:tokenizer.chat_template".to_owned()),
+        normalized_text: text.and_then(normalize_template_text),
     })
 }
 
@@ -624,17 +632,21 @@ fn template_from_package(
     let template_file = root.join("chat_template.jinja");
     if template_file.exists() {
         let bytes = read_bounded(&template_file, MAX_CONFIG_BYTES)?;
+        let text = String::from_utf8_lossy(&bytes);
         return Ok(Some(TemplateSummary {
-            exact_hash: Some(hash_text(&String::from_utf8_lossy(&bytes))),
+            exact_hash: Some(hash_text(&text)),
             present: true,
             source: Some("chat_template.jinja".to_owned()),
+            normalized_text: normalize_template_text(&text),
         }));
     }
     if let Some(template) = tokenizer_cfg.and_then(|v| v.get("chat_template")) {
+        let text = template.as_str();
         return Ok(Some(TemplateSummary {
-            exact_hash: template.as_str().map(hash_text),
+            exact_hash: text.map(hash_text),
             present: true,
             source: Some("tokenizer_config.json:chat_template".to_owned()),
+            normalized_text: text.and_then(normalize_template_text),
         }));
     }
     Ok(None)
@@ -679,6 +691,19 @@ fn hash_ordered_strings<'a>(values: impl IntoIterator<Item = &'a str>) -> String
 fn hash_text(value: &str) -> String {
     let normalized = value.replace("\r\n", "\n");
     hex::encode(Sha256::digest(normalized.as_bytes()))
+}
+
+/// Collapses runs of whitespace to a single space and trims the ends, so
+/// cross-format template comparison isn't thrown off by re-indentation or
+/// line-ending differences. Returns `None` if the collapsed text exceeds
+/// `MAX_NORMALIZED_TEMPLATE_BYTES`, so oversized templates fall back to the
+/// existing hash-only comparison instead of being silently truncated.
+fn normalize_template_text(value: &str) -> Option<String> {
+    let collapsed = value.split_whitespace().collect::<Vec<_>>().join(" ");
+    if collapsed.len() > MAX_NORMALIZED_TEMPLATE_BYTES {
+        return None;
+    }
+    Some(collapsed)
 }
 
 fn generation_from_package(
