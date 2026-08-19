@@ -10,6 +10,7 @@ use crate::finding_evidence::{
 };
 use crate::scanner::{CheckType, Confidence, FindingClass, LayerScanResult, ScanStatus};
 use anyhow::{anyhow, bail, Context, Result};
+use flate2::read::{GzDecoder, ZlibDecoder};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs::File;
 use std::io::{Cursor, Read, Seek, SeekFrom};
@@ -184,6 +185,27 @@ pub fn scan(
             .finish()],
         });
     }
+    if count >= 2 && magic[0] == 0x1f && magic[1] == 0x8b {
+        return Ok(match scan_gzip(file, identity, media, budget) {
+            Ok(results) => results,
+            Err(error) => vec![FindingBuilder::new(
+                "LF-PICKLE-MALFORMED",
+                CheckType::PickleStructure,
+                ScanStatus::Fail,
+            )
+            .class(FindingClass::Structural)
+            .confidence(Confidence::High)
+            .digest(identity)
+            .media_type(media)
+            .subject(EvidenceSubject::identity(identity, media).with_sha256(Some(identity.to_owned())))
+            .detail(format!("Malformed or unsafe gzip-compressed pickle stream: {error}"))
+            .match_note(error.to_string())
+            .evidence_unavailable(
+                "the gzip stream could not be decompressed, so no member or byte offset could be attributed",
+            )
+            .finish()],
+        });
+    }
     let mut results = vec![scan_stream(
         file.try_clone()?,
         size,
@@ -196,6 +218,66 @@ pub fn scan(
         file, size, identity, media, budget,
     ));
     Ok(results)
+}
+
+/// A gzip-compressed pickle/joblib stream: joblib's default `compress=True`
+/// wraps the pickle bytes in gzip, and can additionally wrap them in zlib
+/// underneath (e.g. `gzip(zlib(pickle))`). Decompress transparently, bounded
+/// by [`MAX_PICKLE_MEMBER_BYTES`], so real pickle opcode evidence is produced
+/// instead of failing to parse the compressed bytes as if they were raw pickle.
+fn scan_gzip(
+    file: &File,
+    identity: &str,
+    media: &str,
+    budget: &crate::budget::ScanBudget,
+) -> Result<Vec<LayerScanResult>> {
+    let mut reader = file.try_clone()?;
+    reader.seek(SeekFrom::Start(0))?;
+    let decompressed =
+        read_bounded_decompressed(GzDecoder::new(reader), "gzip-compressed pickle stream")?;
+    let bytes = if decompressed.len() >= 2 && looks_like_zlib(&decompressed[..2]) {
+        read_bounded_decompressed(
+            ZlibDecoder::new(Cursor::new(decompressed)),
+            "zlib-compressed pickle stream",
+        )?
+    } else {
+        decompressed
+    };
+    let len = bytes.len() as u64;
+    let mut results = vec![scan_stream(
+        Cursor::new(bytes.clone()),
+        len,
+        identity,
+        media,
+        None,
+        budget,
+    )];
+    results.extend(parser_differential_bytes(
+        &bytes, identity, media, None, budget,
+    ));
+    Ok(results)
+}
+
+fn looks_like_zlib(head: &[u8]) -> bool {
+    head.len() == 2
+        && head[0] & 0x0f == 8
+        && (u16::from(head[0]) * 256 + u16::from(head[1])) % 31 == 0
+}
+
+fn read_bounded_decompressed<R: Read>(mut reader: R, label: &str) -> Result<Vec<u8>> {
+    let mut buf = Vec::new();
+    let mut chunk = [0u8; 64 * 1024];
+    loop {
+        let n = reader.read(&mut chunk)?;
+        if n == 0 {
+            break;
+        }
+        buf.extend_from_slice(&chunk[..n]);
+        if buf.len() as u64 > MAX_PICKLE_MEMBER_BYTES {
+            bail!("{label} exceeds the {MAX_PICKLE_MEMBER_BYTES} byte decompression bound");
+        }
+    }
+    Ok(buf)
 }
 
 /// Run the parser differential over a plain (non-ZIP) pickle stream and

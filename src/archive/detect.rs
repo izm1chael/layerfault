@@ -1,3 +1,5 @@
+use std::fs::File;
+use std::io::{Read, Seek, SeekFrom};
 use std::path::Path;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -30,6 +32,55 @@ pub struct DetectionResult {
 
 pub fn detect_archive_format(path: &Path, prefix: &[u8]) -> DetectionResult {
     detect_archive_format_name(&path.to_string_lossy(), prefix)
+}
+
+/// Like [`detect_archive_format`], but for gzip-magic content it decompresses
+/// the leading bytes and confirms they look like a TAR header before trusting
+/// the TarGz classification. A gzip magic prefix alone is ambiguous: it also
+/// matches a plain gzip-compressed non-archive blob (e.g. a gzip-compressed
+/// pickle/joblib file), which is not a TAR stream and would otherwise be
+/// routed into the archive parser and fail as "malformed TAR" instead of
+/// being scanned as the artifact format its extension actually claims.
+pub fn detect_archive_format_confirmed(path: &Path, prefix: &[u8], file: &File) -> DetectionResult {
+    let result = detect_archive_format(path, prefix);
+    if result.format != ArchiveFormat::TarGz {
+        return result;
+    }
+    if confirm_tar_gz_content(file) {
+        return result;
+    }
+    // The gzip magic bytes didn't unpack into anything TAR-shaped; fall back
+    // to the extension claim (or Unknown) rather than forcing TAR parsing.
+    let claimed = result.claimed_format;
+    DetectionResult {
+        format: if claimed == ArchiveFormat::TarGz {
+            ArchiveFormat::Unknown
+        } else {
+            claimed
+        },
+        claimed_format: claimed,
+        mismatch: false,
+    }
+}
+
+fn confirm_tar_gz_content(file: &File) -> bool {
+    let Ok(mut reader) = file.try_clone() else {
+        return false;
+    };
+    if reader.seek(SeekFrom::Start(0)).is_err() {
+        return false;
+    }
+    let mut decoder = flate2::read::GzDecoder::new(reader);
+    let mut buf = [0u8; 512];
+    let mut filled = 0usize;
+    while filled < buf.len() {
+        match decoder.read(&mut buf[filled..]) {
+            Ok(0) => break,
+            Ok(n) => filled += n,
+            Err(_) => return false,
+        }
+    }
+    is_tar_header_prefix(&buf[..filled])
 }
 
 /// Detect an archive using a logical member name and in-memory prefix. This

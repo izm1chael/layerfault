@@ -100,7 +100,8 @@ pub(super) fn scan_package_file(
     let mut out = Vec::new();
     let subject = member_subject(rel, digest, Some(size));
     let file_prefix = prefix(file, 512)?;
-    let archive_detection = crate::archive::detect_archive_format(path, &file_prefix);
+    let archive_detection =
+        crate::archive::detect_archive_format_confirmed(path, &file_prefix, file);
     if archive_detection.format != crate::archive::ArchiveFormat::Unknown {
         let archive_limits = crate::archive::ArchiveLimits::default();
         match crate::archive::inspect_opened(path, file, rel, &archive_limits, 0, budget) {

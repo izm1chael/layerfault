@@ -459,7 +459,8 @@ fn inspect_opened(
                 let mut cloned = file.try_clone()?;
                 cloned.seek(SeekFrom::Start(0))?;
                 let n = cloned.read(&mut prefix_buf).unwrap_or(0);
-                let detection = crate::archive::detect_archive_format(path, &prefix_buf[..n]);
+                let detection =
+                    crate::archive::detect_archive_format_confirmed(path, &prefix_buf[..n], &file);
                 if detection.format != crate::archive::ArchiveFormat::Unknown {
                     match crate::archive::inspect_opened(
                         path,

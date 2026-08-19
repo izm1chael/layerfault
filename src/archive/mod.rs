@@ -4,7 +4,10 @@ pub mod member;
 pub mod tar;
 pub mod zip;
 
-pub use detect::{detect_archive_format, detect_archive_format_name, ArchiveFormat};
+pub use detect::{
+    detect_archive_format, detect_archive_format_confirmed, detect_archive_format_name,
+    ArchiveFormat,
+};
 pub use limits::{ArchiveBudgetTracker, ArchiveLimits};
 pub use member::{normalize_member_path, NormalizedMemberPath};
 
@@ -96,7 +99,7 @@ pub fn inspect_opened(
     let n = cloned.read(&mut prefix_buf)?;
     let prefix = &prefix_buf[..n];
 
-    let detection = detect_archive_format(display_path, prefix);
+    let detection = detect_archive_format_confirmed(display_path, prefix, file);
     let mut findings = Vec::new();
 
     if detection.mismatch {
