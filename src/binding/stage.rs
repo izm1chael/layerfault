@@ -5,7 +5,100 @@ use super::types::{
 };
 use anyhow::{anyhow, bail, Context, Result};
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
+
+/// Directory names under the config dir that hold private short-lived
+/// staged copies created during execution binding (see `create_unique_dir`,
+/// which embeds the creating process's pid in each entry's name).
+const STAGING_ROOT_NAMES: [&str; 3] = ["admission-staging", "runtime-staging", "package-staging"];
+
+/// Minimum age before an orphaned staging directory is eligible for
+/// removal. `Drop` never runs on SIGKILL, so a killed process's staging
+/// directory is a permanent leak unless something else reclaims it; this
+/// margin just avoids racing a directory that's still mid-creation by a
+/// process whose pid we failed to parse.
+const STALE_STAGING_MIN_AGE_SECS: u64 = 300;
+
+/// All staging roots that may accumulate orphaned copies if a `layerfault`
+/// process staging into them is killed before it can clean up after itself.
+pub fn staging_roots() -> Result<Vec<PathBuf>> {
+    let base = crate::paths::config_dir()?;
+    Ok(STAGING_ROOT_NAMES
+        .iter()
+        .map(|name| base.join(name))
+        .collect())
+}
+
+fn is_pid_alive(pid: u32) -> bool {
+    #[cfg(target_os = "linux")]
+    {
+        Path::new(&format!("/proc/{pid}")).exists()
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        // No portable, safe (non-`unsafe`) liveness check without `/proc`;
+        // assume alive so staleness falls back to the age check alone
+        // rather than risking removal of a directory still in active use.
+        let _ = pid;
+        true
+    }
+}
+
+/// `create_unique_dir` names entries `{unix_timestamp}-{pid}-{short}-{counter}`;
+/// pull the creation time and owning pid back out of that name.
+fn parse_staging_dir_name(name: &str) -> (Option<u64>, Option<u32>) {
+    let mut fields = name.splitn(4, '-');
+    let created_at = fields.next().and_then(|value| value.parse::<u64>().ok());
+    let owner_pid = fields.next().and_then(|value| value.parse::<u32>().ok());
+    (created_at, owner_pid)
+}
+
+/// Staging directories under `parent` whose owning process is confirmed
+/// dead (or whose name couldn't be attributed to a pid at all) and which
+/// have sat for at least `STALE_STAGING_MIN_AGE_SECS`. Read-only: callers
+/// decide whether to actually remove what's returned.
+pub fn stale_staging_dirs(parent: &Path) -> Vec<PathBuf> {
+    let Ok(entries) = fs::read_dir(parent) else {
+        return Vec::new();
+    };
+    let now = crate::paths::now_unix();
+    let mut stale = Vec::new();
+    for entry in entries.flatten() {
+        let Ok(file_type) = entry.file_type() else {
+            continue;
+        };
+        if !file_type.is_dir() {
+            continue;
+        }
+        let path = entry.path();
+        let Some(name) = path.file_name().and_then(|value| value.to_str()) else {
+            continue;
+        };
+        let (created_at, owner_pid) = parse_staging_dir_name(name);
+        let age_secs = created_at.map(|created| now.saturating_sub(created));
+        if age_secs.is_none_or(|age| age < STALE_STAGING_MIN_AGE_SECS) {
+            continue;
+        }
+        let orphaned = match owner_pid {
+            Some(pid) => !is_pid_alive(pid),
+            None => true,
+        };
+        if orphaned {
+            stale.push(path);
+        }
+    }
+    stale
+}
+
+/// Best-effort pre-flight reclaim of `parent`'s stale staging directories,
+/// run before staging a new copy into it. Individual removal failures are
+/// ignored: this is opportunistic cleanup, not a precondition for the
+/// current operation, and must never block or fail staging.
+fn sweep_stale_staging(parent: &Path) {
+    for path in stale_staging_dirs(parent) {
+        let _ = fs::remove_dir_all(path);
+    }
+}
 
 pub fn stage_verified(path: &Path, expected_sha256: &str) -> Result<StagedArtifact> {
     let parent = crate::paths::config_dir()?.join("admission-staging");
@@ -29,6 +122,7 @@ pub fn stage_verified_under(
         ));
     }
     crate::paths::ensure_private_dir(parent)?;
+    sweep_stale_staging(parent);
     let short = expected_sha256
         .trim_start_matches("sha256:")
         .chars()
@@ -99,6 +193,7 @@ pub fn stage_verified_package_under(
     }
 
     crate::paths::ensure_private_dir(parent)?;
+    sweep_stale_staging(parent);
     let short_fp = expected_report
         .fingerprint
         .trim_start_matches("lfpkg:sha256:")
@@ -480,6 +575,86 @@ mod tests {
 
         let result = stage_verified_package_under(&pkg_dir, &report, &parent);
         assert!(result.is_err());
+        let _ = fs::remove_dir_all(base);
+        Ok(())
+    }
+
+    #[test]
+    #[cfg(target_os = "linux")]
+    fn stale_staging_dirs_reclaims_only_aged_orphans_with_a_dead_owner() -> Result<()> {
+        let base = std::env::temp_dir().join(format!(
+            "layerfault-stale-staging-{}-{}",
+            std::process::id(),
+            crate::paths::now_unix()
+        ));
+        fs::create_dir_all(&base)?;
+        let now = crate::paths::now_unix();
+
+        let mut child = std::process::Command::new("true").spawn()?;
+        let dead_pid = child.id();
+        child.wait()?;
+
+        // Orphaned: past the grace period, owning process is confirmed dead.
+        let dead_owner = base.join(format!("{}-{dead_pid}-deadbeef-0", now - 3600));
+        fs::create_dir_all(&dead_owner)?;
+
+        // Still in use: past the grace period, but owned by this live test process.
+        let live_owner = base.join(format!("{}-{}-deadbeef-0", now - 3600, std::process::id()));
+        fs::create_dir_all(&live_owner)?;
+
+        // Not yet eligible: owner is dead, but the directory is still within
+        // the grace period (could be a live process whose pid we mis-parsed).
+        let fresh_dead_owner = base.join(format!("{now}-{dead_pid}-deadbeef-0"));
+        fs::create_dir_all(&fresh_dead_owner)?;
+
+        let stale = stale_staging_dirs(&base);
+        assert!(stale.contains(&dead_owner));
+        assert!(!stale.contains(&live_owner));
+        assert!(!stale.contains(&fresh_dead_owner));
+
+        fs::remove_dir_all(&base)?;
+        Ok(())
+    }
+
+    #[test]
+    #[cfg(target_os = "linux")]
+    fn staging_orphaned_by_a_killed_process_is_reclaimed_by_the_next_stage_call() -> Result<()> {
+        let base = std::env::temp_dir().join(format!(
+            "layerfault-staging-sweep-{}-{}",
+            std::process::id(),
+            crate::paths::now_unix()
+        ));
+        let parent = base.join("staging");
+        fs::create_dir_all(&parent)?;
+
+        let mut child = std::process::Command::new("true").spawn()?;
+        let dead_pid = child.id();
+        child.wait()?;
+
+        // Simulate what a killed prior invocation leaves behind: a fully
+        // formed staging entry whose owning process no longer exists, old
+        // enough to clear the grace period.
+        let orphan = parent.join(format!(
+            "{}-{dead_pid}-deadbeef-0",
+            crate::paths::now_unix() - 3600
+        ));
+        fs::create_dir_all(&orphan)?;
+        fs::write(orphan.join("leaked.bin"), b"orphaned staged copy")?;
+
+        let source = base.join("source.gguf");
+        fs::write(&source, b"verified artifact content")?;
+        let digest = format!(
+            "sha256:{}",
+            hex::encode(Sha256::digest(b"verified artifact content"))
+        );
+        let staged = stage_verified_under(&source, &digest, &parent, false)?;
+
+        assert!(
+            !orphan.exists(),
+            "staging into the same parent must reclaim the dead process's orphaned copy"
+        );
+
+        staged.cleanup()?;
         let _ = fs::remove_dir_all(base);
         Ok(())
     }
