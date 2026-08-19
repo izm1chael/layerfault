@@ -15,4 +15,11 @@ cargo fmt --all -- --check
 log "Repository publication invariants"
 bash scripts/security/repo-invariants.sh
 
+if command -v semgrep >/dev/null 2>&1; then
+  log "Semgrep (staged files)"
+  bash scripts/security/staged-semgrep.sh
+else
+  echo "WARN: semgrep is not installed; skipping staged-file scan" >&2
+fi
+
 log "Pre-commit checks passed"
