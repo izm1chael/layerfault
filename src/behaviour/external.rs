@@ -1,4 +1,5 @@
 use super::*;
+use anyhow::Context;
 pub fn run_external_llama(
     model: &Path,
     runtime_path: Option<&Path>,
@@ -61,7 +62,10 @@ fn run_external_llama_active_deadline(
         bail!("behaviour command hard total timeout expired during static admission");
     }
     let model = resolve_gguf(model)?;
-    let model_identity = crate::modelmeta::build_snapshot(&model)?.identity.canonical;
+    let model_identity = crate::modelmeta::build_snapshot(&model)?
+        .identity
+        .artifact_sha256
+        .context("model snapshot is missing an artifact sha256 digest")?;
     let staged_model = crate::binding::stage_verified(&model, &model_identity)?;
     let suite = probes::expand_mutations(probes::load_suite(suite_path)?, limits.max_mutations);
     let executable = match runtime_path {

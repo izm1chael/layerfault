@@ -176,3 +176,24 @@ path = "fuzz_targets/transformation_chain.rs"
 test = false
 doc = false
 bench = false
+
+[[bin]]
+name = "npy"
+path = "fuzz_targets/npy.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "archive_zip"
+path = "fuzz_targets/archive_zip.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "archive_tar"
+path = "fuzz_targets/archive_tar.rs"
+test = false
+doc = false
+bench = false
