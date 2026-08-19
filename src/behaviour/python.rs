@@ -822,6 +822,9 @@ os.environ["HF_HUB_OFFLINE"] = "1"
 os.environ["TRANSFORMERS_OFFLINE"] = "1"
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 os.environ["PYTHONDONTWRITEBYTECODE"] = "1"
+# Avoid torch.compile JIT warmup cost, which never pays off in this
+# short-lived, few-forward-pass probe session.
+os.environ["TORCHDYNAMO_DISABLE"] = "1"
 
 try:
     with contextlib.redirect_stdout(sys.stderr):
@@ -829,6 +832,10 @@ try:
         import transformers
         from transformers import AutoModelForCausalLM, AutoTokenizer
         torch.set_grad_enabled(False)
+        try:
+            torch._dynamo.config.disable = True
+        except Exception:
+            pass
         try:
             torch.set_num_threads(max(1, min(4, os.cpu_count() or 1)))
         except Exception:
@@ -843,11 +850,16 @@ try:
             local_files_only=True,
             trust_remote_code=args.trust_remote_code,
         )
+        # bf16-on-CPU is usually slower than fp32 (software-emulated or
+        # upcast anyway on most x86 CPUs), so only use "auto" on GPU.
+        dtype_kwarg = "auto"
+        if not torch.cuda.is_available():
+            dtype_kwarg = torch.float32
         model = AutoModelForCausalLM.from_pretrained(
             source,
             local_files_only=True,
             trust_remote_code=args.trust_remote_code,
-            torch_dtype="auto",
+            torch_dtype=dtype_kwarg,
         )
         if is_adapter:
             from peft import PeftModel

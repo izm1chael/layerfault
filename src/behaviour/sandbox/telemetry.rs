@@ -521,6 +521,11 @@ fn is_trusted_wrapper_setup(lower: &str, actor_is_trusted_wrapper: bool) -> bool
 ///   completes — nothing the sandboxed program does can be attributed to a
 ///   path under it, because nothing sandboxed has started yet when these
 ///   calls happen.
+/// - Before that absolute path exists, bwrap first `mkdir()`s the bare
+///   relative names `newroot`/`oldroot` (no leading `/`) to create the
+///   pivot_root staging points. Matched as an exact quoted argument on
+///   `mkdir(`/`mkdirat(` only, so it can't be widened by a traced program
+///   creating its own nested `.../newroot` directory elsewhere.
 ///
 /// Both are causally impossible to originate from the traced program: they
 /// happen before it exists. This is intentionally not gated on the
@@ -549,7 +554,21 @@ fn is_bwrap_namespace_construction(lower: &str) -> bool {
         ]
         .iter()
         .any(|call| lower.contains(call));
-    id_map_write || newroot_setup
+    let relative_pivot_root_setup = ["\"newroot\"", "\"oldroot\""]
+        .iter()
+        .any(|name| lower.contains(name))
+        && ["mkdir(", "mkdirat("]
+            .iter()
+            .any(|call| lower.contains(call));
+    id_map_write || newroot_setup || relative_pivot_root_setup
+}
+
+/// True for activity under PyTorch's own inductor JIT cache directory
+/// (`/tmp/torchinductor_<uid>/...`), a fixed path no probe workload has
+/// reason to name — same path-based allowlist design as
+/// `expected_runtime_artifact`'s `__pycache__`/`.pyc` handling.
+fn is_pytorch_inductor_cache_activity(lower: &str) -> bool {
+    lower.contains("/tmp/torchinductor_")
 }
 
 fn classify_trace_line(
@@ -592,7 +611,8 @@ fn classify_trace_line(
     let trusted_housekeeping =
         is_trusted_resource_tracker_cleanup(&lower, actor_is_resource_tracker)
             || is_trusted_wrapper_setup(&lower, actor_is_trusted_wrapper)
-            || is_bwrap_namespace_construction(&lower);
+            || is_bwrap_namespace_construction(&lower)
+            || is_pytorch_inductor_cache_activity(&lower);
     if (write_like || mutate_like)
         && !trusted_housekeeping
         && telemetry.filesystem_write_attempts.len() < MAX_TELEMETRY_ROWS
@@ -1031,6 +1051,54 @@ mod tests {
             false,
         );
         assert_eq!(telemetry.filesystem_write_attempts.len(), 1);
+    }
+
+    #[test]
+    fn relative_newroot_oldroot_mkdir_is_trusted_as_namespace_construction() {
+        let mut telemetry = SandboxTelemetry::default();
+        classify_trace_line(
+            r#"mkdir("newroot", 0755) = 0"#,
+            &mut telemetry,
+            false,
+            false,
+        );
+        classify_trace_line(
+            r#"mkdir("oldroot", 0755) = 0"#,
+            &mut telemetry,
+            false,
+            false,
+        );
+        assert!(
+            telemetry.filesystem_write_attempts.is_empty(),
+            "bwrap's relative newroot/oldroot pivot staging must not be reported: {:?}",
+            telemetry.filesystem_write_attempts
+        );
+    }
+
+    #[test]
+    fn decoy_newroot_directory_name_still_reported() {
+        // Match is exact-quoted-argument only, so a decoy name that merely
+        // contains "newroot" as a substring must still be reported.
+        let mut telemetry = SandboxTelemetry::default();
+        classify_trace_line(
+            r#"mkdir("shell_newroot", 0755) = 0"#,
+            &mut telemetry,
+            false,
+            false,
+        );
+        assert_eq!(telemetry.filesystem_write_attempts.len(), 1);
+    }
+
+    #[test]
+    fn torchinductor_cache_dir_creation_is_expected_runtime_artifact() {
+        let mut telemetry = SandboxTelemetry::default();
+        classify_trace_line(
+            r#"mkdir("/tmp/torchinductor_uid_1000", 0777) = 0"#,
+            &mut telemetry,
+            false,
+            false,
+        );
+        assert_eq!(telemetry.filesystem_write_attempts.len(), 0);
     }
 
     #[test]

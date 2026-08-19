@@ -590,14 +590,8 @@ fn parse_next_link(header: Option<&str>) -> Option<String> {
     None
 }
 fn constant_time_eq(left: &[u8], right: &[u8]) -> bool {
-    if left.len() != right.len() {
-        return false;
-    }
-    let mut diff = 0u8;
-    for (a, b) in left.iter().zip(right) {
-        diff |= a ^ b;
-    }
-    diff == 0
+    use subtle::ConstantTimeEq;
+    left.ct_eq(right).into()
 }
 
 #[cfg(test)]
