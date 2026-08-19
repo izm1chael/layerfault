@@ -1043,6 +1043,10 @@ pub(crate) enum GcTarget {
     ContentCache,
     /// The verified Hugging Face content object cache.
     ObjectCache,
+    /// Orphaned execution-binding staging directories left behind when a
+    /// `layerfault` process staging a copy for active analysis was killed
+    /// before it could clean up after itself.
+    Staging,
     /// All of the above.
     All,
 }

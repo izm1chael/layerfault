@@ -448,6 +448,45 @@ pub(crate) fn run_gc(args: GcArgs) -> Result<()> {
     if matches!(args.target, GcTarget::ObjectCache | GcTarget::All) {
         run_object_cache_gc(&args)?;
     }
+    if matches!(args.target, GcTarget::Staging | GcTarget::All) {
+        run_staging_gc(&args)?;
+    }
+    Ok(())
+}
+
+fn run_staging_gc(args: &GcArgs) -> Result<()> {
+    let roots = layerfault::binding::staging_roots()?;
+    let candidates: Vec<PathBuf> = roots
+        .iter()
+        .flat_map(|root| layerfault::binding::stale_staging_dirs(root))
+        .collect();
+    let mut removed = 0usize;
+    if args.execute {
+        for path in &candidates {
+            if fs::remove_dir_all(path).is_ok() {
+                removed += 1;
+            }
+        }
+    }
+    if args.json {
+        let value = serde_json::json!({
+            "candidates": candidates.iter().map(|path| path.display().to_string()).collect::<Vec<_>>(),
+            "executed": args.execute,
+            "removed": removed,
+        });
+        println!("{}", serde_json::to_string_pretty(&value)?);
+    } else {
+        println!("Orphaned staging directories: {}", candidates.len());
+        for path in &candidates {
+            println!("ORPHAN {}", path.display());
+        }
+        if args.execute {
+            println!(
+                "Removed {removed} orphaned staging director{}",
+                if removed == 1 { "y" } else { "ies" }
+            );
+        }
+    }
     Ok(())
 }
 
