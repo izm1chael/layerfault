@@ -135,7 +135,10 @@ pub(crate) fn finalize_report(
             .any(|rule| rule != "LF-BEHAV-RUNTIME-FAILURE")
     });
     let meaningful_probe_completed = executions.iter().any(|value| {
-        value.category != "runtime_side_effects" && value.exit_code == Some(0) && !value.timed_out
+        value.category != "runtime_side_effects"
+            && value.exit_code == Some(0)
+            && !value.timed_out
+            && !value.response_excerpt.trim().is_empty()
     });
     let dynamic_observations = summarize_dynamic_observations(&executions);
     Ok(BehaviourReport {
