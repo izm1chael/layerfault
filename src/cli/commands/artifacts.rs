@@ -608,6 +608,13 @@ fn pipeline_decision(exit: i32) -> String {
     match exit {
         0 => "PASS".to_owned(),
         1 => "WARN".to_owned(),
+        // A deadline/cancellation interruption (see
+        // `SecurityDecision::escalate_for_control_interruption`) means the
+        // scan did not finish, not that it found something blocking — keep
+        // that distinct from an actual BLOCK verdict so automation reading
+        // `summary.blocking == 0` alongside the decision string isn't misled
+        // into treating "ran out of time" as "found a threat".
+        6 => "INCOMPLETE".to_owned(),
         _ => "BLOCK".to_owned(),
     }
 }
@@ -691,4 +698,27 @@ fn package_report_exit(
         code,
         report.coverage.control_interrupted(),
     )
+}
+
+#[cfg(test)]
+mod pipeline_decision_tests {
+    use super::pipeline_decision;
+
+    #[test]
+    fn control_interruption_reports_incomplete_not_block() {
+        // Exit 6 means the scan was cut off by a wall-clock deadline or
+        // cancellation, not that a blocking finding was produced (see
+        // `SecurityDecision::escalate_for_control_interruption`). It must
+        // stay distinguishable from a real BLOCK verdict.
+        assert_eq!(pipeline_decision(6), "INCOMPLETE");
+    }
+
+    #[test]
+    fn ordinary_codes_still_map_as_before() {
+        assert_eq!(pipeline_decision(0), "PASS");
+        assert_eq!(pipeline_decision(1), "WARN");
+        assert_eq!(pipeline_decision(2), "BLOCK");
+        assert_eq!(pipeline_decision(3), "BLOCK");
+        assert_eq!(pipeline_decision(4), "BLOCK");
+    }
 }
