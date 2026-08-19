@@ -43,7 +43,10 @@ run_target() {
   local log_file="$SMOKE_CORPUS_ROOT/$target.log"
 
   mkdir -p "$target_corpus"
-  cp -a "corpus/$target/." "$target_corpus/"
+  printf 'target=%s\n' "$target" >"$log_file"
+  if [[ -d "corpus/$target" ]]; then
+    cp -a "corpus/$target/." "$target_corpus/"
+  fi
   local -a dict_args=()
   if [[ -f "dictionaries/$target.dict" ]]; then
     dict_args+=("-dict=dictionaries/$target.dict")
@@ -56,7 +59,7 @@ run_target() {
     -rss_limit_mb="$RSS_MB" \
     -use_value_profile=1 \
     "${dict_args[@]}" \
-    -print_final_stats=1 >"$log_file" 2>&1
+    -print_final_stats=1 >>"$log_file" 2>&1
 }
 
 run_batch() {
@@ -79,7 +82,11 @@ run_batch() {
       tail -n 12 "$SMOKE_CORPUS_ROOT/$target.log"
     else
       echo "ERROR: fuzz target $target failed" >&2
-      cat "$SMOKE_CORPUS_ROOT/$target.log" >&2
+      if [[ -f "$SMOKE_CORPUS_ROOT/$target.log" ]]; then
+        cat "$SMOKE_CORPUS_ROOT/$target.log" >&2
+      else
+        echo "No fuzz log was produced for $target" >&2
+      fi
       failed=1
     fi
   done
