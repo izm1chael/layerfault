@@ -6,6 +6,41 @@ pub fn inspect(root: &Path) -> Result<PackageReport> {
     inspect_with_budget(root, &budget)
 }
 
+/// Find every `.mlpackage` directory boundary within a package root: the
+/// root itself, if its own name carries the extension, plus any nested
+/// occurrence (bounded by the same traversal limits as package discovery).
+/// Symlinked directories are not followed, matching `discover_package`.
+fn mlpackage_boundaries(root: &Path) -> Vec<PathBuf> {
+    let is_mlpackage_dir = |path: &Path| -> bool {
+        path.is_dir()
+            && path
+                .extension()
+                .and_then(|ext| ext.to_str())
+                .is_some_and(|ext| ext.eq_ignore_ascii_case("mlpackage"))
+    };
+
+    let mut boundaries = Vec::new();
+    if is_mlpackage_dir(root) {
+        boundaries.push(root.to_path_buf());
+    }
+
+    let mut walker = WalkDir::new(root)
+        .follow_links(false)
+        .max_depth(MAX_PACKAGE_DEPTH)
+        .into_iter();
+    while let Some(entry) = walker.next() {
+        let Ok(entry) = entry else { continue };
+        if entry.depth() == 0 {
+            continue;
+        }
+        if entry.file_type().is_dir() && is_mlpackage_dir(entry.path()) {
+            boundaries.push(entry.path().to_path_buf());
+            walker.skip_current_dir();
+        }
+    }
+    boundaries
+}
+
 pub(super) fn estimate_member_cost(path: &Path, size: u64) -> crate::scheduler::TaskCost {
     let ext = path
         .extension()
@@ -694,6 +729,34 @@ pub fn inspect_with_scheduler(
             .ok();
     if let Some(report) = tokenizer_security.as_ref() {
         findings.extend(report.findings.clone());
+    }
+
+    // Additive, package-shape-triggered detector: MLX packages have no
+    // directory-extension convention (unlike Core ML's `.mlpackage`), so
+    // per-member classification alone never dispatches to the MLX checks.
+    // This runs alongside — not instead of — generic member scanning.
+    if crate::formats::mlx::looks_like_mlx_package(&root) {
+        findings.extend(crate::formats::mlx::scan_package(
+            &root,
+            &merkle_identity,
+            PACKAGE_MEDIA_TYPE,
+        )?);
+    }
+
+    // Additive, package-shape-triggered detector: `.mlpackage` is a
+    // directory-as-bundle convention, not a real file extension, so the
+    // per-member walk above recurses straight through it and never treats
+    // the enclosing directory as a distinct package boundary — it only ever
+    // finds and classifies the inner `.mlmodel` file. Explicitly detect
+    // `.mlpackage` boundaries (the root itself, or nested anywhere in a
+    // larger package) and dispatch the Manifest.json integrity check for
+    // each, alongside — not instead of — the generic member scan.
+    for boundary in mlpackage_boundaries(&root) {
+        findings.extend(crate::formats::coreml::scan_package(
+            &boundary,
+            &merkle_identity,
+            PACKAGE_MEDIA_TYPE,
+        )?);
     }
 
     sort_findings_canonically(&mut findings);
