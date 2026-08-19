@@ -203,6 +203,18 @@
         requirement_reason: "",
     },
     RuleMetadata {
+        rule_id: "LF-BEHAV-EMPTY-RESPONSE",
+        rule_version: 1,
+        detector_family: "behavioural",
+        title: "Behavioural probe returned an empty response",
+        meaning: "An active behavioural probe completed without a response payload, so the runtime did not provide a usable result for evaluation.",
+        why_it_matters: "An empty response is an observable runtime outcome, but it is not by itself evidence of malicious behavior.",
+        remediation: "Inspect the runner diagnostics and repeat the probe with a functioning runtime before relying on the behavioural result.",
+        limitations: "This records an incomplete or unusable probe response; it does not establish why the response was empty or attribute intent to the model.",
+        evidence_requirement: EvidenceRequirement::Required,
+        requirement_reason: "",
+    },
+    RuleMetadata {
         rule_id: "LF-BEHAV-CANARY-ACCESS",
         rule_version: 1,
         detector_family: "behavioural",

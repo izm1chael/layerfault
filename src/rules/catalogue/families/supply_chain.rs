@@ -287,6 +287,18 @@
         requirement_reason: "",
     },
     RuleMetadata {
+        rule_id: "LF-DIFF-EMPTY-RESPONSE",
+        rule_version: 1,
+        detector_family: "lineage",
+        title: "Behavioural comparison received an empty response",
+        meaning: "A base-versus-derived behavioural comparison observed an empty response for a probe, preventing a meaningful comparison for that probe.",
+        why_it_matters: "An empty response reduces comparison coverage and must not be treated as evidence of either equivalence or a security regression.",
+        remediation: "Inspect the runner diagnostics and repeat the comparison with a functioning runtime before relying on the behavioural result.",
+        limitations: "This records an incomplete or unusable probe response; it does not establish why the response was empty or attribute intent to either model.",
+        evidence_requirement: EvidenceRequirement::Required,
+        requirement_reason: "",
+    },
+    RuleMetadata {
         rule_id: "LF-DIFF-INCOMPLETE",
         rule_version: 1,
         detector_family: "lineage",
