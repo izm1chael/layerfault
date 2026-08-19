@@ -84,6 +84,26 @@ pub fn inspect_tar(
             ));
             break;
         }
+        if index >= budget.limits.max_members_per_archive {
+            coverage_state = CoverageState::Incomplete;
+            coverage_details.push(format!(
+                "Per-archive member limit exceeded at TAR entry index {}",
+                index
+            ));
+            findings.push(make_finding(
+                identity,
+                CheckType::PackageSecurity,
+                ScanStatus::Fail,
+                FindingClass::Structural,
+                Confidence::High,
+                "LF-ARCHIVE-LIMIT",
+                format!(
+                    "Per-archive member limit {} exceeded while reading TAR entry index {}",
+                    budget.limits.max_members_per_archive, index
+                ),
+            ));
+            break;
+        }
         if budget.add_member().is_err() {
             coverage_state = CoverageState::Incomplete;
             coverage_details.push("Cumulative member limit exceeded".to_owned());
