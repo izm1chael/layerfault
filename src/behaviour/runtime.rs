@@ -109,6 +109,10 @@ impl RuntimeAdapter {
                 .join("workspace")
                 .join("layerfault-llama.sock");
             let socket_sandbox = PathBuf::from("/workspace/workspace/layerfault-llama.sock");
+            // llama-server requires a slot save path for /slots?action=erase.
+            let slot_save_path_host = workspace.root.join("workspace").join("slots");
+            crate::paths::ensure_private_dir(&slot_save_path_host)?;
+            let slot_save_path_sandbox = PathBuf::from("/workspace/workspace/slots");
             let sandboxed = super::sandbox::command_for(
                 runtime_binding.path(),
                 model,
@@ -151,7 +155,9 @@ impl RuntimeAdapter {
                 .arg("--no-webui")
                 // /slots is off by default in llama.cpp; this instance is
                 // private and single-tenant, and infer()'s reset needs it.
-                .arg("--slots");
+                .arg("--slots")
+                .arg("--slot-save-path")
+                .arg(&slot_save_path_sandbox);
             let started = Instant::now();
             runtime_binding.revalidate()?;
             let host_fs = std::sync::Arc::new(super::cgroup::HostCgroupFs::new());
