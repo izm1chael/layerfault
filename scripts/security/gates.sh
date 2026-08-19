@@ -41,8 +41,8 @@ printf '%s
 ' 'import subprocess
 def load(): subprocess.run(["echo","fixture"])' > "$TMP/package-a/modeling_fixture.py"
 cp "$TMP/package-a/modeling_fixture.py" "$TMP/package-b/modeling_fixture.py"
-FP_A="$($BIN fingerprint "$TMP/package-a" | head -n1)"
-FP_B="$($BIN fingerprint "$TMP/package-b" | head -n1)"
+FP_A="$($BIN fingerprint "$TMP/package-a")"
+FP_B="$($BIN fingerprint "$TMP/package-b")"
 [[ "$FP_A" == "$FP_B" && "$FP_A" == lfpkg:sha256:* ]] || { echo "package fingerprint is not location-independent" >&2; exit 1; }
 set +e
 "$BIN" verify-package "$TMP/package-a" --policy workstation --json > "$TMP/package.json" 2>/dev/null
