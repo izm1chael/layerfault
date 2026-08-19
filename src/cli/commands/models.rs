@@ -126,14 +126,15 @@ pub(crate) fn run_models(args: ModelsArgs) -> Result<()> {
             }
         }
         ModelsCommand::IdentityCompare {
-            left,
-            right,
+            base,
+            derived,
             weights,
             json: emit_json,
         } => {
-            let left_identity = layered_identity(&left, weights)?;
-            let right_identity = layered_identity(&right, weights)?;
-            let comparison = layerfault::model::identity::compare(&left_identity, &right_identity);
+            let base_identity = layered_identity(&base, weights)?;
+            let derived_identity = layered_identity(&derived, weights)?;
+            let comparison =
+                layerfault::model::identity::compare(&base_identity, &derived_identity);
             if emit_json {
                 write_stdout_json(&comparison, true)?;
             } else {
@@ -191,6 +192,7 @@ pub(crate) fn run_models(args: ModelsArgs) -> Result<()> {
             runtimes,
             format,
             output,
+            json,
         } => {
             let passport = build_passport(
                 &target,
@@ -218,7 +220,14 @@ pub(crate) fn run_models(args: ModelsArgs) -> Result<()> {
             let bytes = serde_json::to_vec_pretty(&value)?;
             if let Some(path) = output {
                 layerfault::paths::write_private(&path, &bytes)?;
-                println!("{}", path.display());
+                if json {
+                    println!(
+                        "{}",
+                        serde_json::json!({"ok": true, "output": path.display().to_string()})
+                    );
+                } else {
+                    println!("{}", path.display());
+                }
             } else {
                 println!("{}", String::from_utf8_lossy(&bytes));
             }

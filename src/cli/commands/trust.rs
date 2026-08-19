@@ -7,16 +7,24 @@ pub(crate) fn run_trust(args: TrustArgs) -> Result<()> {
             name,
             public_key,
             namespaces,
+            json,
         } => {
             let pem = layerfault::trust::read_public_key_pem(&public_key)?;
             let key = store.add_key(name, pem, namespaces)?;
             let path = store.save(args.store.as_deref())?;
-            println!(
-                "Trusted key '{}' ({}) saved to {}",
-                key.name,
-                key.fingerprint,
-                path.display()
-            );
+            if json {
+                println!(
+                    "{}",
+                    serde_json::json!({"ok": true, "name": key.name, "fingerprint": key.fingerprint, "store": path.display().to_string()})
+                );
+            } else {
+                println!(
+                    "Trusted key '{}' ({}) saved to {}",
+                    key.name,
+                    key.fingerprint,
+                    path.display()
+                );
+            }
         }
         TrustCommand::List { json } => {
             if json {
@@ -38,32 +46,54 @@ pub(crate) fn run_trust(args: TrustArgs) -> Result<()> {
                 }
             }
         }
-        TrustCommand::Remove { selector } => {
+        TrustCommand::Remove { selector, json } => {
             let removed = store.remove_key(&selector)?;
             store.save(args.store.as_deref())?;
-            println!(
-                "Removed trusted key '{}' ({})",
-                removed.name, removed.fingerprint
-            );
+            if json {
+                println!(
+                    "{}",
+                    serde_json::json!({"ok": true, "name": removed.name, "fingerprint": removed.fingerprint})
+                );
+            } else {
+                println!(
+                    "Removed trusted key '{}' ({})",
+                    removed.name, removed.fingerprint
+                );
+            }
         }
-        TrustCommand::Revoke { selector } => {
+        TrustCommand::Revoke { selector, json } => {
             let key = store.revoke_key(&selector, true)?;
             store.save(args.store.as_deref())?;
-            println!("Revoked trusted key '{}' ({})", key.name, key.fingerprint);
+            if json {
+                println!(
+                    "{}",
+                    serde_json::json!({"ok": true, "name": key.name, "fingerprint": key.fingerprint, "revoked": true})
+                );
+            } else {
+                println!("Revoked trusted key '{}' ({})", key.name, key.fingerprint);
+            }
         }
-        TrustCommand::Unrevoke { selector } => {
+        TrustCommand::Unrevoke { selector, json } => {
             let key = store.revoke_key(&selector, false)?;
             store.save(args.store.as_deref())?;
-            println!(
-                "Re-enabled trusted key '{}' ({})",
-                key.name, key.fingerprint
-            );
+            if json {
+                println!(
+                    "{}",
+                    serde_json::json!({"ok": true, "name": key.name, "fingerprint": key.fingerprint, "revoked": false})
+                );
+            } else {
+                println!(
+                    "Re-enabled trusted key '{}' ({})",
+                    key.name, key.fingerprint
+                );
+            }
         }
         TrustCommand::Configure {
             selector,
             active_from_unix,
             expires_unix,
             rotation_group,
+            json,
         } => {
             let key = store.configure_key_lifetime(
                 &selector,
@@ -72,25 +102,46 @@ pub(crate) fn run_trust(args: TrustArgs) -> Result<()> {
                 rotation_group,
             )?;
             store.save(args.store.as_deref())?;
-            println!(
-                "Updated trust lifecycle for '{}' ({})",
-                key.name, key.fingerprint
-            );
+            if json {
+                println!(
+                    "{}",
+                    serde_json::json!({"ok": true, "name": key.name, "fingerprint": key.fingerprint})
+                );
+            } else {
+                println!(
+                    "Updated trust lifecycle for '{}' ({})",
+                    key.name, key.fingerprint
+                );
+            }
         }
-        TrustCommand::Export { output } => {
+        TrustCommand::Export { output, json } => {
             layerfault::paths::write_private(&output, &serde_json::to_vec_pretty(&store)?)?;
-            println!(
-                "Exported {} trusted key(s) to {}",
-                store.keys.len(),
-                output.display()
-            );
+            if json {
+                println!(
+                    "{}",
+                    serde_json::json!({"ok": true, "count": store.keys.len(), "output": output.display().to_string()})
+                );
+            } else {
+                println!(
+                    "Exported {} trusted key(s) to {}",
+                    store.keys.len(),
+                    output.display()
+                );
+            }
         }
-        TrustCommand::Import { input } => {
+        TrustCommand::Import { input, json } => {
             let imported = TrustStore::load(Some(&input))?;
             let count = imported.keys.len();
             store.merge(imported)?;
             let path = store.save(args.store.as_deref())?;
-            println!("Imported {count} trusted key(s) into {}", path.display());
+            if json {
+                println!(
+                    "{}",
+                    serde_json::json!({"ok": true, "count": count, "store": path.display().to_string()})
+                );
+            } else {
+                println!("Imported {count} trusted key(s) into {}", path.display());
+            }
         }
     }
     Ok(())

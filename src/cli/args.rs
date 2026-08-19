@@ -469,6 +469,8 @@ pub(crate) enum TrustCommand {
         public_key: PathBuf,
         #[arg(long = "namespace")]
         namespaces: Vec<String>,
+        #[arg(long, default_value_t = false)]
+        json: bool,
     },
     List {
         #[arg(long, default_value_t = false)]
@@ -476,12 +478,18 @@ pub(crate) enum TrustCommand {
     },
     Remove {
         selector: String,
+        #[arg(long, default_value_t = false)]
+        json: bool,
     },
     Revoke {
         selector: String,
+        #[arg(long, default_value_t = false)]
+        json: bool,
     },
     Unrevoke {
         selector: String,
+        #[arg(long, default_value_t = false)]
+        json: bool,
     },
     Configure {
         selector: String,
@@ -491,14 +499,20 @@ pub(crate) enum TrustCommand {
         expires_unix: Option<u64>,
         #[arg(long)]
         rotation_group: Option<String>,
+        #[arg(long, default_value_t = false)]
+        json: bool,
     },
     Export {
         #[arg(long)]
         output: PathBuf,
+        #[arg(long, default_value_t = false)]
+        json: bool,
     },
     Import {
         #[arg(long)]
         input: PathBuf,
+        #[arg(long, default_value_t = false)]
+        json: bool,
     },
 }
 
@@ -568,6 +582,8 @@ pub(crate) enum BaselineCommand {
         output: Option<PathBuf>,
         #[arg(long)]
         ollama_dir: Option<PathBuf>,
+        #[arg(long, default_value_t = false)]
+        json: bool,
     },
     Verify {
         #[arg(long, default_value = "default")]
@@ -604,6 +620,8 @@ pub(crate) enum BaselineCommand {
         reason: String,
         #[arg(long)]
         sign_with: Option<PathBuf>,
+        #[arg(long, default_value_t = false)]
+        json: bool,
     },
     Sign {
         #[arg(long, default_value = "default")]
@@ -612,6 +630,8 @@ pub(crate) enum BaselineCommand {
         baseline: Option<PathBuf>,
         #[arg(long)]
         private_key: PathBuf,
+        #[arg(long, default_value_t = false)]
+        json: bool,
     },
     VerifySignature {
         #[arg(long, default_value = "default")]
@@ -641,6 +661,8 @@ pub(crate) enum QuarantineCommand {
         reason: Option<String>,
         #[arg(long, default_value_t = false)]
         no_scan: bool,
+        #[arg(long, default_value_t = false)]
+        json: bool,
     },
     List {
         #[arg(long)]
@@ -665,6 +687,8 @@ pub(crate) enum QuarantineCommand {
         include_blobs: bool,
         #[arg(long)]
         sign_with: Option<PathBuf>,
+        #[arg(long, default_value_t = false)]
+        json: bool,
     },
     Purge {
         id: String,
@@ -672,6 +696,8 @@ pub(crate) enum QuarantineCommand {
         ollama_dir: Option<PathBuf>,
         #[arg(long, default_value_t = false)]
         yes: bool,
+        #[arg(long, default_value_t = false)]
+        json: bool,
     },
     Restore {
         id: String,
@@ -679,6 +705,8 @@ pub(crate) enum QuarantineCommand {
         ollama_dir: Option<PathBuf>,
         #[arg(long, default_value_t = false)]
         force: bool,
+        #[arg(long, default_value_t = false)]
+        json: bool,
     },
 }
 
@@ -695,18 +723,26 @@ pub(crate) enum PolicyCommand {
         profile: String,
         #[arg(long)]
         output: PathBuf,
+        #[arg(long, default_value_t = false)]
+        json: bool,
     },
     Show {
         #[arg(long)]
         file: Option<PathBuf>,
         #[arg(long, default_value = "workstation")]
         profile: String,
+        #[arg(long, default_value_t = false)]
+        json: bool,
     },
     Lint {
         file: PathBuf,
+        #[arg(long, default_value_t = false)]
+        json: bool,
     },
     Explain {
         file: PathBuf,
+        #[arg(long, default_value_t = false)]
+        json: bool,
     },
     Test {
         file: PathBuf,
@@ -726,6 +762,8 @@ pub(crate) enum PolicyCommand {
         /// explain` or omit this flag to see the actual enforced difference.
         #[arg(long, default_value_t = false)]
         raw: bool,
+        #[arg(long, default_value_t = false)]
+        json: bool,
     },
 }
 
@@ -752,8 +790,8 @@ pub(crate) enum DatasetCommand {
         json: bool,
     },
     Compare {
-        left: PathBuf,
-        right: PathBuf,
+        base: PathBuf,
+        derived: PathBuf,
         #[arg(long, value_parser = parse_jobs)]
         jobs: Option<usize>,
         #[arg(long, default_value_t = false)]
@@ -1356,8 +1394,8 @@ pub(crate) enum ModelsCommand {
         json: bool,
     },
     IdentityCompare {
-        left: PathBuf,
-        right: PathBuf,
+        base: PathBuf,
+        derived: PathBuf,
         #[arg(long, default_value_t = false)]
         weights: bool,
         #[arg(long, default_value_t = false)]
@@ -1392,6 +1430,8 @@ pub(crate) enum ModelsCommand {
         format: String,
         #[arg(long)]
         output: Option<PathBuf>,
+        #[arg(long, default_value_t = false)]
+        json: bool,
     },
 }
 
@@ -1475,6 +1515,8 @@ pub(crate) enum AdvisoryCommand {
         signature: PathBuf,
         #[arg(long)]
         public_key: PathBuf,
+        #[arg(long, default_value_t = false)]
+        json: bool,
     },
 }
 
@@ -1525,6 +1567,8 @@ pub(crate) enum EvidenceCommand {
         policy_file: Option<PathBuf>,
         #[arg(long)]
         trust_store: Option<PathBuf>,
+        #[arg(long, default_value_t = false)]
+        json: bool,
     },
     Gate {
         receipt: PathBuf,
@@ -1561,6 +1605,8 @@ pub(crate) enum EvidenceCommand {
         receipt: PathBuf,
         #[arg(long)]
         output: PathBuf,
+        #[arg(long, default_value_t = false)]
+        json: bool,
     },
 }
 
@@ -1600,6 +1646,8 @@ pub(crate) enum IntelligenceCommand {
         public_key: PathBuf,
         #[arg(long)]
         output: PathBuf,
+        #[arg(long, default_value_t = false)]
+        json: bool,
     },
     /// Verify and import a portable offline intelligence bundle.
     Import {
@@ -1612,6 +1660,8 @@ pub(crate) enum IntelligenceCommand {
         public_key_output: PathBuf,
         #[arg(long, default_value_t = false)]
         allow_rollback: bool,
+        #[arg(long, default_value_t = false)]
+        json: bool,
     },
     VerifyBundle {
         bundle: PathBuf,
@@ -1698,7 +1748,11 @@ pub(crate) enum CompositionCommand {
         json: bool,
     },
     /// Write a minimal composition manifest template.
-    Init { output: PathBuf },
+    Init {
+        output: PathBuf,
+        #[arg(long, default_value_t = false)]
+        json: bool,
+    },
 }
 
 #[derive(clap::Args, Debug)]
@@ -1748,6 +1802,8 @@ pub(crate) enum PassportCommand {
         private_key: PathBuf,
         #[arg(long)]
         output: PathBuf,
+        #[arg(long, default_value_t = false)]
+        json: bool,
     },
     Diff {
         left: PathBuf,
@@ -1921,6 +1977,8 @@ pub(crate) enum InventoryCommand {
         receipt: PathBuf,
         #[arg(long)]
         trust_store: Option<PathBuf>,
+        #[arg(long, default_value_t = false)]
+        json: bool,
     },
     Watch {
         #[arg(long)]

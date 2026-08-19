@@ -57,9 +57,17 @@ pub(crate) fn run_intelligence(args: IntelligenceArgs) -> Result<()> {
             signature,
             public_key,
             output,
+            json,
         } => {
             layerfault::intelligence::export_bundle(&pack, &signature, &public_key, &output)?;
-            println!("{}", output.display());
+            if json {
+                println!(
+                    "{}",
+                    serde_json::json!({"ok": true, "output": output.display().to_string()})
+                );
+            } else {
+                println!("{}", output.display());
+            }
         }
         IntelligenceCommand::Import {
             bundle,
@@ -67,6 +75,7 @@ pub(crate) fn run_intelligence(args: IntelligenceArgs) -> Result<()> {
             signature_output,
             public_key_output,
             allow_rollback,
+            json,
         } => {
             let verified = layerfault::intelligence::verify_bundle(&bundle)?;
             layerfault::intelligence::enforce_no_rollback(&verified, allow_rollback)?;
@@ -77,10 +86,23 @@ pub(crate) fn run_intelligence(args: IntelligenceArgs) -> Result<()> {
                 &public_key_output,
             )?;
             layerfault::intelligence::record_accepted(&imported)?;
-            println!("Imported intelligence pack: {}", imported.sha256);
-            println!("Pack: {}", pack_output.display());
-            println!("Signature: {}", signature_output.display());
-            println!("Public key: {}", public_key_output.display());
+            if json {
+                println!(
+                    "{}",
+                    serde_json::json!({
+                        "ok": true,
+                        "sha256": imported.sha256,
+                        "pack": pack_output.display().to_string(),
+                        "signature": signature_output.display().to_string(),
+                        "public_key": public_key_output.display().to_string(),
+                    })
+                );
+            } else {
+                println!("Imported intelligence pack: {}", imported.sha256);
+                println!("Pack: {}", pack_output.display());
+                println!("Signature: {}", signature_output.display());
+                println!("Public key: {}", public_key_output.display());
+            }
         }
         IntelligenceCommand::VerifyBundle { bundle, json } => {
             let verified = layerfault::intelligence::verify_bundle(&bundle)?;
@@ -300,6 +322,7 @@ pub(crate) fn run_inventory(args: InventoryArgs) -> Result<()> {
             identity,
             receipt,
             trust_store,
+            json,
         } => {
             let mut inventory = layerfault::inventory::load_state(&state)?;
             let entry = inventory
@@ -315,7 +338,14 @@ pub(crate) fn run_inventory(args: InventoryArgs) -> Result<()> {
             layerfault::inventory::apply_receipt(entry, &receipt, &trust)?;
             inventory.updated_unix = layerfault::paths::now_unix();
             layerfault::inventory::save_state(&state, &inventory)?;
-            println!("Approved {} using {}", identity, receipt.display());
+            if json {
+                println!(
+                    "{}",
+                    serde_json::json!({"ok": true, "identity": identity, "receipt": receipt.display().to_string()})
+                );
+            } else {
+                println!("Approved {} using {}", identity, receipt.display());
+            }
         }
         InventoryCommand::Watch {
             state,

@@ -2,29 +2,51 @@ use super::super::*;
 
 pub(crate) fn run_policy(args: PolicyArgs) -> Result<()> {
     match args.command {
-        PolicyCommand::Init { profile, output } => {
+        PolicyCommand::Init {
+            profile,
+            output,
+            json,
+        } => {
             let document = PolicyDocument::builtin(PolicyProfile::parse(&profile)?);
             document.validate()?;
             layerfault::paths::write_private(&output, &serde_json::to_vec_pretty(&document)?)?;
-            println!(
-                "Wrote {:?} policy to {}",
-                document.profile,
-                output.display()
-            );
+            if json {
+                println!(
+                    "{}",
+                    serde_json::json!({"ok": true, "profile": document.profile, "output": output.display().to_string()})
+                );
+            } else {
+                println!(
+                    "Wrote {:?} policy to {}",
+                    document.profile,
+                    output.display()
+                );
+            }
         }
-        PolicyCommand::Show { file, profile } => {
+        PolicyCommand::Show {
+            file,
+            profile,
+            json: _,
+        } => {
             let document = match file {
                 Some(path) => PolicyDocument::load(&path)?,
                 None => PolicyDocument::builtin(PolicyProfile::parse(&profile)?),
             };
             println!("{}", serde_json::to_string_pretty(&document)?);
         }
-        PolicyCommand::Lint { file } => {
+        PolicyCommand::Lint { file, json } => {
             let document = PolicyDocument::load(&file)?;
             document.validate()?;
-            println!("PASS: {} is a valid Layerfault policy", file.display());
+            if json {
+                println!(
+                    "{}",
+                    serde_json::json!({"ok": true, "valid": true, "file": file.display().to_string()})
+                );
+            } else {
+                println!("PASS: {} is a valid Layerfault policy", file.display());
+            }
         }
-        PolicyCommand::Explain { file } => {
+        PolicyCommand::Explain { file, json: _ } => {
             let document = PolicyDocument::load(&file)?;
             let effective = document.effective();
             println!(
@@ -54,7 +76,12 @@ pub(crate) fn run_policy(args: PolicyArgs) -> Result<()> {
             emit_admission(&result, json)?;
             std::process::exit(admission::exit_code(&[result]));
         }
-        PolicyCommand::Diff { left, right, raw } => {
+        PolicyCommand::Diff {
+            left,
+            right,
+            raw,
+            json: _,
+        } => {
             let a = PolicyDocument::load(&left)?;
             let b = PolicyDocument::load(&right)?;
             let changes = policy_diff_json(&a, &b, raw)?;
@@ -95,7 +122,14 @@ pub(crate) fn run_doctor(args: OutputArgs) -> Result<()> {
         println!("{}", serde_json::to_string_pretty(&checks)?);
     } else {
         for check in checks {
-            println!("{:<16} {:<12} {}", check.name, check.status, check.detail);
+            let size = check
+                .size_bytes
+                .map(doctor::human_bytes)
+                .unwrap_or_default();
+            println!(
+                "{:<16} {:<12} {:<10} {}",
+                check.name, check.status, size, check.detail
+            );
         }
     }
     Ok(())

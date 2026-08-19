@@ -97,9 +97,16 @@ pub(crate) fn run_composition(args: CompositionArgs) -> Result<()> {
                 println!("{}", assessment.detail);
             }
         }
-        CompositionCommand::Init { output } => {
+        CompositionCommand::Init { output, json } => {
             layerfault::model::composition::write_example(&output)?;
-            println!("{}", output.display());
+            if json {
+                println!(
+                    "{}",
+                    serde_json::json!({"ok": true, "output": output.display().to_string()})
+                );
+            } else {
+                println!("{}", output.display());
+            }
         }
     }
     Ok(())

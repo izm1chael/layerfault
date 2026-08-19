@@ -181,18 +181,26 @@ pub(crate) fn run_baseline(args: BaselineArgs) -> Result<()> {
             name,
             output,
             ollama_dir,
+            json,
         } => {
             let base_dir = app::resolve_base_dir(ollama_dir.as_deref())?;
             baseline_preflight(&base_dir)?;
             let value = Baseline::capture(&base_dir)?;
             let path = output.unwrap_or(Baseline::default_path(&name)?);
             value.save(&path)?;
-            println!(
-                "Baseline '{}' captured {} model(s) at {}",
-                name,
-                value.models.len(),
-                path.display()
-            );
+            if json {
+                println!(
+                    "{}",
+                    serde_json::json!({"ok": true, "name": name, "models": value.models.len(), "path": path.display().to_string()})
+                );
+            } else {
+                println!(
+                    "Baseline '{}' captured {} model(s) at {}",
+                    name,
+                    value.models.len(),
+                    path.display()
+                );
+            }
         }
         BaselineCommand::Verify {
             name,
@@ -255,6 +263,7 @@ pub(crate) fn run_baseline(args: BaselineArgs) -> Result<()> {
             ollama_dir,
             reason,
             sign_with,
+            json,
         } => {
             let base_dir = app::resolve_base_dir(ollama_dir.as_deref())?;
             baseline_preflight(&base_dir)?;
@@ -274,21 +283,36 @@ pub(crate) fn run_baseline(args: BaselineArgs) -> Result<()> {
             if let Some(key) = sign_with {
                 baseline::sign(&path, &key)?;
             }
-            println!("Baseline '{}' updated at {}", name, path.display());
+            if json {
+                println!(
+                    "{}",
+                    serde_json::json!({"ok": true, "name": name, "path": path.display().to_string()})
+                );
+            } else {
+                println!("Baseline '{}' updated at {}", name, path.display());
+            }
         }
         BaselineCommand::Sign {
             name,
             baseline: path,
             private_key,
+            json,
         } => {
             let path = path.unwrap_or(Baseline::default_path(&name)?);
             Baseline::load(&path)?;
             let signature = baseline::sign(&path, &private_key)?;
-            println!(
-                "Signed baseline {} with {}",
-                path.display(),
-                signature.key_fingerprint
-            );
+            if json {
+                println!(
+                    "{}",
+                    serde_json::json!({"ok": true, "path": path.display().to_string(), "fingerprint": signature.key_fingerprint})
+                );
+            } else {
+                println!(
+                    "Signed baseline {} with {}",
+                    path.display(),
+                    signature.key_fingerprint
+                );
+            }
         }
         BaselineCommand::VerifySignature {
             name,
@@ -319,6 +343,7 @@ pub(crate) fn run_quarantine(args: QuarantineArgs) -> Result<()> {
             ollama_dir,
             reason,
             no_scan,
+            json,
         } => {
             let base_dir = app::resolve_base_dir(ollama_dir.as_deref())?;
             let mut evidence = quarantine::QuarantineEvidence {
@@ -350,13 +375,26 @@ pub(crate) fn run_quarantine(args: QuarantineArgs) -> Result<()> {
                 evidence.finding_ids.dedup();
             }
             let record = quarantine::quarantine_model_with_evidence(&base_dir, &model, evidence)?;
-            println!(
-                "Quarantined {} as {} ({} exclusive blobs moved; {} shared blobs retained)",
-                record.model,
-                record.id,
-                record.moved_blob_digests.len(),
-                record.shared_blob_digests.len()
-            );
+            if json {
+                println!(
+                    "{}",
+                    serde_json::json!({
+                        "ok": true,
+                        "id": record.id,
+                        "model": record.model,
+                        "moved_blobs": record.moved_blob_digests.len(),
+                        "shared_blobs": record.shared_blob_digests.len(),
+                    })
+                );
+            } else {
+                println!(
+                    "Quarantined {} as {} ({} exclusive blobs moved; {} shared blobs retained)",
+                    record.model,
+                    record.id,
+                    record.moved_blob_digests.len(),
+                    record.shared_blob_digests.len()
+                );
+            }
         }
         QuarantineCommand::List { ollama_dir, json } => {
             let base_dir = app::resolve_base_dir(ollama_dir.as_deref())?;
@@ -395,6 +433,7 @@ pub(crate) fn run_quarantine(args: QuarantineArgs) -> Result<()> {
             output,
             include_blobs,
             sign_with,
+            json,
         } => {
             let base_dir = app::resolve_base_dir(ollama_dir.as_deref())?;
             let exported = quarantine::export_evidence(
@@ -404,35 +443,55 @@ pub(crate) fn run_quarantine(args: QuarantineArgs) -> Result<()> {
                 include_blobs,
                 sign_with.as_deref(),
             )?;
-            println!(
-                "Exported quarantine {} to {} ({} files, {} bytes, signed={})",
-                exported.quarantine_id,
-                exported.output,
-                exported.files,
-                exported.bytes,
-                exported.signed
-            );
+            if json {
+                println!("{}", serde_json::to_string_pretty(&exported)?);
+            } else {
+                println!(
+                    "Exported quarantine {} to {} ({} files, {} bytes, signed={})",
+                    exported.quarantine_id,
+                    exported.output,
+                    exported.files,
+                    exported.bytes,
+                    exported.signed
+                );
+            }
         }
         QuarantineCommand::Purge {
             id,
             ollama_dir,
             yes,
+            json,
         } => {
             if !yes {
                 return Err(anyhow!("Purging quarantine is destructive; rerun with --yes after exporting evidence if required"));
             }
             let base_dir = app::resolve_base_dir(ollama_dir.as_deref())?;
             let record = quarantine::purge(&base_dir, &id)?;
-            println!("Purged quarantine {} ({})", record.id, record.model);
+            if json {
+                println!(
+                    "{}",
+                    serde_json::json!({"ok": true, "id": record.id, "model": record.model})
+                );
+            } else {
+                println!("Purged quarantine {} ({})", record.id, record.model);
+            }
         }
         QuarantineCommand::Restore {
             id,
             ollama_dir,
             force,
+            json,
         } => {
             let base_dir = app::resolve_base_dir(ollama_dir.as_deref())?;
             let record = quarantine::restore(&base_dir, &id, force)?;
-            println!("Restored {} from quarantine {}", record.model, record.id);
+            if json {
+                println!(
+                    "{}",
+                    serde_json::json!({"ok": true, "id": record.id, "model": record.model})
+                );
+            } else {
+                println!("Restored {} from quarantine {}", record.model, record.id);
+            }
         }
     }
     Ok(())

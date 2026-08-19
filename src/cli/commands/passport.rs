@@ -101,11 +101,19 @@ pub(crate) fn run_passport(args: PassportArgs) -> Result<()> {
             passport,
             private_key,
             output,
+            json,
         } => {
             let passport = layerfault::inventory::load_passport(&passport)?;
             let signed = layerfault::inventory::sign_passport(passport, &private_key)?;
             layerfault::inventory::write_signed_passport(&output, &signed)?;
-            println!("{}", output.display());
+            if json {
+                println!(
+                    "{}",
+                    serde_json::json!({"ok": true, "output": output.display().to_string()})
+                );
+            } else {
+                println!("{}", output.display());
+            }
         }
         PassportCommand::Diff { left, right, json } => {
             let left = layerfault::inventory::load_portable_passport(&left)?;

@@ -42,9 +42,14 @@ pub(crate) fn run_advisories(args: AdvisoryArgs) -> Result<()> {
             database,
             signature,
             public_key,
+            json,
         } => {
             let digest = advisory::verify_external_database(&database, &signature, &public_key)?;
-            println!("Verified signed advisory database: {digest}");
+            if json {
+                println!("{}", serde_json::json!({"ok": true, "sha256": digest}));
+            } else {
+                println!("Verified signed advisory database: {digest}");
+            }
         }
     }
     Ok(())
@@ -99,6 +104,7 @@ pub(crate) fn run_evidence(args: EvidenceArgs) -> Result<()> {
             policy: profile,
             policy_file,
             trust_store,
+            json,
         } => {
             if target.is_dir() {
                 return Err(anyhow!("evidence admit currently requires a concrete artifact file; package receipts should bind the final admitted artifact/package workflow"));
@@ -266,7 +272,14 @@ pub(crate) fn run_evidence(args: EvidenceArgs) -> Result<()> {
                 &private_key,
             )?;
             evidence::write_signed(&output, &envelope)?;
-            println!("{}", output.display());
+            if json {
+                println!(
+                    "{}",
+                    serde_json::json!({"ok": true, "output": output.display().to_string()})
+                );
+            } else {
+                println!("{}", output.display());
+            }
         }
         EvidenceCommand::Gate {
             receipt,
@@ -439,7 +452,11 @@ pub(crate) fn run_evidence(args: EvidenceArgs) -> Result<()> {
                 std::process::exit(3);
             }
         }
-        EvidenceCommand::Predicate { receipt, output } => {
+        EvidenceCommand::Predicate {
+            receipt,
+            output,
+            json,
+        } => {
             let envelope = evidence::load(&receipt)?;
             let statement = serde_json::json!({
                 "_type": "https://in-toto.io/Statement/v1",
@@ -448,7 +465,14 @@ pub(crate) fn run_evidence(args: EvidenceArgs) -> Result<()> {
                 "predicate": {"evidence": envelope}
             });
             layerfault::paths::write_private(&output, &serde_json::to_vec_pretty(&statement)?)?;
-            println!("{}", output.display());
+            if json {
+                println!(
+                    "{}",
+                    serde_json::json!({"ok": true, "output": output.display().to_string()})
+                );
+            } else {
+                println!("{}", output.display());
+            }
         }
     }
     Ok(())

@@ -8,6 +8,28 @@ pub struct DoctorCheck {
     pub name: String,
     pub status: String,
     pub detail: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub size_bytes: Option<u64>,
+}
+
+/// Recursive on-disk footprint of a directory, in bytes. Best-effort: a
+/// permission error or a raced-away entry mid-walk drops that one entry
+/// rather than failing the whole doctor pass, since this exists to answer
+/// "roughly how big" for triage, not to be a byte-exact accounting tool.
+fn dir_size_bytes(path: &Path) -> Option<u64> {
+    if !path.is_dir() {
+        return None;
+    }
+    let mut total = 0_u64;
+    for entry in walkdir::WalkDir::new(path).follow_links(false) {
+        let Ok(entry) = entry else { continue };
+        if entry.file_type().is_file() {
+            if let Ok(metadata) = entry.metadata() {
+                total = total.saturating_add(metadata.len());
+            }
+        }
+    }
+    Some(total)
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -50,6 +72,7 @@ pub fn run() -> Vec<DoctorCheck> {
                 name: binary.to_owned(),
                 status: "available".to_owned(),
                 detail: path.display().to_string(),
+                size_bytes: None,
             }),
             None => checks.push(DoctorCheck {
                 name: binary.to_owned(),
@@ -62,6 +85,7 @@ pub fn run() -> Vec<DoctorCheck> {
                 } else {
                     "optional integration unavailable".to_owned()
                 },
+                size_bytes: None,
             }),
         }
     }
@@ -83,6 +107,7 @@ pub fn run() -> Vec<DoctorCheck> {
                 .unwrap_or_else(|| "unknown".to_owned()),
             capabilities.accelerator
         ),
+        size_bytes: None,
     });
     checks.push(DoctorCheck {
         name: "transformers-active".to_owned(),
@@ -96,6 +121,7 @@ pub fn run() -> Vec<DoctorCheck> {
             .managed_python_runtime
             .clone()
             .unwrap_or_else(|| "managed Python runtime not found/import-ready".to_owned()),
+        size_bytes: None,
     });
     checks.push(DoctorCheck {
         name: "llama-active".to_owned(),
@@ -108,6 +134,7 @@ pub fn run() -> Vec<DoctorCheck> {
         detail: sources::find_executable("llama-server")
             .map(|path| path.display().to_string())
             .unwrap_or_else(|| "llama-server not found".to_owned()),
+        size_bytes: None,
     });
     checks.push(DoctorCheck {
         name: "microvm-sandbox".to_owned(),
@@ -122,6 +149,7 @@ pub fn run() -> Vec<DoctorCheck> {
             capabilities.microvm_hypervisor.as_deref().unwrap_or("none"),
             Path::new("/dev/kvm").exists()
         ),
+        size_bytes: None,
     });
     checks.push(DoctorCheck {
         name: "ebpf-telemetry".to_owned(),
@@ -139,6 +167,7 @@ pub fn run() -> Vec<DoctorCheck> {
             ),
             Err(reason) => format!("strace fallback active: {reason}"),
         },
+        size_bytes: None,
     });
 
     for (name, kind) in [
@@ -171,11 +200,13 @@ pub fn run() -> Vec<DoctorCheck> {
                             .unwrap_or("unparsed"),
                         value.database_sha256
                     ),
+                    size_bytes: None,
                 },
                 Err(error) => DoctorCheck {
                     name: name.to_owned(),
                     status: "warning".to_owned(),
                     detail: error.to_string(),
+                    size_bytes: None,
                 },
             });
         }
@@ -191,11 +222,13 @@ pub fn run() -> Vec<DoctorCheck> {
             }
             .to_owned(),
             detail: path.display().to_string(),
+            size_bytes: dir_size_bytes(&path),
         },
         Err(error) => DoctorCheck {
             name: "ollama-store".to_owned(),
             status: "not-found".to_owned(),
             detail: error.to_string(),
+            size_bytes: None,
         },
     });
     let hf = sources::hf_cache_root(None).unwrap_or_else(|_| PathBuf::from("<unknown>"));
@@ -208,13 +241,49 @@ pub fn run() -> Vec<DoctorCheck> {
         }
         .to_owned(),
         detail: hf.display().to_string(),
+        size_bytes: dir_size_bytes(&hf),
     });
     let config = crate::paths::config_dir().unwrap_or_else(|_| PathBuf::from("<unknown>"));
     checks.push(DoctorCheck {
         name: "config".to_owned(),
         status: "configured".to_owned(),
         detail: config.display().to_string(),
+        size_bytes: dir_size_bytes(&config),
     });
+
+    // Every other cache/staging namespace `gc --target all` can reclaim from,
+    // so the full on-disk footprint is visible in one place instead of
+    // requiring a manual `du -sh` across each directory by hand.
+    if let Ok(roots) = crate::binding::staging_roots() {
+        for root in roots {
+            let name = root
+                .file_name()
+                .map(|value| value.to_string_lossy().into_owned())
+                .unwrap_or_else(|| "staging".to_owned());
+            checks.push(DoctorCheck {
+                name,
+                status: if root.is_dir() { "present" } else { "empty" }.to_owned(),
+                detail: root.display().to_string(),
+                size_bytes: dir_size_bytes(&root),
+            });
+        }
+    }
+    if let Ok(plan) = crate::content_cache::gc::plan() {
+        checks.push(DoctorCheck {
+            name: "content-cache".to_owned(),
+            status: "present".to_owned(),
+            detail: "reclaimable via `gc --target content-cache`".to_owned(),
+            size_bytes: Some(plan.total_bytes),
+        });
+    }
+    if let Ok(plan) = crate::object_cache::gc::plan() {
+        checks.push(DoctorCheck {
+            name: "object-cache".to_owned(),
+            status: "present".to_owned(),
+            detail: "reclaimable via `gc --target object-cache`".to_owned(),
+            size_bytes: Some(plan.total_bytes),
+        });
+    }
     checks
 }
 
@@ -485,7 +554,7 @@ fn meminfo_kib(key: &str) -> Option<u64> {
     None
 }
 
-fn human_bytes(bytes: u64) -> String {
+pub fn human_bytes(bytes: u64) -> String {
     const GIB: f64 = 1024.0 * 1024.0 * 1024.0;
     const MIB: f64 = 1024.0 * 1024.0;
     if bytes >= 1024 * 1024 * 1024 {

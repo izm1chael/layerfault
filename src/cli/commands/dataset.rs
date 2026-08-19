@@ -39,14 +39,14 @@ pub(crate) fn run_dataset(args: DatasetArgs) -> Result<()> {
             }
         }
         DatasetCommand::Compare {
-            left,
-            right,
+            base,
+            derived,
             jobs,
             json: emit_json,
         } => {
             let report = layerfault::dataset::compare_with_jobs(
-                &left,
-                &right,
+                &base,
+                &derived,
                 jobs.unwrap_or_else(layerfault::app::default_jobs),
             )?;
             if emit_json {
