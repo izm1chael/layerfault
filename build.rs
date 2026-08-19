@@ -4,6 +4,8 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 fn main() {
+    emit_catalogue();
+
     let mut build_files = Vec::new();
     for root in ["src", "schemas", "advisories", "policies", "vendor"] {
         collect(Path::new(root), &mut build_files);
@@ -56,6 +58,51 @@ fn main() {
         "cargo:rustc-env=LAYERFAULT_SCANNER_REVISION={}",
         digest_files(b"layerfault-scanner-contract\0", &scanner_files)
     );
+}
+
+/// Concatenate the verbatim `RuleMetadata { … },` token fragments in
+/// `src/rules/catalogue/families/` into a single generated static array that
+/// `catalogue/mod.rs` splices in via `include!`.  Keeping the entries as token
+/// fragments (not Rust modules) preserves `&'static` lifetime and lets the
+/// catalogue scale without a monolithic source file.
+fn emit_catalogue() {
+    let families_dir = Path::new("src/rules/catalogue/families");
+    let out_dir = PathBuf::from(std::env::var("OUT_DIR").expect("OUT_DIR set"));
+    let mut fragments: Vec<PathBuf> = match fs::read_dir(families_dir) {
+        Ok(entries) => entries
+            .filter_map(Result::ok)
+            .map(|entry| entry.path())
+            .filter(|p| p.extension().and_then(|s| s.to_str()) == Some("rs"))
+            .collect(),
+        Err(error) => panic!(
+            "failed to read catalogue families dir {}: {error}",
+            families_dir.display()
+        ),
+    };
+    fragments.sort();
+    let doc = "\
+/// Authoritative catalogue of all declared detector rules.
+///
+/// Assembled at build time from verbatim token fragments in
+/// `src/rules/catalogue/families/` by `build.rs` (`emit_catalogue`).
+";
+    let mut source = String::from(doc);
+    source.push_str("pub static CATALOGUE: &[RuleMetadata] = &[\n");
+    for fragment in &fragments {
+        let body = fs::read_to_string(fragment).unwrap_or_else(|error| {
+            panic!(
+                "failed to read catalogue fragment {}: {error}",
+                fragment.display()
+            )
+        });
+        source.push_str(&body);
+    }
+    source.push_str("];\n");
+    fs::write(out_dir.join("catalogue_gen.rs"), source).expect("write catalogue_gen.rs");
+    println!("cargo:rerun-if-changed={}", families_dir.display());
+    for fragment in &fragments {
+        println!("cargo:rerun-if-changed={}", fragment.display());
+    }
 }
 
 fn digest_files(domain: &[u8], files: &[PathBuf]) -> String {

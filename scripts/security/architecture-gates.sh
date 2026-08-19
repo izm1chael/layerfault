@@ -33,6 +33,7 @@ declare -A MOD_LINE_LIMITS=(
     [src/model/dataset/mod.rs]=300
     [src/hub/mod.rs]=350
     [src/cli/mod.rs]=350
+    [src/rules/catalogue/mod.rs]=20
 )
 
 # Monolith locations that must not return as substantive files. A file here
@@ -41,6 +42,7 @@ declare -A MOD_LINE_LIMITS=(
 MONOLITH_FACADE_MAX_LINES=25
 MONOLITHS=(
     src/binding.rs
+    src/rules/catalogue.rs
 )
 
 substantive_line_count() {

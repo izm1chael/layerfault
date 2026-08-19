@@ -120,4 +120,16 @@ mod tests {
         assert!(spec("LF-CODE-SUBPROCESS").is_some());
         assert!(spec("LF-NOT-A-REAL-RULE").is_none());
     }
+
+    #[test]
+    fn ruleset_digest_stable_across_split() {
+        // Captured before the family-grouped catalogue split. Only the four
+        // identity fields (rule_id, rule_version, detector_family,
+        // evidence_requirement) participate in the digest; prose edits are
+        // inert, any structural identity change flips this hash.
+        assert_eq!(
+            ruleset_sha256(),
+            "sha256:401c0899115fdba4c78ae9f64594c8e41249f4c97ca3f9de2f471eee49fc7c09"
+        );
+    }
 }

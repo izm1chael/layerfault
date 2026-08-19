@@ -25,3 +25,6 @@ __pycache__/
 
 # Windows download metadata
 *:Zone.Identifier
+
+# Local overlay archive artifacts (never tracked).
+/layerfault-*-overlay*.zip
