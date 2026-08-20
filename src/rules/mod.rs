@@ -129,7 +129,7 @@ mod tests {
         // inert, any structural identity change flips this hash.
         assert_eq!(
             ruleset_sha256(),
-            "sha256:eb082552895e103938065312b22f67f5fffc3e6028e42fbce5d6033d8dddcbe2"
+            "sha256:59a36276cca863cf906fd17d83a067cad6401c0b943cff02cdf0f31a50e6e4f6"
         );
     }
 }

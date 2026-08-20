@@ -159,13 +159,50 @@ pub fn scan(
             } else {
                 0
             };
+            // The extended header comes in two forms: a 32+ byte form that
+            // includes `segment_data_size`, and a short 24-byte form that
+            // doesn't. When segments are present (`segment_base_offset != 0`)
+            // but this file uses the short form, `segment_data_size` is
+            // unknown — not "zero segment bytes". Treating it as zero would
+            // silently collapse `expected_size` down to just the offset
+            // where segments *begin*, giving false confidence that a file
+            // truncated partway through the segment/delegate region would
+            // be caught, when it structurally cannot be: this matches
+            // ExecuTorch's own reference runtime, which computes the same
+            // `expected_size` formula and has the same blind spot for this
+            // header form. Report the limitation explicitly instead of
+            // silently falling through to a clean Pass.
+            let segment_size_unknown =
+                segment_base_offset != 0 && header_length < EH_LENGTH_WITH_SEGMENT_DATA_SIZE;
             let expected_size = if segment_base_offset == 0 {
                 program_size
             } else {
                 segment_base_offset.saturating_add(segment_data_size)
             };
 
-            if expected_size > 0 && size < expected_size {
+            if segment_size_unknown {
+                results.push(
+                    FindingBuilder::new(
+                        "LF-EXECUTORCH-SEGMENT-SIZE-UNKNOWN",
+                        CheckType::LayerPolicy,
+                        ScanStatus::Warn,
+                    )
+                    .class(FindingClass::Compatibility)
+                    .confidence(Confidence::High)
+                    .digest(identity)
+                    .media_type(media)
+                    .subject(subject.clone())
+                    .detail(format!(
+                        "ExecuTorch extended header declares segments starting at byte {segment_base_offset} but uses the short header form, which does not declare the segments' total size; truncation within the segment/delegate region cannot be verified"
+                    ))
+                    .evidence(structural_invariant(
+                        subject.clone(),
+                        "extended header omits segment_data_size",
+                        serde_json::json!({ "segment_base_offset": segment_base_offset, "header_length": header_length }),
+                    ))
+                    .finish(),
+                );
+            } else if expected_size > 0 && size < expected_size {
                 results.push(
                     FindingBuilder::new(
                         "LF-EXECUTORCH-TRUNCATED",

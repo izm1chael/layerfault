@@ -772,6 +772,25 @@
         ],
         "must_not_include_rules": []
       }
+    },
+    {
+      "id": "coverage-incomplete-executorch-short-header-segments",
+      "category": "coverage_incomplete",
+      "description": "ExecuTorch .pte extended header uses the short 24-byte form with segments present; segment truncation cannot be verified",
+      "command": {
+        "kind": "inspect",
+        "path": "tests/detector_quality/fixtures/coverage_incomplete/executorch_short_header_segments/model.pte"
+      },
+      "expected": {
+        "overall": "WARN",
+        "exit_code": 1,
+        "must_include_rules": [
+          "LF-EXECUTORCH-SEGMENT-SIZE-UNKNOWN"
+        ],
+        "must_not_include_rules": [
+          "LF-EXECUTORCH-TRUNCATED"
+        ]
+      }
     }
   ],
   "waivers": [
