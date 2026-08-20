@@ -223,6 +223,135 @@ fn test_coreml_inspection() {
 }
 
 #[test]
+fn test_coreml_package_inspection() {
+    let dir = tempdir().unwrap();
+
+    // 1. Valid .mlpackage
+    let valid_pkg = dir.path().join("model.mlpackage");
+    std::fs::create_dir_all(valid_pkg.join("Data/com.apple.CoreML")).unwrap();
+    File::create(valid_pkg.join("Data/com.apple.CoreML/model.mlmodel")).unwrap();
+    {
+        let mut f = File::create(valid_pkg.join("Manifest.json")).unwrap();
+        f.write_all(
+            br#"{
+            "fileFormatVersion": "1.0.0",
+            "itemInfoEntries": {
+                "com.apple.CoreML/model.mlmodel": {
+                    "path": "Data/com.apple.CoreML/model.mlmodel"
+                }
+            }
+        }"#,
+        )
+        .unwrap();
+    }
+
+    let results = layerfault::formats::coreml::scan_package(
+        &valid_pkg,
+        "test-digest",
+        "application/vnd.layerfault.package",
+    )
+    .unwrap();
+    assert!(results.iter().any(|r| r
+        .matches
+        .iter()
+        .any(|m| m.contains("LF-COREML-PACKAGE-VALID"))));
+    assert!(!results.iter().any(|r| r
+        .matches
+        .iter()
+        .any(|m| m.contains("LF-COREML-PACKAGE-UNSAFE"))));
+
+    // 2. .mlpackage with escaping symlink (coreml-mlpackage-symlink-lfi-poc)
+    #[cfg(unix)]
+    {
+        let poc_pkg = dir.path().join("poc.mlpackage");
+        std::fs::create_dir_all(poc_pkg.join("weights")).unwrap();
+        {
+            let mut f = File::create(poc_pkg.join("Manifest.json")).unwrap();
+            f.write_all(
+                br#"{
+                "fileFormatVersion": "1.0.0",
+                "itemInfoEntries": {
+                    "weights": {
+                        "path": "weights/copied_host_marker.txt"
+                    }
+                }
+            }"#,
+            )
+            .unwrap();
+        }
+        std::os::unix::fs::symlink(
+            "../../../../reviewer_host_marker.txt",
+            poc_pkg.join("weights/copied_host_marker.txt"),
+        )
+        .unwrap();
+
+        let results = layerfault::formats::coreml::scan_package(
+            &poc_pkg,
+            "test-digest",
+            "application/vnd.layerfault.package",
+        )
+        .unwrap();
+        assert!(results.iter().any(|r| r
+            .matches
+            .iter()
+            .any(|m| m.contains("LF-COREML-PACKAGE-UNSAFE"))));
+        assert!(!results.iter().any(|r| r
+            .matches
+            .iter()
+            .any(|m| m.contains("LF-COREML-PACKAGE-VALID"))));
+
+        // Test full package::inspect on the poc mlpackage
+        let report = layerfault::package::inspect(&poc_pkg).unwrap();
+        assert!(report.blocking());
+        assert!(report.findings.iter().any(|r| r
+            .matches
+            .iter()
+            .any(|m| m.contains("LF-COREML-PACKAGE-UNSAFE"))));
+        assert!(report
+            .findings
+            .iter()
+            .any(|r| r.matches.iter().any(|m| m.contains("LF-PACKAGE-SYMLINK"))));
+        assert!(!report.findings.iter().any(|r| r
+            .matches
+            .iter()
+            .any(|m| m.contains("LF-COREML-PACKAGE-VALID"))));
+    }
+
+    // 3. .mlpackage with path traversal in Manifest.json
+    let traversal_pkg = dir.path().join("traversal.mlpackage");
+    std::fs::create_dir_all(&traversal_pkg).unwrap();
+    {
+        let mut f = File::create(traversal_pkg.join("Manifest.json")).unwrap();
+        f.write_all(
+            br#"{
+            "fileFormatVersion": "1.0.0",
+            "itemInfoEntries": {
+                "weights": {
+                    "path": "../../../../etc/passwd"
+                }
+            }
+        }"#,
+        )
+        .unwrap();
+    }
+
+    let results = layerfault::formats::coreml::scan_package(
+        &traversal_pkg,
+        "test-digest",
+        "application/vnd.layerfault.package",
+    )
+    .unwrap();
+    assert!(results.iter().any(|r| r
+        .matches
+        .iter()
+        .any(|m| m.contains("LF-COREML-PACKAGE-UNSAFE"))));
+    assert!(!results.iter().any(|r| r
+        .matches
+        .iter()
+        .any(|m| m.contains("LF-COREML-PACKAGE-VALID"))));
+}
+
+#[test]
 fn test_mlx_inspection() {
     let dir = tempdir().unwrap();
 

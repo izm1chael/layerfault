@@ -160,44 +160,7 @@ pub fn scan_package(path: &Path, identity: &str, media: &str) -> Result<Vec<Laye
         .with_media_type(media);
 
     let manifest_path = path.join("Manifest.json");
-    if manifest_path.exists() {
-        match open_readonly_nofollow(&manifest_path) {
-            Ok(_) => {
-                results.push(
-                    FindingBuilder::new(
-                        "LF-COREML-PACKAGE-VALID",
-                        CheckType::LayerPolicy,
-                        ScanStatus::Pass,
-                    )
-                    .class(FindingClass::Structural)
-                    .confidence(Confidence::High)
-                    .digest(identity)
-                    .media_type(media)
-                    .subject(subject.clone())
-                    .detail("Core ML .mlpackage Manifest.json verified safely".to_owned())
-                    .finish(),
-                );
-            }
-            Err(err) => {
-                results.push(
-                    FindingBuilder::new(
-                        "LF-COREML-PACKAGE-UNSAFE",
-                        CheckType::LayerPolicy,
-                        ScanStatus::Fail,
-                    )
-                    .class(FindingClass::Structural)
-                    .confidence(Confidence::High)
-                    .digest(identity)
-                    .media_type(media)
-                    .subject(subject.clone())
-                    .detail(format!(
-                        "Core ML .mlpackage Manifest.json failed safe opening: {err}"
-                    ))
-                    .finish(),
-                );
-            }
-        }
-    } else {
+    if !manifest_path.exists() {
         results.push(
             FindingBuilder::new(
                 "LF-COREML-PACKAGE-MISSING-MANIFEST",
@@ -212,9 +175,219 @@ pub fn scan_package(path: &Path, identity: &str, media: &str) -> Result<Vec<Laye
             .detail("Core ML .mlpackage directory lacks mandatory Manifest.json file".to_owned())
             .finish(),
         );
+        return Ok(results);
+    }
+
+    let file = match open_readonly_nofollow(&manifest_path) {
+        Ok(file) => file,
+        Err(err) => {
+            results.push(
+                FindingBuilder::new(
+                    "LF-COREML-PACKAGE-UNSAFE",
+                    CheckType::LayerPolicy,
+                    ScanStatus::Fail,
+                )
+                .class(FindingClass::Structural)
+                .confidence(Confidence::High)
+                .digest(identity)
+                .media_type(media)
+                .subject(subject.clone())
+                .detail(format!(
+                    "Core ML .mlpackage Manifest.json failed safe opening: {err}"
+                ))
+                .finish(),
+            );
+            return Ok(results);
+        }
+    };
+
+    let bytes = match crate::safeio::read_all_from_file(&file, 4 * 1024 * 1024) {
+        Ok(b) => b,
+        Err(err) => {
+            results.push(
+                FindingBuilder::new(
+                    "LF-COREML-PACKAGE-UNSAFE",
+                    CheckType::LayerPolicy,
+                    ScanStatus::Fail,
+                )
+                .class(FindingClass::Structural)
+                .confidence(Confidence::High)
+                .digest(identity)
+                .media_type(media)
+                .subject(subject.clone())
+                .detail(format!(
+                    "Core ML .mlpackage Manifest.json failed safe read: {err}"
+                ))
+                .finish(),
+            );
+            return Ok(results);
+        }
+    };
+
+    let manifest_json: serde_json::Value = match serde_json::from_slice(&bytes) {
+        Ok(val) => val,
+        Err(err) => {
+            results.push(
+                FindingBuilder::new(
+                    "LF-COREML-PACKAGE-UNSAFE",
+                    CheckType::LayerPolicy,
+                    ScanStatus::Fail,
+                )
+                .class(FindingClass::Structural)
+                .confidence(Confidence::High)
+                .digest(identity)
+                .media_type(media)
+                .subject(subject.clone())
+                .detail(format!(
+                    "Core ML .mlpackage Manifest.json contains invalid JSON: {err}"
+                ))
+                .finish(),
+            );
+            return Ok(results);
+        }
+    };
+
+    let mut unsafe_manifest_refs = Vec::new();
+
+    // Check itemInfoEntries and all declared relative paths in Manifest.json
+    if let Some(item_entries) = manifest_json
+        .get("itemInfoEntries")
+        .and_then(|v| v.as_object())
+    {
+        for (item_key, item_val) in item_entries {
+            if let Some(item_path_str) = item_val.get("path").and_then(|p| p.as_str()) {
+                if item_path_str.starts_with('/')
+                    || item_path_str.starts_with('\\')
+                    || item_path_str.contains("../")
+                    || item_path_str.contains("..\\")
+                {
+                    unsafe_manifest_refs.push(format!(
+                        "item '{item_key}' references path traversal: '{item_path_str}'"
+                    ));
+                } else {
+                    let target_path = path.join(item_path_str);
+                    if let Ok(meta) = std::fs::symlink_metadata(&target_path) {
+                        if meta.file_type().is_symlink() && is_escaping_symlink(path, &target_path)
+                        {
+                            unsafe_manifest_refs.push(format!(
+                                "item '{item_key}' references escaping symlink: '{item_path_str}'"
+                            ));
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Check all symlinks present within the .mlpackage directory bundle
+    let mut escaping_bundle_symlinks = Vec::new();
+    let walker = walkdir::WalkDir::new(path)
+        .follow_links(false)
+        .max_depth(32)
+        .into_iter();
+    for entry in walker.flatten() {
+        if entry.file_type().is_symlink() && is_escaping_symlink(path, entry.path()) {
+            let rel = entry
+                .path()
+                .strip_prefix(path)
+                .unwrap_or_else(|_| entry.path())
+                .display()
+                .to_string();
+            let target_str = std::fs::read_link(entry.path())
+                .map(|t| t.display().to_string())
+                .unwrap_or_else(|_| "<unreadable>".to_owned());
+            escaping_bundle_symlinks.push(format!("'{rel}' -> '{target_str}'"));
+        }
+    }
+
+    if !unsafe_manifest_refs.is_empty() || !escaping_bundle_symlinks.is_empty() {
+        let mut details = Vec::new();
+        if !unsafe_manifest_refs.is_empty() {
+            details.push(format!(
+                "unsafe manifest references: [{}]",
+                unsafe_manifest_refs.join(", ")
+            ));
+        }
+        if !escaping_bundle_symlinks.is_empty() {
+            details.push(format!(
+                "escaping bundle symlinks: [{}]",
+                escaping_bundle_symlinks.join(", ")
+            ));
+        }
+        results.push(
+            FindingBuilder::new(
+                "LF-COREML-PACKAGE-UNSAFE",
+                CheckType::LayerPolicy,
+                ScanStatus::Fail,
+            )
+            .class(FindingClass::Structural)
+            .confidence(Confidence::High)
+            .digest(identity)
+            .media_type(media)
+            .subject(subject.clone())
+            .detail(format!(
+                "Core ML .mlpackage contains unsafe references or escaping symlinks: {}",
+                details.join("; ")
+            ))
+            .finish(),
+        );
+    } else {
+        results.push(
+            FindingBuilder::new(
+                "LF-COREML-PACKAGE-VALID",
+                CheckType::LayerPolicy,
+                ScanStatus::Pass,
+            )
+            .class(FindingClass::Structural)
+            .confidence(Confidence::High)
+            .digest(identity)
+            .media_type(media)
+            .subject(subject.clone())
+            .detail("Core ML .mlpackage Manifest.json verified safely".to_owned())
+            .finish(),
+        );
     }
 
     Ok(results)
+}
+
+fn is_escaping_symlink(bundle_root: &Path, link_path: &Path) -> bool {
+    let Ok(target) = std::fs::read_link(link_path) else {
+        return true;
+    };
+    let target_str = target.to_string_lossy();
+    if target_str.starts_with('/')
+        || target_str.starts_with('\\')
+        || target_str.contains("../")
+        || target_str.contains("..\\")
+    {
+        return true;
+    }
+    let parent = link_path.parent().unwrap_or(bundle_root);
+    let resolved = parent.join(&target);
+    if let (Ok(canon_root), Ok(canon_resolved)) =
+        (bundle_root.canonicalize(), resolved.canonicalize())
+    {
+        !canon_resolved.starts_with(canon_root)
+    } else {
+        // If canonicalization fails, check relative path components
+        let mut normal_depth: isize = 0;
+        if let Ok(rel_from_root) = parent.strip_prefix(bundle_root) {
+            normal_depth = rel_from_root.components().count() as isize;
+        }
+        for comp in target.components() {
+            match comp {
+                std::path::Component::ParentDir => normal_depth -= 1,
+                std::path::Component::Normal(_) => normal_depth += 1,
+                std::path::Component::RootDir | std::path::Component::Prefix(_) => return true,
+                _ => {}
+            }
+            if normal_depth < 0 {
+                return true;
+            }
+        }
+        false
+    }
 }
 
 fn read_varint(buf: &[u8]) -> Option<(u64, usize)> {
