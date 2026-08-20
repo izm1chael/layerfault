@@ -119,6 +119,66 @@ pub fn cache_policy() -> CachePolicy {
     }
 }
 
+/// Cache lookup only: never falls back to computing (and thus reading the
+/// whole file for) a fresh digest on a miss. Use this ahead of a physical
+/// pass that is going to happen anyway for some other reason (e.g. an
+/// uncached stream observer needs to see the bytes) — calling the eager,
+/// compute-on-miss `sha256_prefixed` in that situation would perform one
+/// full read to populate the digest cache and then a second, separate full
+/// read moments later for the observer pass, doubling I/O for no benefit
+/// since the observer pass was going to compute the digest for free anyway.
+pub fn sha256_cached_only(path: &Path, file: &File) -> Result<Option<String>> {
+    let before = capture_identity(path, file)?;
+    if !eligible(before.len) {
+        return Ok(None);
+    }
+    let Some(record) = load_digest_record(&before)? else {
+        return Ok(None);
+    };
+    let guard = cache_validation_sha256(file, before.len, None)?;
+    let after = capture_identity(path, file)?;
+    if after == before && guard == record.guard_sha256 {
+        Ok(Some(record.sha256))
+    } else {
+        Ok(None)
+    }
+}
+
+/// Persist a digest already computed by some other full-file pass (e.g. a
+/// stream-observer pass that hashed the bytes as a side effect) into the
+/// same persistent digest cache `sha256_prefixed` reads from, without
+/// performing a redundant read of its own — only cheap sampled-guard bytes
+/// are read here. `expected_before` should be the identity captured before
+/// that pass began; a mismatch means the file changed mid-scan and the
+/// digest must not be cached under a false identity.
+pub fn store_digest(
+    path: &Path,
+    file: &File,
+    expected_before: &FileIdentity,
+    sha256: &str,
+) -> Result<()> {
+    if !eligible(expected_before.len) {
+        return Ok(());
+    }
+    let after = capture_identity(path, file)?;
+    if after != *expected_before {
+        return Ok(());
+    }
+    let guard_sha256 = cache_validation_sha256(file, after.len, Some(sha256))?;
+    let final_identity = capture_identity(path, file)?;
+    if final_identity != after {
+        return Ok(());
+    }
+    let record = DigestRecord {
+        schema_version: CACHE_SCHEMA_VERSION,
+        scanner_revision: DIGEST_CACHE_REVISION.to_owned(),
+        identity: final_identity.clone(),
+        guard_sha256,
+        sha256: sha256.to_owned(),
+    };
+    store_record("digests", &final_identity, "sha256", &record)
+}
+
 pub fn sha256_prefixed(path: &Path, file: &File) -> Result<HashOutcome> {
     let before = capture_identity(path, file)?;
     if eligible(before.len) {

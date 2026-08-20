@@ -397,23 +397,13 @@ impl<'a> ScanSession<'a> {
 
     /// Evaluate cache eligibility and load available cached digest / observer evidence.
     pub fn plan(&self, observers: &[Box<dyn StreamObserver>]) -> Result<ScanPlan> {
-        let mut cached_digest = None;
-        let mut needs_digest = true;
-
-        if digest_eligible(self.size) {
-            if let Ok(outcome) =
-                crate::scanner::cache::identity::sha256_prefixed(self.path, self.file)
-            {
-                if outcome.cache_hit {
-                    cached_digest = Some(outcome.sha256);
-                    needs_digest = false;
-                    self.metrics.borrow_mut().record_cache_hit();
-                } else {
-                    self.metrics.borrow_mut().record_cache_miss();
-                }
-            }
-        }
-
+        // Observer cache state decides everything else: if any observer needs
+        // a fresh physical pass, that pass is unavoidable and will compute
+        // the digest as a side effect for free, so the digest lookup must
+        // stay cheap (lookup-only, no compute-on-miss) to avoid paying for a
+        // second full read. Only when no observer needs a pass is it worth
+        // eagerly computing (and caching) the digest via a dedicated read,
+        // since that would otherwise be the only read this scan performs.
         let mut cached_observer_results = Vec::with_capacity(observers.len());
         let mut missing_observer = false;
 
@@ -436,6 +426,40 @@ impl<'a> ScanSession<'a> {
             }
             cached_observer_results.push(None);
             missing_observer = true;
+        }
+
+        let mut cached_digest = None;
+        let mut needs_digest = true;
+
+        if digest_eligible(self.size) {
+            if missing_observer {
+                // A physical pass is happening regardless; only ask whether
+                // the digest is already known, never force a compute-on-miss
+                // read here — `run()`'s single physical pass below will
+                // compute it as part of the same read that feeds the
+                // observer, and will cache it afterward.
+                if let Ok(Some(sha256)) =
+                    crate::scanner::cache::identity::sha256_cached_only(self.path, self.file)
+                {
+                    self.metrics.borrow_mut().record_cache_hit();
+                    cached_digest = Some(sha256);
+                    needs_digest = false;
+                } else {
+                    self.metrics.borrow_mut().record_cache_miss();
+                }
+            } else if let Ok(outcome) =
+                crate::scanner::cache::identity::sha256_prefixed(self.path, self.file)
+            {
+                // No observer needs a pass, so this may be the only read this
+                // scan performs — worth eagerly computing/caching here.
+                if outcome.cache_hit {
+                    self.metrics.borrow_mut().record_cache_hit();
+                } else {
+                    self.metrics.borrow_mut().record_cache_miss();
+                }
+                cached_digest = Some(outcome.sha256);
+                needs_digest = false;
+            }
         }
 
         let needs_stream_pass = needs_digest || missing_observer;
@@ -522,6 +546,19 @@ impl<'a> ScanSession<'a> {
                     let hex_str = hex::encode(hasher.finalize());
                     format!("sha256:{hex_str}")
                 };
+                if compute_digest {
+                    // Persist the digest this pass just computed as a side
+                    // effect, so a later scan of the same unchanged file
+                    // (e.g. a different command against the same path) can
+                    // skip re-hashing even though this pass was driven by an
+                    // observer needing fresh bytes, not by the digest cache.
+                    let _ = crate::scanner::cache::identity::store_digest(
+                        self.path,
+                        self.file,
+                        &self.identity_before,
+                        &calculated_digest,
+                    );
+                }
 
                 // Complete active observers
                 for &idx in &active_indices {
