@@ -107,6 +107,7 @@ pub struct OpcodeSite {
 pub struct PickleAnalysis {
     pub completeness: AnalysisCompleteness,
     pub unresolved_execution: Vec<UnresolvedExecutionPrimitive>,
+    pub persistent_ids: Vec<OpcodeSite>,
     pub globals: BTreeSet<String>,
     pub unknown_globals: BTreeSet<String>,
     pub dangerous: BTreeSet<String>,
@@ -127,6 +128,7 @@ impl Default for PickleAnalysis {
         Self {
             completeness: AnalysisCompleteness::Complete,
             unresolved_execution: Vec::new(),
+            persistent_ids: Vec::new(),
             globals: BTreeSet::new(),
             unknown_globals: BTreeSet::new(),
             dangerous: BTreeSet::new(),
@@ -436,6 +438,36 @@ fn finding_from_analysis(
         .started(started);
         for value in &dangerous {
             builder = builder.evidence(opcode_evidence(&subject, &analysis, value));
+        }
+        return builder.finish();
+    }
+    if !analysis.persistent_ids.is_empty() {
+        let first_entry = analysis.persistent_ids[0].entry.clone();
+        let mut builder = FindingBuilder::new(
+            "LF-PICKLE-PERSISTENT-ID",
+            CheckType::ScannerAssurance,
+            ScanStatus::Warn,
+        )
+        .class(FindingClass::Structural)
+        .confidence(Confidence::High)
+        .digest(identity)
+        .media_type(media)
+        .subject(subject.clone())
+        .detail(format!(
+            "{label} contains persistent ID opcode(s) (PERSID/BINPERSID); persistent ID resolution is application-defined and requires resolver-aware review"
+        ))
+        .match_note(format!("persistent ID opcode observed: {first_entry}"))
+        .started(started);
+        for site in &analysis.persistent_ids {
+            builder = builder.evidence(serialization_opcode(
+                subject.clone(),
+                site.opcode_index,
+                site.byte_offset,
+                serde_json::json!({
+                    "opcode": site.opcode,
+                    "entry": site.entry,
+                }),
+            ));
         }
         return builder.finish();
     }
@@ -948,12 +980,12 @@ fn analyze_reader_inner<R: Read + Seek>(
                 }
             }
             b'P' => {
-                state.record_unresolved("PERSID", "persistent ID resolution is application-defined and may invoke external object loading");
+                state.record_persistent_id("PERSID");
                 skip_line(&mut reader, &mut pos, len, MAX_TRACKED_STRING_BYTES)?;
                 state.push(StackValue::Other)?;
             }
             b'Q' => {
-                state.record_unresolved("BINPERSID", "persistent ID resolution is application-defined and may invoke external object loading");
+                state.record_persistent_id("BINPERSID");
                 state.pop();
                 state.push(StackValue::Other)?;
             }
@@ -1246,6 +1278,20 @@ impl ParserState {
         } else if !is_allowlisted(value) {
             self.note_site(value);
             self.analysis.unknown_globals.insert(value.to_owned());
+        }
+    }
+    fn record_persistent_id(&mut self, opcode: &'static str) {
+        let site = OpcodeSite {
+            entry: opcode.to_owned(),
+            opcode,
+            opcode_index: self.analysis.opcode_count as u64,
+            byte_offset: self.current_offset,
+        };
+        if self.analysis.persistent_ids.len() < MAX_OPCODE_SITES {
+            self.analysis.persistent_ids.push(site.clone());
+        }
+        if self.analysis.sites.len() < MAX_OPCODE_SITES {
+            self.analysis.sites.push(site);
         }
     }
     fn record_extension(&mut self, code: u32) {
@@ -1542,6 +1588,46 @@ mod tests {
         let analysis = analyze_bytes(&global("acme.model", "CustomTensor"))?;
         assert!(analysis.unknown_globals.contains("acme.model.CustomTensor"));
         Ok(())
+    }
+
+    #[test]
+    fn persistent_id_persid_emits_rule() {
+        let bytes = b"Pexternal_ref\n.";
+        let subject = EvidenceSubject::identity("sha256:abcd", "application/octet-stream");
+        let analysis = analyze_bytes(bytes).expect("analysis");
+        assert_eq!(analysis.persistent_ids.len(), 1);
+        assert_eq!(analysis.persistent_ids[0].entry, "PERSID");
+
+        let finding = finding_from_analysis(
+            analysis,
+            "sha256:abcd",
+            "application/octet-stream",
+            "pickle stream",
+            subject,
+            Instant::now(),
+        );
+        assert_eq!(crate::policy::rule_id(&finding), "LF-PICKLE-PERSISTENT-ID");
+        assert_eq!(finding.status, ScanStatus::Warn);
+    }
+
+    #[test]
+    fn persistent_id_binpersid_emits_rule() {
+        let bytes = b"\x80\x02X\x04\x00\x00\x00dataQ.";
+        let subject = EvidenceSubject::identity("sha256:abcd", "application/octet-stream");
+        let analysis = analyze_bytes(bytes).expect("analysis");
+        assert_eq!(analysis.persistent_ids.len(), 1);
+        assert_eq!(analysis.persistent_ids[0].entry, "BINPERSID");
+
+        let finding = finding_from_analysis(
+            analysis,
+            "sha256:abcd",
+            "application/octet-stream",
+            "pickle stream",
+            subject,
+            Instant::now(),
+        );
+        assert_eq!(crate::policy::rule_id(&finding), "LF-PICKLE-PERSISTENT-ID");
+        assert_eq!(finding.status, ScanStatus::Warn);
     }
 
     #[test]

@@ -87,6 +87,14 @@ pub fn risk_lookup(rule: &str) -> RiskExplanation {
             vec!["unreviewed class construction", "arbitrary code execution if a dangerous loader is used"],
             vec!["Review the exact named/opaque content before loading.", "Prefer Safetensors/GGUF or a weights-only loader."],
         ),
+        "LF-PICKLE-PERSISTENT-ID" => (
+            "Pickle persistent ID observed",
+            vec!["Parser Assurance", "Supply Chain"],
+            "Pickle persistent-ID semantics (PERSID/BINPERSID) were observed in the opcode stream.",
+            "Persistent ID resolution is application-defined and can invoke external or custom object loading.",
+            vec!["arbitrary object resolution", "loader confusion", "unresolved external reference"],
+            vec!["Review the persistent ID resolver implementation before loading.", "Prefer data-only serialization."],
+        ),
         "LF-SERIALIZATION-UNSAFE" => (
             "Code-capable model serialization detected",
             vec!["Code Execution", "Supply Chain"],

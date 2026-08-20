@@ -649,6 +649,7 @@ fn pipeline_priority(finding: &layerfault::scanner::LayerScanResult) -> u8 {
         | "LF-SERIALIZATION-UNSAFE"
         | "LF-CODE-IMPORT-SIDE-EFFECT" => 3,
         "LF-PICKLE-UNKNOWN-GLOBAL"
+        | "LF-PICKLE-PERSISTENT-ID"
         | "LF-PICKLE-OPAQUE-COMPRESSED"
         | "LF-PICKLE-OPAQUE-CONTAINER" => 4,
         "LF-CODE-AUTO-MAP" | "LF-CODE-REMOTE-TRUST" | "LF-PACKAGE-CODE" => 4,
