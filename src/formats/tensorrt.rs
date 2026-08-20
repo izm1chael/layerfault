@@ -78,13 +78,22 @@ pub fn scan(
         );
     }
 
-    // Binary scan for embedded executable payloads or native binaries
+    // Binary scan for embedded executable payloads or native binaries.
+    //
+    // Unlike a weights-only format (GGUF, Safetensors), a TensorRT engine's
+    // entire purpose is to be a serialized, compiled GPU execution plan —
+    // it inherently contains compiled machine code as normal, expected,
+    // load-bearing content. There is no such thing as a "clean" engine
+    // without one. Reporting this generic scan as a blocking finding would
+    // fail every real TensorRT engine, not just tampered ones, so it's kept
+    // as visible, non-blocking evidence instead of forwarded as a Fail.
     let bin_result = BinaryScanner::scan_file(file, size, identity, media)?;
     if bin_result.status == ScanStatus::Fail {
         let mut executable_finding = bin_result;
+        executable_finding.status = ScanStatus::Warn;
         executable_finding.check_type = CheckType::PackageSecurity;
         executable_finding.detail = Some(
-            "TensorRT engine blob contains embedded native executable binary payload".to_owned(),
+            "TensorRT engine blob contains embedded native executable/binary payload; this is expected of every serialized TensorRT engine (a compiled GPU execution plan) and is not, by itself, evidence of tampering".to_owned(),
         );
         results.push(executable_finding);
     }
