@@ -130,9 +130,8 @@ impl HubFile {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize)]
 pub struct HubModel {
-    #[serde(alias = "modelId")]
     pub id: String,
     #[serde(default)]
     pub sha: Option<String>,
@@ -152,6 +151,66 @@ pub struct HubModel {
     pub library_name: Option<String>,
     #[serde(default)]
     pub card_data: Option<serde_json::Value>,
+}
+
+// A plain `#[serde(alias = "modelId")]` on `id` cannot represent this API's
+// real response shape: every live Hub endpoint (the model-list endpoint
+// `platform crawl` uses, and the single-model endpoint the webhook path
+// uses) sends *both* `id` and `modelId` as separate top-level keys with the
+// same value, simultaneously. `#[serde(alias = ...)]` only tells serde which
+// *one* spelling to accept — it treats two recognized spellings appearing
+// together as a genuine duplicate-field conflict and rejects the whole
+// payload, regardless of whether the alias happens to equal the field's own
+// canonical name. Deserializing into an intermediate shape with both keys
+// optional, then resolving `id.or(model_id)` afterward, is required.
+impl<'de> Deserialize<'de> for HubModel {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        struct Raw {
+            #[serde(default)]
+            id: Option<String>,
+            #[serde(default, rename = "modelId")]
+            model_id: Option<String>,
+            #[serde(default)]
+            sha: Option<String>,
+            #[serde(default)]
+            private: bool,
+            #[serde(default)]
+            gated: serde_json::Value,
+            #[serde(default)]
+            siblings: Vec<HubFile>,
+            #[serde(default, rename = "lastModified")]
+            last_modified: Option<String>,
+            #[serde(default)]
+            tags: Vec<String>,
+            #[serde(default)]
+            pipeline_tag: Option<String>,
+            #[serde(default)]
+            library_name: Option<String>,
+            #[serde(default)]
+            card_data: Option<serde_json::Value>,
+        }
+
+        let raw = Raw::deserialize(deserializer)?;
+        let id = raw.id.or(raw.model_id).ok_or_else(|| {
+            serde::de::Error::custom("Hub model response is missing both `id` and `modelId`")
+        })?;
+        Ok(HubModel {
+            id,
+            sha: raw.sha,
+            private: raw.private,
+            gated: raw.gated,
+            siblings: raw.siblings,
+            last_modified: raw.last_modified,
+            tags: raw.tags,
+            pipeline_tag: raw.pipeline_tag,
+            library_name: raw.library_name,
+            card_data: raw.card_data,
+        })
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -248,6 +307,39 @@ pub fn is_security_relevant_member(path: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn hub_model_accepts_id_and_model_id_present_together() {
+        // Every real Hub API response (both the list endpoint `platform
+        // crawl` uses and the single-model endpoint the webhook path uses)
+        // sends `id` and `modelId` as separate top-level keys simultaneously,
+        // with the same value. A plain `#[serde(alias = "modelId")]` on `id`
+        // rejects this as a duplicate-field conflict.
+        let json = r#"{"id":"Qwen/Qwen3-0.6B","modelId":"Qwen/Qwen3-0.6B","sha":"abc123"}"#;
+        let model: HubModel =
+            serde_json::from_str(json).expect("must parse a real Hub payload shape");
+        assert_eq!(model.id, "Qwen/Qwen3-0.6B");
+    }
+
+    #[test]
+    fn hub_model_falls_back_to_model_id_when_id_absent() {
+        let json = r#"{"modelId":"Qwen/Qwen3-0.6B"}"#;
+        let model: HubModel = serde_json::from_str(json).expect("modelId alone must still resolve");
+        assert_eq!(model.id, "Qwen/Qwen3-0.6B");
+    }
+
+    #[test]
+    fn hub_model_accepts_bare_id_alone() {
+        let json = r#"{"id":"Qwen/Qwen3-0.6B"}"#;
+        let model: HubModel = serde_json::from_str(json).expect("id alone must still resolve");
+        assert_eq!(model.id, "Qwen/Qwen3-0.6B");
+    }
+
+    #[test]
+    fn hub_model_rejects_missing_both_id_and_model_id() {
+        let json = r#"{"sha":"abc123"}"#;
+        assert!(serde_json::from_str::<HubModel>(json).is_err());
+    }
 
     #[test]
     fn security_member_selector_includes_loader_and_serialization_risk() {
