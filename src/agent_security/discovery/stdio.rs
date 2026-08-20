@@ -191,7 +191,7 @@ fn spawn_sandboxed(
     command.args(&bwrap_args);
     command.stdin(Stdio::piped());
     command.stdout(Stdio::piped());
-    command.stderr(Stdio::null());
+    command.stderr(Stdio::piped());
     crate::behaviour::sandbox::configure_process_group(&mut command);
     // Keep the pinned descriptors alive until after spawn (their CLOEXEC
     // flag was already cleared so the child inherits them); explicit drop
@@ -225,6 +225,7 @@ struct JsonRpcStdio {
     stdin: ChildStdin,
     lines: mpsc::Receiver<std::io::Result<String>>,
     next_id: u64,
+    stderr: std::sync::Arc<std::sync::Mutex<Vec<u8>>>,
 }
 
 impl JsonRpcStdio {
@@ -255,11 +256,38 @@ impl JsonRpcStdio {
                 }
             }
         });
+        let stderr_buf = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        if let Some(mut stderr) = child.stderr.take() {
+            let stderr_buf_clone = stderr_buf.clone();
+            std::thread::spawn(move || {
+                let mut reader = (&mut stderr).take(64 * 1024);
+                let mut chunk = Vec::new();
+                let _ = reader.read_to_end(&mut chunk);
+                if let Ok(mut lock) = stderr_buf_clone.lock() {
+                    *lock = chunk;
+                }
+            });
+        }
         Ok(Self {
             stdin,
             lines,
             next_id: 1,
+            stderr: stderr_buf,
         })
+    }
+
+    fn stderr_string(&self) -> String {
+        self.stderr
+            .lock()
+            .ok()
+            .and_then(|bytes| {
+                if bytes.is_empty() {
+                    None
+                } else {
+                    Some(String::from_utf8_lossy(&bytes).trim().to_owned())
+                }
+            })
+            .unwrap_or_default()
     }
 
     fn send(&mut self, method: &str, params: Value, expect_response: bool) -> Result<Option<u64>> {
@@ -332,9 +360,16 @@ fn run_discovery_sequence(child: &mut Child, timeout: Duration) -> Result<StdioD
         .expect("initialize always expects a response");
     let initialize_response = transport.recv_response(init_id, deadline).ok();
     if initialize_response.is_none() {
-        limitations.push(
-            "MCP server did not respond to initialize within the discovery timeout".to_owned(),
-        );
+        let stderr = transport.stderr_string();
+        if stderr.is_empty() {
+            limitations.push(
+                "MCP server did not respond to initialize within the discovery timeout".to_owned(),
+            );
+        } else {
+            limitations.push(format!(
+                "MCP server did not respond to initialize within the discovery timeout; process stderr: {stderr}"
+            ));
+        }
         return Ok(StdioDiscoveryOutcome {
             initialize: None,
             tools_list: None,
@@ -363,7 +398,14 @@ fn run_discovery_sequence(child: &mut Child, timeout: Duration) -> Result<StdioD
         match transport.recv_response(id, deadline) {
             Ok(response) => response.get("result").cloned(),
             Err(error) => {
-                limitations.push(format!("MCP discovery {method} failed: {error}"));
+                let stderr = transport.stderr_string();
+                if stderr.is_empty() {
+                    limitations.push(format!("MCP discovery {method} failed: {error}"));
+                } else {
+                    limitations.push(format!(
+                        "MCP discovery {method} failed: {error}; process stderr: {stderr}"
+                    ));
+                }
                 None
             }
         }
@@ -608,5 +650,31 @@ for line in sys.stdin:
         assert!(error.to_string().contains("not a regular file"));
 
         let _ = std::fs::remove_dir_all(&directory);
+    }
+
+    #[test]
+    fn discovery_captures_child_stderr_on_failure() {
+        if !bwrap_available() {
+            eprintln!("skipping: bubblewrap not available");
+            return;
+        }
+        let script = r#"
+import sys
+sys.stderr.write("simulated MCP startup diagnostic error\n")
+sys.stderr.flush()
+sys.exit(1)
+"#;
+        let script_path = write_executable_fixture("failing_mcp.py", script);
+        let outcome = discover_stdio(script_path.to_str().unwrap(), &[])
+            .expect("discover_stdio should return outcome with limitations");
+        let _ = std::fs::remove_file(&script_path);
+
+        assert!(outcome.initialize.is_none());
+        assert!(!outcome.limitations.is_empty());
+        assert!(
+            outcome.limitations[0].contains("simulated MCP startup diagnostic error"),
+            "limitation should include captured process stderr: {:?}",
+            outcome.limitations
+        );
     }
 }

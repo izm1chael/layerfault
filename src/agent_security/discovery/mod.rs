@@ -405,6 +405,7 @@ pub fn snapshot_from_stdio(
         outcome.prompts_list,
         server_transport_identity,
         observed_at,
+        &outcome.limitations,
     )?;
     Ok((snapshot, outcome.limitations))
 }
@@ -425,6 +426,7 @@ pub fn snapshot_from_remote(
         outcome.prompts_list,
         server_transport_identity,
         observed_at,
+        &outcome.limitations,
     )?;
     Ok((snapshot, outcome.limitations))
 }
@@ -436,9 +438,14 @@ fn snapshot_from_outcome(
     prompts_list: Option<Value>,
     server_transport_identity: String,
     observed_at: u64,
+    limitations: &[String],
 ) -> Result<McpCapabilitySnapshot> {
     let Some(initialize) = initialize else {
-        bail!("MCP discovery did not receive a usable initialize response");
+        if let Some(first_lim) = limitations.first() {
+            bail!("MCP discovery did not receive a usable initialize response: {first_lim}");
+        } else {
+            bail!("MCP discovery did not receive a usable initialize response");
+        }
     };
     let protocol = parse_initialize_response(&initialize);
     let tools = parse_tools_list(&initialize, tools_list.as_ref());

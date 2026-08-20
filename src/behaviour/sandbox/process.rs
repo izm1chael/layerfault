@@ -82,6 +82,8 @@ fn signal_linux_tree(root: u32, signal: &str) {
                 .arg(signal)
                 .arg("--")
                 .arg(pid.to_string())
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
                 .env_clear()
                 .status();
         }
