@@ -180,29 +180,7 @@ pub fn scan(
                 segment_base_offset.saturating_add(segment_data_size)
             };
 
-            if segment_size_unknown {
-                results.push(
-                    FindingBuilder::new(
-                        "LF-EXECUTORCH-SEGMENT-SIZE-UNKNOWN",
-                        CheckType::LayerPolicy,
-                        ScanStatus::Warn,
-                    )
-                    .class(FindingClass::Compatibility)
-                    .confidence(Confidence::High)
-                    .digest(identity)
-                    .media_type(media)
-                    .subject(subject.clone())
-                    .detail(format!(
-                        "ExecuTorch extended header declares segments starting at byte {segment_base_offset} but uses the short header form, which does not declare the segments' total size; truncation within the segment/delegate region cannot be verified"
-                    ))
-                    .evidence(structural_invariant(
-                        subject.clone(),
-                        "extended header omits segment_data_size",
-                        serde_json::json!({ "segment_base_offset": segment_base_offset, "header_length": header_length }),
-                    ))
-                    .finish(),
-                );
-            } else if expected_size > 0 && size < expected_size {
+            if expected_size > 0 && size < expected_size {
                 results.push(
                     FindingBuilder::new(
                         "LF-EXECUTORCH-TRUNCATED",
@@ -225,6 +203,28 @@ pub fn scan(
                     .finish(),
                 );
                 return Ok(results);
+            } else if segment_size_unknown {
+                results.push(
+                    FindingBuilder::new(
+                        "LF-EXECUTORCH-SEGMENT-SIZE-UNKNOWN",
+                        CheckType::LayerPolicy,
+                        ScanStatus::Warn,
+                    )
+                    .class(FindingClass::Compatibility)
+                    .confidence(Confidence::High)
+                    .digest(identity)
+                    .media_type(media)
+                    .subject(subject.clone())
+                    .detail(format!(
+                        "ExecuTorch extended header declares segments starting at byte {segment_base_offset} but uses the short header form, which does not declare the segments' total size; truncation within the segment/delegate region cannot be verified"
+                    ))
+                    .evidence(structural_invariant(
+                        subject.clone(),
+                        "extended header omits segment_data_size",
+                        serde_json::json!({ "segment_base_offset": segment_base_offset, "header_length": header_length }),
+                    ))
+                    .finish(),
+                );
             }
         }
     }
