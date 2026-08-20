@@ -206,6 +206,21 @@ fn test_symlink_and_hardlink_members() -> anyhow::Result<()> {
     Ok(())
 }
 
+fn simple_crc32(bytes: &[u8]) -> u32 {
+    let mut crc = 0xFFFF_FFFFu32;
+    for &byte in bytes {
+        crc ^= byte as u32;
+        for _ in 0..8 {
+            if crc & 1 != 0 {
+                crc = (crc >> 1) ^ 0xEDB8_8320;
+            } else {
+                crc >>= 1;
+            }
+        }
+    }
+    !crc
+}
+
 #[test]
 fn test_duplicate_names_and_case_collisions() -> anyhow::Result<()> {
     let dir = tempdir()?;
@@ -221,7 +236,8 @@ fn test_duplicate_names_and_case_collisions() -> anyhow::Result<()> {
 
     for (name, content) in &entries {
         let offset = raw.len() as u32;
-        cd_offsets.push((offset, *name, content.len() as u32));
+        let crc = simple_crc32(content);
+        cd_offsets.push((offset, *name, content.len() as u32, crc));
 
         raw.extend_from_slice(b"PK\x03\x04");
         raw.extend_from_slice(&[0x14, 0x00]); // version needed
@@ -229,7 +245,7 @@ fn test_duplicate_names_and_case_collisions() -> anyhow::Result<()> {
         raw.extend_from_slice(&[0x00, 0x00]); // compression = stored
         raw.extend_from_slice(&[0x00, 0x00]); // time
         raw.extend_from_slice(&[0x00, 0x00]); // date
-        raw.extend_from_slice(&[0x00, 0x00, 0x00, 0x00]); // crc32
+        raw.extend_from_slice(&crc.to_le_bytes()); // crc32
         let size = content.len() as u32;
         raw.extend_from_slice(&size.to_le_bytes());
         raw.extend_from_slice(&size.to_le_bytes());
@@ -241,7 +257,7 @@ fn test_duplicate_names_and_case_collisions() -> anyhow::Result<()> {
     }
 
     let cd_start = raw.len() as u32;
-    for (offset, name, size) in cd_offsets {
+    for (offset, name, size, crc) in cd_offsets {
         raw.extend_from_slice(b"PK\x01\x02");
         raw.extend_from_slice(&[0x14, 0x00]); // version made
         raw.extend_from_slice(&[0x14, 0x00]); // version needed
@@ -249,7 +265,7 @@ fn test_duplicate_names_and_case_collisions() -> anyhow::Result<()> {
         raw.extend_from_slice(&[0x00, 0x00]); // stored
         raw.extend_from_slice(&[0x00, 0x00]); // time
         raw.extend_from_slice(&[0x00, 0x00]); // date
-        raw.extend_from_slice(&[0x00, 0x00, 0x00, 0x00]); // crc32
+        raw.extend_from_slice(&crc.to_le_bytes()); // crc32
         raw.extend_from_slice(&size.to_le_bytes());
         raw.extend_from_slice(&size.to_le_bytes());
         let name_len = name.len() as u16;
@@ -275,15 +291,45 @@ fn test_duplicate_names_and_case_collisions() -> anyhow::Result<()> {
     raw.extend_from_slice(&cd_start.to_le_bytes());
     raw.extend_from_slice(&[0x00, 0x00]);
 
-    fs::write(&zip_path, raw)?;
+    fs::write(&zip_path, &raw)?;
 
     let limits = ArchiveLimits::default();
     let report = archive::inspect(&zip_path, &limits)?;
 
-    assert!(report
-        .findings
-        .iter()
-        .any(|f| f.matches.iter().any(|m| m.contains("LF-ARCHIVE-DUPLICATE"))));
+    assert_eq!(
+        report.members.len(),
+        3,
+        "All 3 central directory entries must be processed"
+    );
+
+    // Exact duplicate entry assertion
+    assert!(
+        report.findings.iter().any(|f| {
+            f.matches.iter().any(|m| m.contains("LF-ARCHIVE-DUPLICATE"))
+                && f.status == ScanStatus::Fail
+                && f.detail
+                    .as_deref()
+                    .map(|d| d.contains("duplicate entry for normalized path 'model.py'"))
+                    .unwrap_or(false)
+        }),
+        "Must flag exact-name duplicate model.py entry: {:?}",
+        report.findings
+    );
+
+    // Case collision assertion
+    assert!(
+        report.findings.iter().any(|f| {
+            f.matches.iter().any(|m| m.contains("LF-ARCHIVE-DUPLICATE"))
+                && f.status == ScanStatus::Warn
+                && f.detail
+                    .as_deref()
+                    .map(|d| d.contains("case-collides with existing entry 'model.py'"))
+                    .unwrap_or(false)
+        }),
+        "Must flag case collision for Model.py: {:?}",
+        report.findings
+    );
+
     Ok(())
 }
 

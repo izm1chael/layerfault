@@ -4,14 +4,224 @@ use super::member::{format_virtual_subject, normalize_member_path, ArchiveMember
 use super::{ArchiveCoverage, ArchiveMemberReport, ArchiveReport, CoverageState};
 use crate::safeio::open_readonly_nofollow;
 use crate::scanner::{CheckType, Confidence, FindingClass, LayerScanResult, ScanStatus};
-use anyhow::{anyhow, Context, Result};
+use anyhow::{anyhow, bail, Context, Result};
 use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::Path;
 use tempfile::NamedTempFile;
-use zip::ZipArchive;
+
+#[derive(Debug, Clone)]
+struct RawZipEntry {
+    raw_name: String,
+    compressed_size: u64,
+    uncompressed_size: u64,
+    local_header_offset: u64,
+    compression_method: u16,
+    is_dir: bool,
+    is_encrypted: bool,
+    is_symlink: bool,
+}
+
+fn read_central_directory_entries<R: Read + Seek>(reader: &mut R) -> Result<Vec<RawZipEntry>> {
+    let file_len = reader.seek(SeekFrom::End(0))?;
+    if file_len < 22 {
+        bail!("file too short to be a valid ZIP archive");
+    }
+
+    // Read up to 65535 + 22 bytes from the end to find EOCD
+    let search_len = (65535 + 22).min(file_len);
+    let search_offset = file_len - search_len;
+    reader.seek(SeekFrom::Start(search_offset))?;
+    let mut search_buf = vec![0u8; search_len as usize];
+    reader.read_exact(&mut search_buf)?;
+
+    // Find EOCD (PK\x05\x06) from the end
+    let mut eocd_pos = None;
+    for i in (0..=search_buf.len().saturating_sub(22)).rev() {
+        if &search_buf[i..i + 4] == b"PK\x05\x06" {
+            let comment_len =
+                u16::from_le_bytes(search_buf[i + 20..i + 22].try_into().unwrap()) as usize;
+            if i + 22 + comment_len <= search_buf.len() {
+                eocd_pos = Some(search_offset + i as u64);
+                break;
+            }
+        }
+    }
+
+    let Some(eocd_offset) = eocd_pos else {
+        bail!("unable to find ZIP End of Central Directory (EOCD) record");
+    };
+
+    reader.seek(SeekFrom::Start(eocd_offset))?;
+    let mut eocd = [0u8; 22];
+    reader.read_exact(&mut eocd)?;
+
+    let mut cd_size = u32::from_le_bytes(eocd[12..16].try_into().unwrap()) as u64;
+    let mut cd_offset = u32::from_le_bytes(eocd[16..20].try_into().unwrap()) as u64;
+    let cd_entries_total = u16::from_le_bytes(eocd[10..12].try_into().unwrap()) as u64;
+
+    // Check for Zip64 EOCD Locator (20 bytes before EOCD)
+    if (cd_entries_total == 0xFFFF || cd_size == 0xFFFFFFFF || cd_offset == 0xFFFFFFFF)
+        && eocd_offset >= 20
+    {
+        reader.seek(SeekFrom::Start(eocd_offset - 20))?;
+        let mut locator = [0u8; 20];
+        if reader.read_exact(&mut locator).is_ok() && &locator[..4] == b"PK\x06\x07" {
+            let zip64_eocd_offset = u64::from_le_bytes(locator[8..16].try_into().unwrap());
+            if zip64_eocd_offset < file_len {
+                reader.seek(SeekFrom::Start(zip64_eocd_offset))?;
+                let mut zip64_eocd = [0u8; 56];
+                if reader.read_exact(&mut zip64_eocd).is_ok() && &zip64_eocd[..4] == b"PK\x06\x06" {
+                    cd_size = u64::from_le_bytes(zip64_eocd[40..48].try_into().unwrap());
+                    cd_offset = u64::from_le_bytes(zip64_eocd[48..56].try_into().unwrap());
+                }
+            }
+        }
+    }
+
+    if cd_offset >= file_len {
+        bail!("ZIP central directory offset is beyond end of file");
+    }
+
+    reader.seek(SeekFrom::Start(cd_offset))?;
+    let mut entries = Vec::new();
+    let cd_end = cd_offset.saturating_add(cd_size).min(file_len);
+
+    let mut current_pos = cd_offset;
+    while current_pos + 46 <= cd_end {
+        let mut header = [0u8; 46];
+        if reader.read_exact(&mut header).is_err() {
+            break;
+        }
+        if &header[..4] != b"PK\x01\x02" {
+            break;
+        }
+        let flags = u16::from_le_bytes(header[8..10].try_into().unwrap());
+        let compression_method = u16::from_le_bytes(header[10..12].try_into().unwrap());
+        let mut compressed_size = u32::from_le_bytes(header[20..24].try_into().unwrap()) as u64;
+        let mut uncompressed_size = u32::from_le_bytes(header[24..28].try_into().unwrap()) as u64;
+        let name_len = u16::from_le_bytes(header[28..30].try_into().unwrap()) as usize;
+        let extra_len = u16::from_le_bytes(header[30..32].try_into().unwrap()) as usize;
+        let comment_len = u16::from_le_bytes(header[32..34].try_into().unwrap()) as usize;
+        let ext_attr = u32::from_le_bytes(header[38..42].try_into().unwrap());
+        let mut local_offset = u32::from_le_bytes(header[42..46].try_into().unwrap()) as u64;
+
+        let mut name_bytes = vec![0u8; name_len];
+        if reader.read_exact(&mut name_bytes).is_err() {
+            break;
+        }
+        let raw_name = String::from_utf8_lossy(&name_bytes).into_owned();
+
+        let mut extra_bytes = vec![0u8; extra_len];
+        if reader.read_exact(&mut extra_bytes).is_err() {
+            break;
+        }
+
+        // Parse Zip64 extra field if needed
+        let mut extra_idx = 0;
+        while extra_idx + 4 <= extra_bytes.len() {
+            let header_id =
+                u16::from_le_bytes(extra_bytes[extra_idx..extra_idx + 2].try_into().unwrap());
+            let data_size = u16::from_le_bytes(
+                extra_bytes[extra_idx + 2..extra_idx + 4]
+                    .try_into()
+                    .unwrap(),
+            ) as usize;
+            extra_idx += 4;
+            if extra_idx + data_size > extra_bytes.len() {
+                break;
+            }
+            if header_id == 0x0001 {
+                let mut field_offset = extra_idx;
+                if uncompressed_size == 0xFFFFFFFF && field_offset + 8 <= extra_idx + data_size {
+                    uncompressed_size = u64::from_le_bytes(
+                        extra_bytes[field_offset..field_offset + 8]
+                            .try_into()
+                            .unwrap(),
+                    );
+                    field_offset += 8;
+                }
+                if compressed_size == 0xFFFFFFFF && field_offset + 8 <= extra_idx + data_size {
+                    compressed_size = u64::from_le_bytes(
+                        extra_bytes[field_offset..field_offset + 8]
+                            .try_into()
+                            .unwrap(),
+                    );
+                    field_offset += 8;
+                }
+                if local_offset == 0xFFFFFFFF && field_offset + 8 <= extra_idx + data_size {
+                    local_offset = u64::from_le_bytes(
+                        extra_bytes[field_offset..field_offset + 8]
+                            .try_into()
+                            .unwrap(),
+                    );
+                }
+            }
+            extra_idx += data_size;
+        }
+
+        // Skip comment
+        if comment_len > 0 {
+            let _ = reader.seek(SeekFrom::Current(comment_len as i64));
+        }
+
+        let mode = ext_attr >> 16;
+        let is_dir = raw_name.ends_with('/')
+            || raw_name.ends_with('\\')
+            || (mode & 0o170000) == 0o040000
+            || (ext_attr & 0x10) != 0;
+        let is_encrypted = (flags & 1) != 0;
+        let is_symlink = (mode & 0o170000) == 0o120000;
+
+        entries.push(RawZipEntry {
+            raw_name,
+            compressed_size,
+            uncompressed_size,
+            local_header_offset: local_offset,
+            compression_method,
+            is_dir,
+            is_encrypted,
+            is_symlink,
+        });
+
+        current_pos += 46 + name_len as u64 + extra_len as u64 + comment_len as u64;
+    }
+
+    Ok(entries)
+}
+
+fn open_raw_zip_entry<'a, R: Read + Seek>(
+    reader: &'a mut R,
+    entry: &RawZipEntry,
+) -> Result<Box<dyn Read + 'a>> {
+    reader.seek(SeekFrom::Start(entry.local_header_offset))?;
+    let mut local_header = [0u8; 30];
+    reader.read_exact(&mut local_header)?;
+    if &local_header[..4] != b"PK\x03\x04" {
+        bail!(
+            "invalid local file header magic at offset {}",
+            entry.local_header_offset
+        );
+    }
+    let name_len = u16::from_le_bytes(local_header[26..28].try_into().unwrap()) as u64;
+    let extra_len = u16::from_le_bytes(local_header[28..30].try_into().unwrap()) as u64;
+    let data_offset = entry.local_header_offset + 30 + name_len + extra_len;
+    reader.seek(SeekFrom::Start(data_offset))?;
+
+    let take_reader = reader.take(entry.compressed_size);
+    if entry.compression_method == 0 {
+        Ok(Box::new(take_reader))
+    } else if entry.compression_method == 8 {
+        Ok(Box::new(flate2::read::DeflateDecoder::new(take_reader)))
+    } else {
+        bail!(
+            "unsupported ZIP compression method {}",
+            entry.compression_method
+        );
+    }
+}
 
 pub fn inspect_zip(
     display_path: &Path,
@@ -33,10 +243,10 @@ pub fn inspect_zip(
     })?;
     cloned_file.seek(SeekFrom::Start(0))?;
 
-    let mut archive = ZipArchive::new(cloned_file)
+    let cd_entries = read_central_directory_entries(&mut cloned_file)
         .with_context(|| format!("Invalid ZIP archive header in '{}'", display_path.display()))?;
 
-    let member_count = archive.len();
+    let member_count = cd_entries.len();
     if member_count > budget.limits.max_members_per_archive {
         let report_findings = vec![make_finding(
             identity,
@@ -77,7 +287,7 @@ pub fn inspect_zip(
     let mut wheel_record_map: BTreeMap<String, (String, u64)> = BTreeMap::new();
     let mut member_digests: BTreeMap<String, (String, u64)> = BTreeMap::new();
 
-    for i in 0..member_count {
+    for (i, entry) in cd_entries.into_iter().enumerate() {
         if global_budget.check().is_err() {
             coverage_state = CoverageState::Incomplete;
             coverage_details.push(format!(
@@ -106,66 +316,12 @@ pub fn inspect_zip(
             break;
         }
 
-        let mut zip_entry = match archive.by_index(i) {
-            Ok(entry) => entry,
-            Err(err) => {
-                let err_msg = err.to_string();
-                let lower_err = err_msg.to_ascii_lowercase();
-                if lower_err.contains("password") || lower_err.contains("encrypt") {
-                    coverage_state = CoverageState::Incomplete;
-                    coverage_details.push(format!("Encrypted member at index {}", i));
-                    findings.push(make_finding(
-                        identity,
-                        CheckType::PackageSecurity,
-                        ScanStatus::Warn,
-                        FindingClass::Structural,
-                        Confidence::High,
-                        "LF-ARCHIVE-ENCRYPTED",
-                        format!(
-                            "ZIP entry at index {} is encrypted; content inspection skipped: {}",
-                            i, err_msg
-                        ),
-                    ));
-                    member_reports.push(ArchiveMemberReport {
-                        virtual_path: format!("{identity}!/member_{i}"),
-                        raw_name: format!("member_{i}"),
-                        size_compressed: 0,
-                        size_uncompressed: 0,
-                        sha256: None,
-                        is_dir: false,
-                        is_symlink: false,
-                        is_hardlink: false,
-                        link_target: None,
-                        is_encrypted: true,
-                        format_smuggling: false,
-                    });
-                    skipped_members += 1;
-                    continue;
-                }
-                coverage_state = CoverageState::Incomplete;
-                skipped_members += 1;
-                findings.push(make_finding(
-                    identity,
-                    CheckType::PackageSecurity,
-                    ScanStatus::Fail,
-                    FindingClass::Structural,
-                    Confidence::High,
-                    "LF-ARCHIVE-MALFORMED",
-                    format!("Malformed central directory entry index {}: {}", i, err),
-                ));
-                continue;
-            }
-        };
-
-        let raw_name = zip_entry.name().to_owned();
-        let is_dir = zip_entry.is_dir();
-        let size_compressed = zip_entry.compressed_size();
-        let size_uncompressed = zip_entry.size();
-        let is_encrypted = zip_entry.encrypted();
-
-        // Check Unix mode for symlinks (0o120000 == 0120000 in octal)
-        let mode = zip_entry.unix_mode().unwrap_or(0);
-        let is_symlink = (mode & 0o170000) == 0o120000;
+        let raw_name = entry.raw_name.clone();
+        let is_dir = entry.is_dir;
+        let size_compressed = entry.compressed_size;
+        let size_uncompressed = entry.uncompressed_size;
+        let is_encrypted = entry.is_encrypted;
+        let is_symlink = entry.is_symlink;
 
         let norm_res = normalize_member_path(&raw_name, budget.limits.max_path_bytes);
         let norm_path = match norm_res {
@@ -269,8 +425,39 @@ pub fn inspect_zip(
         if is_symlink {
             let mut target_buf = Vec::new();
             let target_limit = budget.limits.max_path_bytes.saturating_add(1) as u64;
-            if zip_entry
-                .by_ref()
+            let reader = match open_raw_zip_entry(&mut cloned_file, &entry) {
+                Ok(r) => r,
+                Err(err) => {
+                    coverage_state = CoverageState::Incomplete;
+                    coverage_details
+                        .push(format!("Malformed symlink entry '{}': {}", raw_name, err));
+                    findings.push(make_finding(
+                        &virt_path,
+                        CheckType::PackageSecurity,
+                        ScanStatus::Fail,
+                        FindingClass::Structural,
+                        Confidence::High,
+                        "LF-ARCHIVE-MALFORMED",
+                        format!("Malformed symlink entry '{}': {}", raw_name, err),
+                    ));
+                    member_reports.push(ArchiveMemberReport {
+                        virtual_path: virt_path,
+                        raw_name: raw_name.clone(),
+                        size_compressed,
+                        size_uncompressed,
+                        sha256: None,
+                        is_dir,
+                        is_symlink: true,
+                        is_hardlink: false,
+                        link_target: None,
+                        is_encrypted: false,
+                        format_smuggling: false,
+                    });
+                    skipped_members += 1;
+                    continue;
+                }
+            };
+            if reader
                 .take(target_limit)
                 .read_to_end(&mut target_buf)
                 .is_ok()
@@ -354,8 +541,40 @@ pub fn inspect_zip(
         }
 
         // Stream decompress member into private temp file with byte/ratio enforcement
+        let mut reader = match open_raw_zip_entry(&mut cloned_file, &entry) {
+            Ok(r) => r,
+            Err(err) => {
+                coverage_state = CoverageState::Incomplete;
+                coverage_details.push(format!("Malformed entry '{}': {}", raw_name, err));
+                findings.push(make_finding(
+                    &virt_path,
+                    CheckType::PackageSecurity,
+                    ScanStatus::Fail,
+                    FindingClass::Structural,
+                    Confidence::High,
+                    "LF-ARCHIVE-MALFORMED",
+                    format!("Malformed entry '{}': {}", raw_name, err),
+                ));
+                member_reports.push(ArchiveMemberReport {
+                    virtual_path: virt_path,
+                    raw_name: raw_name.clone(),
+                    size_compressed,
+                    size_uncompressed,
+                    sha256: None,
+                    is_dir,
+                    is_symlink,
+                    is_hardlink: false,
+                    link_target: None,
+                    is_encrypted: false,
+                    format_smuggling: false,
+                });
+                skipped_members += 1;
+                continue;
+            }
+        };
+
         let decomp_res = decompress_member_to_tempfile(
-            &mut zip_entry,
+            &mut reader,
             &norm_path.virtual_path,
             size_compressed,
             size_uncompressed,
