@@ -841,7 +841,7 @@ try:
         except Exception:
             pass
         try:
-            torch.set_num_threads(max(1, min(4, os.cpu_count() or 1)))
+            torch.set_num_threads(max(1, min(8, os.cpu_count() or 1)))
         except Exception:
             pass
 

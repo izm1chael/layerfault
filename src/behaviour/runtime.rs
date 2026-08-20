@@ -346,7 +346,7 @@ impl RuntimeSession<'_> {
             "/slots/0?action=erase",
             Some(b"{}"),
             timeout
-                .min(Duration::from_secs(5))
+                .min(Duration::from_secs(30))
                 .max(Duration::from_millis(250)),
             64 * 1024,
         );
