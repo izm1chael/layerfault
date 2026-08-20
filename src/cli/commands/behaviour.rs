@@ -11,6 +11,21 @@ use layerfault::decision::SecurityDecision;
 /// result). `--json` callers must still get a valid, parseable document on
 /// stdout describing why, not an empty stream with the reason only on
 /// stderr as plain text.
+/// `anyhow::Error`'s `Display` (and thus `.to_string()`) only prints the
+/// outermost `.context(...)` message, not the chain of causes underneath it
+/// — e.g. a `.context("persistent llama-server probe failed")` wrapping the
+/// real HTTP/IO error renders as just that generic wrapper text, with the
+/// actual underlying failure silently dropped. Join the full chain so a
+/// JSON `NOT_RUN` reason is actually diagnostic.
+fn error_reason_with_chain(error: &anyhow::Error) -> String {
+    let causes: Vec<String> = error.chain().skip(1).map(ToString::to_string).collect();
+    if causes.is_empty() {
+        error.to_string()
+    } else {
+        format!("{error} ({})", causes.join("; "))
+    }
+}
+
 fn not_run_behaviour_report(
     model_path: &Path,
     limits: &layerfault::behaviour::BehaviourLimits,
@@ -183,7 +198,11 @@ pub(crate) fn run_behaviour(args: BehaviourArgs) -> Result<()> {
         Ok(report) => report,
         Err(error) if args.json => {
             return emit_behaviour(
-                &not_run_behaviour_report(&args.model, &report_limits, &error.to_string()),
+                &not_run_behaviour_report(
+                    &args.model,
+                    &report_limits,
+                    &error_reason_with_chain(&error),
+                ),
                 args.json,
             );
         }
@@ -292,7 +311,7 @@ pub(crate) fn run_compare_behaviour(args: CompareBehaviourArgs) -> Result<()> {
             &args.base,
             &args.derived,
             &report_limits,
-            &error.to_string(),
+            &error_reason_with_chain(&error),
         ),
         Err(error) => return Err(error),
     };
@@ -384,4 +403,28 @@ fn apply_watch_strings(report: &mut layerfault::behaviour::BehaviourReport, watc
 pub(super) fn require_cgroup_from_env_or_arg(arg: bool) -> bool {
     arg || std::env::var("LAYERFAULT_BEHAVIOUR_REQUIRE_CGROUP")
         .is_ok_and(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn error_reason_with_chain_includes_underlying_causes() {
+        let base = anyhow::anyhow!("connection reset by peer");
+        let wrapped = base.context("persistent llama-server probe failed");
+        let reason = error_reason_with_chain(&wrapped);
+        assert!(reason.contains("persistent llama-server probe failed"));
+        assert!(
+            reason.contains("connection reset by peer"),
+            "reason must surface the real underlying cause, not just the wrapper message: {reason}"
+        );
+    }
+
+    #[test]
+    fn error_reason_with_chain_handles_no_causes() {
+        let error = anyhow::anyhow!("llama.cpp runtime was not found on PATH");
+        let reason = error_reason_with_chain(&error);
+        assert_eq!(reason, "llama.cpp runtime was not found on PATH");
+    }
 }
