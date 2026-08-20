@@ -8,7 +8,7 @@ fn create_zip_archive<F>(path: &std::path::Path, build_fn: F) -> anyhow::Result<
 where
     F: FnOnce(&mut zip::ZipWriter<File>) -> anyhow::Result<()>,
 {
-    let file = File::create(path)?;
+    let file = File::create(path)?; // nosemgrep: rust.actix.path-traversal.tainted-path.tainted-path -- tempdir-scoped test fixture
     let mut zip = zip::ZipWriter::new(file);
     build_fn(&mut zip)?;
     zip.finish()?;
@@ -19,7 +19,7 @@ fn create_tar_archive<F>(path: &std::path::Path, build_fn: F) -> anyhow::Result<
 where
     F: FnOnce(&mut tar::Builder<File>) -> anyhow::Result<()>,
 {
-    let file = File::create(path)?;
+    let file = File::create(path)?; // nosemgrep: rust.actix.path-traversal.tainted-path.tainted-path -- tempdir-scoped test fixture
     let mut builder = tar::Builder::new(file);
     build_fn(&mut builder)?;
     builder.finish()?;
@@ -30,7 +30,7 @@ fn create_tar_gz_archive<F>(path: &std::path::Path, build_fn: F) -> anyhow::Resu
 where
     F: FnOnce(&mut tar::Builder<flate2::write::GzEncoder<File>>) -> anyhow::Result<()>,
 {
-    let file = File::create(path)?;
+    let file = File::create(path)?; // nosemgrep: rust.actix.path-traversal.tainted-path.tainted-path -- tempdir-scoped test fixture
     let gz = flate2::write::GzEncoder::new(file, flate2::Compression::default());
     let mut builder = tar::Builder::new(gz);
     build_fn(&mut builder)?;
@@ -514,6 +514,45 @@ fn test_tar_gz_archive() -> anyhow::Result<()> {
         format!("file:{}!/app.py", tar_gz_path.display())
     );
     assert_eq!(report.coverage.state, CoverageState::Complete);
+
+    Ok(())
+}
+
+#[test]
+fn test_standalone_wheel_and_zip_artifact_inspection() -> anyhow::Result<()> {
+    let dir = tempdir()?;
+    let wheel_path = dir.path().join("tampered_package-1.0.0-py3-none-any.whl");
+
+    create_zip_archive(&wheel_path, |zip| {
+        let options = zip::write::SimpleFileOptions::default();
+        zip.start_file("tampered_package/__init__.py", options)?;
+        zip.write_all(b"# tampered code\n")?;
+
+        zip.start_file("tampered_package-1.0.0.dist-info/METADATA", options)?;
+        zip.write_all(b"Metadata-Version: 2.1\nName: tampered_package\nVersion: 1.0.0\n")?;
+
+        zip.start_file("tampered_package-1.0.0.dist-info/RECORD", options)?;
+        // Bad hash in RECORD
+        zip.write_all(b"tampered_package/__init__.py,sha256=invalid_hash,16\n")?;
+        Ok(())
+    })?;
+
+    let report = layerfault::formats::artifact::inspect(
+        &wheel_path,
+        layerfault::formats::artifact::ArtifactScanMode::Full,
+    )?;
+    assert!(
+        report.results.iter().any(|f| f.matches.iter().any(|m| m.contains("LF-WHEEL-RECORD-MISMATCH"))),
+        "standalone wheel scan must route to archive inspection and emit LF-WHEEL-RECORD-MISMATCH: {:?}",
+        report.results
+    );
+    assert!(
+        !report.results.iter().any(|f| f
+            .matches
+            .iter()
+            .any(|m| m.contains("LF-PYTORCH-ZIP-STRUCTURAL"))),
+        "standalone wheel must not be misclassified as PyTorch zip"
+    );
 
     Ok(())
 }

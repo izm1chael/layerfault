@@ -109,6 +109,14 @@ pub fn map_extension_claim_name(value: &str) -> Option<ArtifactFormat> {
         Some(ArtifactFormat::Npz)
     } else if matches!(ext.as_str(), "th" | "t7") {
         Some(ArtifactFormat::Torch7)
+    } else if matches!(
+        ext.as_str(),
+        "zip" | "whl" | "tar" | "gz" | "tgz" | "bz2" | "xz" | "7z"
+    ) || name.ends_with(".tar.gz")
+        || name.ends_with(".tar.bz2")
+        || name.ends_with(".tar.xz")
+    {
+        Some(ArtifactFormat::Unknown)
     } else {
         None
     }
@@ -245,6 +253,8 @@ fn resolve_selected(
                 return claimed;
             } else if claimed == ArtifactFormat::Pickle {
                 return ArtifactFormat::PyTorchZip;
+            } else if claimed == ArtifactFormat::Unknown {
+                return ArtifactFormat::Unknown;
             }
         }
         return ArtifactFormat::PyTorchZip;
@@ -302,5 +312,22 @@ mod tests {
         assert_eq!(ident.extension_claim, None);
         assert_eq!(ident.selected, ArtifactFormat::Pickle);
         assert!(ident.contradictions.is_empty());
+    }
+
+    #[test]
+    fn wheel_and_zip_resolve_to_unknown_archive() {
+        let ident = ArtifactIdentification::identify(
+            Path::new("some_package-0.1.0-py3-none-any.whl"),
+            b"PK\x03\x04\x14\x00",
+        );
+        assert_eq!(ident.extension_claim, Some(ArtifactFormat::Unknown));
+        assert_eq!(ident.selected, ArtifactFormat::Unknown);
+        assert!(ident.contradictions.is_empty());
+
+        let ident_zip =
+            ArtifactIdentification::identify(Path::new("archive.zip"), b"PK\x03\x04\x14\x00");
+        assert_eq!(ident_zip.extension_claim, Some(ArtifactFormat::Unknown));
+        assert_eq!(ident_zip.selected, ArtifactFormat::Unknown);
+        assert!(ident_zip.contradictions.is_empty());
     }
 }
