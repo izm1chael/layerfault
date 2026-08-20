@@ -96,6 +96,31 @@ pub fn scan(
         return Ok(results);
     }
 
+    // Well-formedness: a bounded, single-pass tag-balance walk. This is not a
+    // full validating XML parser (no attribute-syntax or entity checking),
+    // but catches the case a substring presence check cannot: a document
+    // truncated or otherwise cut short mid-content, which leaves every tag
+    // opened so far unclosed at EOF.
+    if let Err(reason) = check_tag_balance(&xml_str) {
+        results.push(
+            FindingBuilder::new(
+                "LF-OPENVINO-MALFORMED",
+                CheckType::LayerPolicy,
+                ScanStatus::Fail,
+            )
+            .class(FindingClass::Structural)
+            .confidence(Confidence::High)
+            .digest(identity)
+            .media_type(media)
+            .subject(subject.clone())
+            .detail(format!(
+                "OpenVINO IR XML graph is not well-formed: {reason}"
+            ))
+            .finish(),
+        );
+        return Ok(results);
+    }
+
     // Locate sidecar .bin weights file
     let parent_dir = path.parent().unwrap_or_else(|| Path::new("."));
     let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("model");
@@ -175,9 +200,126 @@ pub fn scan(
         .digest(identity)
         .media_type(media)
         .subject(subject)
-        .detail("OpenVINO IR XML graph verified statically (no DTD/XXE vulnerabilities)".to_owned())
+        .detail("OpenVINO IR XML graph verified statically (no DTD/XXE vulnerabilities, tag structure well-formed)".to_owned())
         .finish(),
     );
 
     Ok(results)
+}
+
+/// Bounded, single-pass tag-balance check over an XML document.
+///
+/// This is not a validating XML parser — no attribute-syntax checking,
+/// no namespace resolution, no entity handling (entities/DTDs are rejected
+/// earlier, before this runs). It exists to catch documents that are cut
+/// short mid-content: a truncated file still contains real, well-formed
+/// tags up to the cut point, so a substring presence check (e.g. "does the
+/// text contain `<net`") cannot tell a genuine document from a truncated
+/// prefix of one. Tracking whether every opened tag is later closed can.
+fn check_tag_balance(xml: &str) -> Result<(), String> {
+    let bytes = xml.as_bytes();
+    let n = bytes.len();
+    let mut i = 0usize;
+    let mut stack: Vec<&str> = Vec::new();
+
+    while i < n {
+        if bytes[i] != b'<' {
+            i += 1;
+            continue;
+        }
+        if xml[i..].starts_with("<!--") {
+            match xml[i + 4..].find("-->") {
+                Some(end) => i = i + 4 + end + 3,
+                None => return Err("unterminated comment".to_owned()),
+            }
+            continue;
+        }
+        if xml[i..].starts_with("<![CDATA[") {
+            match xml[i + 9..].find("]]>") {
+                Some(end) => i = i + 9 + end + 3,
+                None => return Err("unterminated CDATA section".to_owned()),
+            }
+            continue;
+        }
+        if xml[i..].starts_with("<?") {
+            match xml[i + 2..].find("?>") {
+                Some(end) => i = i + 2 + end + 2,
+                None => return Err("unterminated processing instruction".to_owned()),
+            }
+            continue;
+        }
+        if xml[i..].starts_with("<!") {
+            match find_tag_end(bytes, i + 2) {
+                Some(end) => i = end + 1,
+                None => return Err("unterminated declaration".to_owned()),
+            }
+            continue;
+        }
+
+        let Some(tag_end) = find_tag_end(bytes, i + 1) else {
+            return Err("unterminated tag (missing closing '>')".to_owned());
+        };
+        let inner = &xml[i + 1..tag_end];
+        i = tag_end + 1;
+
+        if let Some(name) = inner.strip_prefix('/') {
+            let name = name.trim().split_whitespace().next().unwrap_or("");
+            match stack.pop() {
+                Some(open) if open == name => {}
+                Some(open) => {
+                    return Err(format!(
+                        "mismatched closing tag '</{name}>', expected '</{open}>'"
+                    ))
+                }
+                None => return Err(format!("closing tag '</{name}>' has no matching open tag")),
+            }
+        } else {
+            let trimmed = inner.trim_end();
+            let self_closing = trimmed.ends_with('/');
+            let content = if self_closing {
+                trimmed[..trimmed.len() - 1].trim_end()
+            } else {
+                inner
+            };
+            let name = content.split_whitespace().next().unwrap_or("");
+            if !name.is_empty() && !self_closing {
+                stack.push(name);
+            }
+        }
+    }
+
+    if let Some(unclosed) = stack.last() {
+        return Err(format!(
+            "{} element(s) never closed before end of document, innermost '<{unclosed}>'",
+            stack.len()
+        ));
+    }
+    Ok(())
+}
+
+/// Find the byte offset of the `>` that ends the tag starting at `start`,
+/// treating `>` inside single- or double-quoted attribute values as content
+/// rather than the tag terminator.
+fn find_tag_end(bytes: &[u8], start: usize) -> Option<usize> {
+    let mut i = start;
+    let mut quote: Option<u8> = None;
+    while i < bytes.len() {
+        let b = bytes[i];
+        match quote {
+            Some(q) => {
+                if b == q {
+                    quote = None;
+                }
+            }
+            None => {
+                if b == b'"' || b == b'\'' {
+                    quote = Some(b);
+                } else if b == b'>' {
+                    return Some(i);
+                }
+            }
+        }
+        i += 1;
+    }
+    None
 }

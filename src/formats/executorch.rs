@@ -115,6 +115,83 @@ pub fn scan(
         }
     }
 
+    // ExecuTorch extended header truncation check. `.pte` files produced with
+    // a segment/delegate layout embed an optional "eh00" extended header at
+    // a fixed offset (see ExecuTorch's `schema/extended_header.h`) declaring
+    // the program's true total size; comparing that against the file's
+    // actual size on disk catches truncation the earlier bounds-only check
+    // cannot, since a truncated tail can still leave the root table (which
+    // lives near the head) internally consistent.
+    const EH_OFFSET: usize = 8;
+    const EH_MAGIC: &[u8; 4] = b"eh00";
+    const EH_LENGTH_OFF: usize = EH_OFFSET + 4;
+    const EH_PROGRAM_SIZE_OFF: usize = EH_LENGTH_OFF + 4;
+    const EH_SEGMENT_BASE_OFFSET_OFF: usize = EH_PROGRAM_SIZE_OFF + 8;
+    const EH_SEGMENT_DATA_SIZE_OFF: usize = EH_SEGMENT_BASE_OFFSET_OFF + 8;
+    const EH_MIN_HEADER_LENGTH: u32 = 24;
+    const EH_LENGTH_WITH_SEGMENT_DATA_SIZE: u32 = 32;
+
+    if header_buf.len() >= EH_SEGMENT_DATA_SIZE_OFF + 8
+        && header_buf[EH_OFFSET..EH_OFFSET + 4] == *EH_MAGIC
+    {
+        let header_length = u32::from_le_bytes(
+            header_buf[EH_LENGTH_OFF..EH_LENGTH_OFF + 4]
+                .try_into()
+                .unwrap(),
+        );
+        if header_length >= EH_MIN_HEADER_LENGTH {
+            let program_size = u64::from_le_bytes(
+                header_buf[EH_PROGRAM_SIZE_OFF..EH_PROGRAM_SIZE_OFF + 8]
+                    .try_into()
+                    .unwrap(),
+            );
+            let segment_base_offset = u64::from_le_bytes(
+                header_buf[EH_SEGMENT_BASE_OFFSET_OFF..EH_SEGMENT_BASE_OFFSET_OFF + 8]
+                    .try_into()
+                    .unwrap(),
+            );
+            let segment_data_size = if header_length >= EH_LENGTH_WITH_SEGMENT_DATA_SIZE {
+                u64::from_le_bytes(
+                    header_buf[EH_SEGMENT_DATA_SIZE_OFF..EH_SEGMENT_DATA_SIZE_OFF + 8]
+                        .try_into()
+                        .unwrap(),
+                )
+            } else {
+                0
+            };
+            let expected_size = if segment_base_offset == 0 {
+                program_size
+            } else {
+                segment_base_offset.saturating_add(segment_data_size)
+            };
+
+            if expected_size > 0 && size < expected_size {
+                results.push(
+                    FindingBuilder::new(
+                        "LF-EXECUTORCH-TRUNCATED",
+                        CheckType::LayerPolicy,
+                        ScanStatus::Fail,
+                    )
+                    .class(FindingClass::Structural)
+                    .confidence(Confidence::High)
+                    .digest(identity)
+                    .media_type(media)
+                    .subject(subject.clone())
+                    .detail(format!(
+                        "ExecuTorch extended header declares a total size of {expected_size} bytes but the file is only {size} bytes"
+                    ))
+                    .evidence(structural_invariant(
+                        subject.clone(),
+                        "file size smaller than extended-header-declared program size",
+                        serde_json::json!({ "size": size, "expected_size": expected_size }),
+                    ))
+                    .finish(),
+                );
+                return Ok(results);
+            }
+        }
+    }
+
     // Binary scan for embedded executable payloads or delegates
     let bin_result = BinaryScanner::scan_file(file, size, identity, media)?;
     if bin_result.status == ScanStatus::Fail {
