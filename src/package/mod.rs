@@ -738,7 +738,7 @@ mod tests {
             sha256: hash.sha256,
             identity: hash.identity,
             cache_hit: hash.cache_hit,
-            kind: classify(&path).to_owned(),
+            kind: classify(&path, &file).to_owned(),
         };
 
         let replacement = dir.path().join("replacement.json");
@@ -768,7 +768,7 @@ mod tests {
             sha256: hash.sha256,
             identity: hash.identity,
             cache_hit: hash.cache_hit,
-            kind: classify(&path).to_owned(),
+            kind: classify(&path, &file).to_owned(),
         };
         let budget =
             crate::budget::ScanBudget::new(crate::budget::ScanBudgetProfile::Default.limits())?;

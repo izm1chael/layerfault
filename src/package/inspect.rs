@@ -568,7 +568,7 @@ pub fn inspect_with_scheduler(
             }
         }
         total_bytes = checked_package_total(total_bytes, size)?;
-        let kind = classify(&path).to_owned();
+        let kind = classify(&path, &file).to_owned();
 
         member_headers.push(PackageMemberHeader {
             path,

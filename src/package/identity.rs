@@ -44,7 +44,7 @@ pub fn fingerprint_report(root: &Path) -> Result<PackageFingerprintReport> {
         total_bytes = checked_package_total(total_bytes, size)?;
         files.push(PackageEntry {
             relative_path: rel,
-            kind: classify(&path).to_owned(),
+            kind: classify(&path, &file).to_owned(),
             size,
             sha256: Some(hash.sha256),
             digest_cache: Some(if hash.cache_hit {

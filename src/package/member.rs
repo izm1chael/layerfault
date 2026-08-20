@@ -107,6 +107,37 @@ pub(super) fn scan_package_file(
         match crate::archive::inspect_opened(path, file, rel, &archive_limits, 0, budget) {
             Ok(archive_report) => {
                 out.extend(archive_report.findings);
+                // A bare ZIP magic is ambiguous: it also serializes several
+                // model-specific container formats (PyTorch's legacy `.zip`
+                // format, `torch.package`, Keras v3 archives, `.npz`). Those
+                // formats don't have their own distinguishing magic — the
+                // generic archive path above matches first and, for members
+                // whose internal layout it doesn't recognize as containing a
+                // known-dangerous pattern (e.g. a DL4J `configuration.json`
+                // + `coefficients.bin` pair), can return zero findings for
+                // what direct single-file scanning correctly recognizes and
+                // structurally inspects. Run the model-format structural
+                // check additively (never in place of the generic archive
+                // scan above) whenever it independently recognizes the same
+                // bytes, so a member never silently vanishes. Gated to plain
+                // `Zip` specifically — `.whl`/`.tar`/`.tar.gz` archives are
+                // unambiguous and keep exactly their existing behavior.
+                if archive_detection.format == crate::archive::ArchiveFormat::Zip {
+                    let format =
+                        ArtifactFormat::detect(path, &file_prefix[..file_prefix.len().min(8)]);
+                    if format != ArtifactFormat::Unknown {
+                        if let Ok(report) = artifact::inspect_opened_file_with_sha256_budget(
+                            path,
+                            file,
+                            format,
+                            artifact::ArtifactScanMode::Full,
+                            digest,
+                            budget,
+                        ) {
+                            out.extend(report.results);
+                        }
+                    }
+                }
                 return Ok(out);
             }
             Err(error) => {

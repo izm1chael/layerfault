@@ -106,7 +106,7 @@ pub(super) fn is_text_candidate(ext: &str, lower: &str) -> bool {
         || lower.ends_with("modelfile")
 }
 
-pub(super) fn classify(path: &Path) -> &'static str {
+pub(super) fn classify(path: &Path, file: &File) -> &'static str {
     let lower = path
         .file_name()
         .and_then(|v| v.to_str())
@@ -117,7 +117,14 @@ pub(super) fn classify(path: &Path) -> &'static str {
         .and_then(|v| v.to_str())
         .unwrap_or("")
         .to_ascii_lowercase();
-    if ArtifactFormat::detect(path, &[]) != ArtifactFormat::Unknown {
+    let mut prefix_buf = [0u8; 8];
+    let prefix_len = (|| -> Result<usize> {
+        let mut cloned = file.try_clone()?;
+        cloned.seek(SeekFrom::Start(0))?;
+        Ok(cloned.read(&mut prefix_buf)?)
+    })()
+    .unwrap_or(0);
+    if ArtifactFormat::detect(path, &prefix_buf[..prefix_len]) != ArtifactFormat::Unknown {
         "model-artifact"
     } else if matches!(ext.as_str(), "py" | "sh" | "ps1" | "bat" | "cmd") {
         "code"
