@@ -263,7 +263,7 @@ fn check_tag_balance(xml: &str) -> Result<(), String> {
         i = tag_end + 1;
 
         if let Some(name) = inner.strip_prefix('/') {
-            let name = name.trim().split_whitespace().next().unwrap_or("");
+            let name = name.split_whitespace().next().unwrap_or("");
             match stack.pop() {
                 Some(open) if open == name => {}
                 Some(open) => {

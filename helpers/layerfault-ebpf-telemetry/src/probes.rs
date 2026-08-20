@@ -136,6 +136,26 @@ pub fn parse_raw_event(
     })
 }
 
+fn attach_tracepoint(
+    ebpf: &mut Ebpf,
+    program_name: &str,
+    category: &str,
+    name: &str,
+) -> Result<()> {
+    let program: &mut TracePoint = ebpf
+        .program_mut(program_name)
+        .with_context(|| format!("probe object has no program named '{program_name}'"))?
+        .try_into()
+        .with_context(|| format!("program '{program_name}' is not a tracepoint"))?;
+    program
+        .load()
+        .with_context(|| format!("unable to load program '{program_name}'"))?;
+    program
+        .attach(category, name)
+        .with_context(|| format!("unable to attach '{program_name}' to {category}:{name}"))?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -177,24 +197,4 @@ mod tests {
     fn rejects_short_record() {
         assert!(parse_raw_event(&[0u8; 4], "run-1", None).is_none());
     }
-}
-
-fn attach_tracepoint(
-    ebpf: &mut Ebpf,
-    program_name: &str,
-    category: &str,
-    name: &str,
-) -> Result<()> {
-    let program: &mut TracePoint = ebpf
-        .program_mut(program_name)
-        .with_context(|| format!("probe object has no program named '{program_name}'"))?
-        .try_into()
-        .with_context(|| format!("program '{program_name}' is not a tracepoint"))?;
-    program
-        .load()
-        .with_context(|| format!("unable to load program '{program_name}'"))?;
-    program
-        .attach(category, name)
-        .with_context(|| format!("unable to attach '{program_name}' to {category}:{name}"))?;
-    Ok(())
 }
