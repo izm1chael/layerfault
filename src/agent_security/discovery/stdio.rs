@@ -226,6 +226,7 @@ struct JsonRpcStdio {
     lines: mpsc::Receiver<std::io::Result<String>>,
     next_id: u64,
     stderr: std::sync::Arc<std::sync::Mutex<Vec<u8>>>,
+    stderr_handle: Option<std::thread::JoinHandle<()>>,
 }
 
 impl JsonRpcStdio {
@@ -257,7 +258,7 @@ impl JsonRpcStdio {
             }
         });
         let stderr_buf = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
-        if let Some(mut stderr) = child.stderr.take() {
+        let stderr_handle = child.stderr.take().map(|mut stderr| {
             let stderr_buf_clone = stderr_buf.clone();
             std::thread::spawn(move || {
                 let mut reader = (&mut stderr).take(64 * 1024);
@@ -266,17 +267,21 @@ impl JsonRpcStdio {
                 if let Ok(mut lock) = stderr_buf_clone.lock() {
                     *lock = chunk;
                 }
-            });
-        }
+            })
+        });
         Ok(Self {
             stdin,
             lines,
             next_id: 1,
             stderr: stderr_buf,
+            stderr_handle,
         })
     }
 
-    fn stderr_string(&self) -> String {
+    fn stderr_string(&mut self) -> String {
+        if let Some(handle) = self.stderr_handle.take() {
+            let _ = handle.join();
+        }
         self.stderr
             .lock()
             .ok()
