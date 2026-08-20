@@ -698,6 +698,80 @@
           "LF-DATASET-NEAR-DUPLICATE-CONCENTRATION"
         ]
       }
+    },
+    {
+      "id": "positive-block-torch7-dangerous-function",
+      "category": "positive_block",
+      "description": "Legacy Torch7 .th stream containing an embedded Lua bytecode function entry",
+      "command": {
+        "kind": "inspect",
+        "path": "tests/detector_quality/fixtures/positive_block/torch7_dangerous_function/model.th"
+      },
+      "expected": {
+        "overall": "BLOCK",
+        "exit_code": 3,
+        "must_include_rules": [
+          "LF-TORCH7-DANGEROUS-FUNCTION"
+        ],
+        "must_not_include_rules": [],
+        "evidence_predicates": {
+          "source_sink_type": "ByteRange"
+        }
+      }
+    },
+    {
+      "id": "positive-block-torch7-malformed",
+      "category": "positive_block",
+      "description": "Torch7 stream with an invalid type tag at the root object",
+      "command": {
+        "kind": "inspect",
+        "path": "tests/detector_quality/fixtures/positive_block/torch7_malformed/model.th"
+      },
+      "expected": {
+        "overall": "BLOCK",
+        "exit_code": 3,
+        "must_include_rules": [
+          "LF-TORCH7-MALFORMED"
+        ],
+        "must_not_include_rules": []
+      }
+    },
+    {
+      "id": "negative-benign-torch7-clean",
+      "category": "negative_benign",
+      "description": "Torch7 stream containing only a plain table of strings/numbers, no function entries",
+      "command": {
+        "kind": "inspect",
+        "path": "tests/detector_quality/fixtures/negative_benign/torch7_clean/model.th"
+      },
+      "expected": {
+        "overall": "PASS",
+        "exit_code": 0,
+        "must_include_rules": [
+          "LF-TORCH7-STRUCT-VALID"
+        ],
+        "must_not_include_rules": [
+          "LF-TORCH7-DANGEROUS-FUNCTION",
+          "LF-TORCH7-MALFORMED"
+        ]
+      }
+    },
+    {
+      "id": "coverage-incomplete-torch7-bzip-compressed",
+      "category": "coverage_incomplete",
+      "description": "BZip2-prefixed .th file; not part of the standard Torch7 format and not decompressed, so the object graph cannot be inspected",
+      "command": {
+        "kind": "inspect",
+        "path": "tests/detector_quality/fixtures/coverage_incomplete/torch7_bzip_compressed/model.th"
+      },
+      "expected": {
+        "overall": "WARN",
+        "exit_code": 1,
+        "must_include_rules": [
+          "LF-TORCH7-OPAQUE-COMPRESSED"
+        ],
+        "must_not_include_rules": []
+      }
     }
   ],
   "waivers": [

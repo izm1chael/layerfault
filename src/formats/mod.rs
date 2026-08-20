@@ -16,6 +16,7 @@ pub mod safetensors;
 pub mod tensorflow;
 pub mod tensorrt;
 pub mod tflite;
+pub mod torch7;
 
 pub use differential::{
     extract_normalized, extract_normalized_opened, NormalizedMetadataEntry, NormalizedModel,
@@ -50,6 +51,7 @@ pub enum ArtifactFormat {
     KerasHdf5,
     Npy,
     Npz,
+    Torch7,
     Unknown,
 }
 
@@ -80,6 +82,7 @@ impl ArtifactFormat {
             Self::KerasHdf5 => "keras-hdf5",
             Self::Npy => "npy",
             Self::Npz => "npz",
+            Self::Torch7 => "torch7",
             Self::Unknown => "unknown",
         }
     }

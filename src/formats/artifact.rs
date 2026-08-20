@@ -1,6 +1,6 @@
 use super::{
     coreml, executorch, gguf, keras, mlx, npy, onnx, openvino, pickle, pytorch, safetensors,
-    tensorflow, tensorrt, tflite, ArtifactFormat, ArtifactIdentification,
+    tensorflow, tensorrt, tflite, torch7, ArtifactFormat, ArtifactIdentification,
 };
 use crate::finding_evidence::{structural_invariant, EvidenceSubject, FindingBuilder};
 use crate::safeio::open_readonly_nofollow;
@@ -236,6 +236,7 @@ fn inspect_opened(
         ArtifactFormat::KerasHdf5 => "application/x-hdf5",
         ArtifactFormat::Npy => "application/x-numpy-npy",
         ArtifactFormat::Npz => "application/x-numpy-npz",
+        ArtifactFormat::Torch7 => "application/x-torch7",
         ArtifactFormat::Unknown => "application/octet-stream",
     };
     let session = crate::scanner::ScanSession::new(path, &file)?;
@@ -410,6 +411,9 @@ fn inspect_opened(
             }
             ArtifactFormat::MlxPackage => {
                 results.extend(mlx::scan_package(path, &identity, media)?);
+            }
+            ArtifactFormat::Torch7 => {
+                results.extend(torch7::scan(path, &file, size, &identity, media)?);
             }
 
             ArtifactFormat::TensorFlowSavedModel => results.push(tensorflow::scan_saved_model(&file, size, &identity, media)?),

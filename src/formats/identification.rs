@@ -107,6 +107,8 @@ pub fn map_extension_claim_name(value: &str) -> Option<ArtifactFormat> {
         Some(ArtifactFormat::Npy)
     } else if ext == "npz" {
         Some(ArtifactFormat::Npz)
+    } else if matches!(ext.as_str(), "th" | "t7") {
+        Some(ArtifactFormat::Torch7)
     } else {
         None
     }
