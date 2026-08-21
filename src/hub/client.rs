@@ -54,6 +54,7 @@ impl HubClient {
             }
             segments.push("revision").push(requested);
         }
+        url.query_pairs_mut().append_pair("blobs", "true");
         let response = self.get_following(url, MAX_METADATA_BYTES as u64)?;
         let bytes = read_response_capped(response, MAX_METADATA_BYTES)?;
         let model: HubModel =
@@ -616,6 +617,8 @@ fn constant_time_eq(left: &[u8], right: &[u8]) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::hub::types::{IntegrityExpectationSource, IntegrityResult};
+
     // blocked_ip's own coverage now lives with its implementation in
     // crate::net_safety, which this module reuses via
     // reject_private_resolution rather than a private copy.
@@ -624,9 +627,170 @@ mod tests {
         assert!(validate_repo_id("org/model-name").is_ok());
         assert!(validate_repo_id("../../etc/passwd").is_err());
     }
+
     #[test]
     fn secret_compare() {
         assert!(verify_webhook_secret(Some("abc"), "abc"));
         assert!(!verify_webhook_secret(Some("abd"), "abc"));
+    }
+
+    #[test]
+    fn deserializes_lfs_sibling_with_blobs_true() {
+        let json = serde_json::json!({
+            "id": "org/example-model",
+            "sha": "1111111111111111111111111111111111111111",
+            "siblings": [
+                {
+                    "rfilename": "model.safetensors",
+                    "size": 10240,
+                    "blobId": "abcdef1234567890abcdef1234567890abcdef12",
+                    "lfs": {
+                        "oid": "sha256:7f83b1657ff1fc53b92dc18148a1d65dfc2d4b1fa3d677284addd200126d9069",
+                        "size": 10240,
+                        "pointerSize": 134
+                    }
+                },
+                {
+                    "rfilename": "config.json",
+                    "size": 512,
+                    "blobId": "1234567890abcdef1234567890abcdef12345678",
+                    "lfs": null
+                }
+            ]
+        });
+
+        let model: HubModel = serde_json::from_value(json).expect("deserialize HubModel");
+        assert_eq!(model.id, "org/example-model");
+        assert_eq!(model.siblings.len(), 2);
+
+        let lfs_file = &model.siblings[0];
+        assert_eq!(lfs_file.path, "model.safetensors");
+        assert_eq!(lfs_file.size, Some(10240));
+        assert_eq!(
+            lfs_file.blob_id.as_deref(),
+            Some("abcdef1234567890abcdef1234567890abcdef12")
+        );
+        let lfs_meta = lfs_file.lfs_metadata().unwrap().expect("lfs metadata");
+        assert_eq!(
+            lfs_meta.oid,
+            "sha256:7f83b1657ff1fc53b92dc18148a1d65dfc2d4b1fa3d677284addd200126d9069"
+        );
+        assert_eq!(lfs_meta.size, 10240);
+        assert_eq!(lfs_meta.pointer_size, Some(134));
+
+        let non_lfs_file = &model.siblings[1];
+        assert_eq!(non_lfs_file.path, "config.json");
+        assert_eq!(non_lfs_file.size, Some(512));
+        assert!(non_lfs_file.lfs_metadata().unwrap().is_none());
+    }
+
+    #[test]
+    fn download_cap_below_lfs_size_fails_with_size_mismatch() {
+        let client = HubClient::new(None).expect("client");
+        let staging = tempfile::tempdir().expect("tempdir");
+        let file = HubFile {
+            path: "model.safetensors".to_owned(),
+            size: Some(10240),
+            blob_id: Some("blob1".to_owned()),
+            lfs: Some(serde_json::json!({
+                "oid": "sha256:7f83b1657ff1fc53b92dc18148a1d65dfc2d4b1fa3d677284addd200126d9069",
+                "size": 10240,
+                "pointerSize": 134
+            })),
+        };
+
+        let err = client
+            .download_verified(
+                "org/example",
+                "1111111111111111111111111111111111111111",
+                &file,
+                staging.path(),
+                Some(1000), // Cap is below 10240
+            )
+            .unwrap_err();
+
+        let err_msg = err.to_string();
+        assert!(
+            err_msg.contains("LF-HF-LFS-SIZE-MISMATCH"),
+            "expected LF-HF-LFS-SIZE-MISMATCH error, got: {err_msg}"
+        );
+    }
+
+    #[test]
+    fn lfs_file_download_expectation_and_json_verification() {
+        let file = HubFile {
+            path: "model.safetensors".to_owned(),
+            size: Some(10240),
+            blob_id: Some("blob1".to_owned()),
+            lfs: Some(serde_json::json!({
+                "oid": "sha256:7f83b1657ff1fc53b92dc18148a1d65dfc2d4b1fa3d677284addd200126d9069",
+                "size": 10240,
+                "pointerSize": 134
+            })),
+        };
+
+        let exp = file.expectation().expect("expectation");
+        assert_eq!(
+            exp.sha256.as_deref(),
+            Some("sha256:7f83b1657ff1fc53b92dc18148a1d65dfc2d4b1fa3d677284addd200126d9069")
+        );
+        assert_eq!(exp.size, Some(10240));
+        assert_eq!(exp.source, IntegrityExpectationSource::GitLfs);
+
+        let res = DownloadResult {
+            repo: "org/example".to_owned(),
+            revision: "1111111111111111111111111111111111111111".to_owned(),
+            file: "model.safetensors".to_owned(),
+            path: "/tmp/model.safetensors".to_owned(),
+            bytes: 10240,
+            sha256: "sha256:7f83b1657ff1fc53b92dc18148a1d65dfc2d4b1fa3d677284addd200126d9069"
+                .to_owned(),
+            elapsed_ms: 120,
+            expected_sha256: exp.sha256,
+            expected_bytes: exp.size,
+            integrity_result: IntegrityResult::Match,
+        };
+
+        let json_val = serde_json::to_value(&res).expect("serialize DownloadResult");
+        assert_eq!(
+            json_val["expected_sha256"],
+            "sha256:7f83b1657ff1fc53b92dc18148a1d65dfc2d4b1fa3d677284addd200126d9069"
+        );
+        assert_eq!(json_val["expected_bytes"], 10240);
+        assert_eq!(json_val["integrity_result"], "MATCH");
+    }
+
+    #[test]
+    fn non_lfs_file_declared_size_populated_and_match() {
+        let file = HubFile {
+            path: "config.json".to_owned(),
+            size: Some(512),
+            blob_id: Some("blob2".to_owned()),
+            lfs: None,
+        };
+
+        let exp = file.expectation().expect("expectation");
+        assert_eq!(exp.sha256, None);
+        assert_eq!(exp.size, Some(512));
+        assert_eq!(exp.source, IntegrityExpectationSource::None);
+
+        let res = DownloadResult {
+            repo: "org/example".to_owned(),
+            revision: "1111111111111111111111111111111111111111".to_owned(),
+            file: "config.json".to_owned(),
+            path: "/tmp/config.json".to_owned(),
+            bytes: 512,
+            sha256: "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+                .to_owned(),
+            elapsed_ms: 25,
+            expected_sha256: exp.sha256,
+            expected_bytes: exp.size,
+            integrity_result: IntegrityResult::Match,
+        };
+
+        let json_val = serde_json::to_value(&res).expect("serialize DownloadResult");
+        assert!(json_val.get("expected_sha256").is_none());
+        assert_eq!(json_val["expected_bytes"], 512);
+        assert_eq!(json_val["integrity_result"], "MATCH");
     }
 }

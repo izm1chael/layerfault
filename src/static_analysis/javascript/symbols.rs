@@ -27,9 +27,9 @@
 use super::limits::JavaScriptAnalysisLimits;
 use super::parser::LineIndex;
 use oxc_ast::ast::{
-    Argument, AssignmentExpression, AssignmentTarget, BindingPattern, BindingPatternKind,
-    Expression, ImportDeclaration, ImportDeclarationSpecifier, ModuleExportName, Program,
-    PropertyKey, VariableDeclarator,
+    Argument, AssignmentExpression, AssignmentTarget, BindingPattern, Expression,
+    ImportDeclaration, ImportDeclarationSpecifier, ModuleExportName, Program, PropertyKey,
+    VariableDeclarator,
 };
 use oxc_ast_visit::{walk, Visit};
 use oxc_span::GetSpan;
@@ -181,8 +181,8 @@ impl<'a> SymbolCollector<'a> {
     }
 
     fn bind_pattern(&mut self, id: &BindingPattern, module: &str, line: Option<usize>) {
-        match &id.kind {
-            BindingPatternKind::BindingIdentifier(bind_id) => {
+        match id {
+            BindingPattern::BindingIdentifier(bind_id) => {
                 if self.at_capacity() {
                     return;
                 }
@@ -194,7 +194,7 @@ impl<'a> SymbolCollector<'a> {
                     line,
                 });
             }
-            BindingPatternKind::ObjectPattern(pattern) => {
+            BindingPattern::ObjectPattern(pattern) => {
                 for prop in &pattern.properties {
                     if self.at_capacity() {
                         return;
@@ -202,7 +202,7 @@ impl<'a> SymbolCollector<'a> {
                     let Some(key_name) = property_key_name(&prop.key) else {
                         continue;
                     };
-                    if let BindingPatternKind::BindingIdentifier(local_id) = &prop.value.kind {
+                    if let BindingPattern::BindingIdentifier(local_id) = &prop.value {
                         self.table.add_import(ImportBinding {
                             local_name: local_id.name.as_str().to_owned(),
                             target_module: module.to_owned(),
@@ -232,7 +232,7 @@ impl<'a> SymbolCollector<'a> {
         // `const x = require('mod').member`.
         if let Expression::StaticMemberExpression(member) = init {
             if let Some(module) = require_module_arg(&member.object) {
-                if let BindingPatternKind::BindingIdentifier(bind_id) = &id.kind {
+                if let BindingPattern::BindingIdentifier(bind_id) = id {
                     self.table.add_import(ImportBinding {
                         local_name: bind_id.name.as_str().to_owned(),
                         target_module: module,
@@ -256,7 +256,7 @@ impl<'a> SymbolCollector<'a> {
 
         // One-hop rebinding of an already-resolved target:
         // `const run = child_process.exec;`
-        if let BindingPatternKind::BindingIdentifier(bind_id) = &id.kind {
+        if let BindingPattern::BindingIdentifier(bind_id) = id {
             if let Some(path) = expression_dotted_path(init) {
                 if let Some(resolved) = self.table.resolve_full_target(&path) {
                     self.table.add_import(ImportBinding {

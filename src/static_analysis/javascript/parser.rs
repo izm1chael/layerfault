@@ -136,18 +136,17 @@ pub fn parse_js_source<'a>(
     let source_type = source_type_for_ext(ext);
     let ret = Parser::new(allocator, source, source_type).parse();
 
-    if ret.panicked || !ret.errors.is_empty() {
+    if ret.panicked || !ret.diagnostics.is_empty() {
         let line_index = LineIndex::new(source);
         let (line, column) = ret
-            .errors
+            .diagnostics
             .first()
-            .and_then(|diagnostic| diagnostic.labels.as_ref())
-            .and_then(|labels| labels.first())
-            .map(|label| line_index.line_col(label.offset(), source))
+            .and_then(|diagnostic| diagnostic.labels.first())
+            .map(|label| line_index.line_col(label.offset() as usize, source))
             .map(|(l, c)| (Some(l), Some(c)))
             .unwrap_or((None, None));
         let error_str = ret
-            .errors
+            .diagnostics
             .first()
             .map(|diagnostic| diagnostic.to_string())
             .unwrap_or_else(|| "unknown parse error".to_owned());
