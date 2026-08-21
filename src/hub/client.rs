@@ -336,13 +336,28 @@ impl HubClient {
         staging: &Path,
         max_bytes: Option<u64>,
     ) -> Result<DownloadResult> {
-        let hub_file = HubFile {
-            path: file.to_owned(),
-            size: None,
-            blob_id: None,
-            lfs: None,
-        };
-        self.download_verified(repo, revision, &hub_file, staging, max_bytes)
+        validate_repo_id(repo)?;
+        validate_revision(revision)?;
+        validate_member_path(file)?;
+
+        let revision_meta = self.model(repo, Some(revision))?;
+        let hub_file = revision_meta
+            .files
+            .into_iter()
+            .find(|f| f.path == file)
+            .unwrap_or_else(|| HubFile {
+                path: file.to_owned(),
+                size: None,
+                blob_id: None,
+                lfs: None,
+            });
+        self.download_verified(
+            repo,
+            &revision_meta.commit_sha,
+            &hub_file,
+            staging,
+            max_bytes,
+        )
     }
 
     fn get_following(&self, mut url: Url, max_response_bytes: u64) -> Result<Response> {

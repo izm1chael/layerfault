@@ -215,7 +215,7 @@ fn process_hub_review(
             coverage_incomplete = true;
             continue;
         }
-        match client.download(repo, revision, &file.path, &root, Some(file_cap)) {
+        match client.download_verified(repo, revision, &file, &root, Some(file_cap)) {
             Ok(result) => {
                 remaining = remaining.saturating_sub(result.bytes);
                 downloaded.push(result);
