@@ -257,6 +257,10 @@ impl RuntimeAdapter {
                         Ok((200, _)) => break,
                         Ok((503, _)) | Err(_) => {}
                         Ok((status, _)) => {
+                            let _ = super::sandbox::terminate_process_tree(
+                                &mut child,
+                                Duration::from_secs(2),
+                            );
                             bail!("llama-server health endpoint returned HTTP {status}")
                         }
                     }
@@ -267,6 +271,34 @@ impl RuntimeAdapter {
                     bail!("persistent llama-server model load exceeded command deadline");
                 }
                 std::thread::sleep(Duration::from_millis(100));
+            }
+
+            let props_check = unix_http(
+                &socket_host,
+                "GET",
+                "/props",
+                None,
+                Duration::from_secs(5),
+                64 * 1024,
+            )
+            .and_then(|(status, bytes)| verify_model_props(status, &bytes));
+            match props_check {
+                Ok(ModelPropsCheck::Verified) => {}
+                Ok(ModelPropsCheck::Unsupported) => {
+                    eprintln!(
+                        "Warning: llama-server does not expose /props; model readiness is based on /health"
+                    );
+                }
+                Err(error) => {
+                    if let Err(cleanup_error) =
+                        super::sandbox::terminate_process_tree(&mut child, Duration::from_secs(2))
+                    {
+                        return Err(error.context(format!(
+                            "llama-server cleanup after readiness failure also failed: {cleanup_error:#}"
+                        )));
+                    }
+                    return Err(error);
+                }
             }
 
             Ok(RuntimeSession {
@@ -412,7 +444,9 @@ impl RuntimeSession<'_> {
                     self.closed = true;
                     Ok(RuntimeResult {
                         stdout: String::new(),
-                        stderr: format!("persistent llama-server probe timed out: {error}"),
+                        stderr: format!(
+                            "persistent llama-server completion request timed out: {error}"
+                        ),
                         exit_code: None,
                         timed_out: true,
                         duration_ms: u64::try_from(started.elapsed().as_millis())
@@ -420,7 +454,8 @@ impl RuntimeSession<'_> {
                         telemetry,
                     })
                 } else {
-                    Err(error.context("persistent llama-server probe failed"))
+                    // Include the target endpoint in the error for better debugging
+                    Err(error.context("persistent llama-server completion request failed"))
                 }
             }
         }
@@ -493,6 +528,54 @@ fn resolve_llama_server(requested: &Path) -> Result<PathBuf> {
     })
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ModelPropsCheck {
+    Verified,
+    Unsupported,
+}
+
+fn verify_model_props(status: u16, body: &[u8]) -> Result<ModelPropsCheck> {
+    if matches!(status, 404 | 405) {
+        return Ok(ModelPropsCheck::Unsupported);
+    }
+    if status != 200 {
+        let excerpt = String::from_utf8_lossy(body)
+            .chars()
+            .take(512)
+            .collect::<String>();
+        bail!(
+            "llama-server /props endpoint returned HTTP {status} after health check passed: {excerpt}"
+        );
+    }
+
+    let props: serde_json::Value =
+        serde_json::from_slice(body).context("llama-server /props returned invalid JSON")?;
+    let object = props
+        .as_object()
+        .ok_or_else(|| anyhow!("llama-server /props response must be a JSON object"))?;
+
+    if object.get("model_loaded").and_then(|value| value.as_bool()) == Some(false) {
+        bail!("llama-server started but reported model_loaded=false");
+    }
+    if object
+        .get("model")
+        .is_some_and(|value| value.is_null() || value.as_str() == Some(""))
+    {
+        bail!("llama-server started but reported a null or empty model");
+    }
+    if let Some(error) = object.get("error") {
+        let meaningful = !error.is_null()
+            && error.as_bool() != Some(false)
+            && error.as_str().is_none_or(|value| !value.is_empty());
+        if meaningful {
+            let excerpt = error.to_string().chars().take(512).collect::<String>();
+            bail!("llama-server reported an error during model load: {excerpt}");
+        }
+    }
+
+    Ok(ModelPropsCheck::Verified)
+}
+
 #[cfg(unix)]
 fn unix_http(
     socket: &Path,
@@ -533,17 +616,43 @@ fn unix_http(
         }
         bytes.extend_from_slice(&buffer[..count]);
     }
+    // Check for empty response (connection closed without data)
+    if bytes.is_empty() {
+        bail!("llama-server closed connection without sending a response (empty response)");
+    }
     let header_end = bytes
         .windows(4)
         .position(|window| window == b"\r\n\r\n")
-        .ok_or_else(|| anyhow!("malformed llama-server HTTP response"))?;
-    let header = std::str::from_utf8(&bytes[..header_end])?;
+        .ok_or_else(|| {
+            // Log the actual response for debugging
+            let excerpt = String::from_utf8_lossy(&bytes[..std::cmp::min(bytes.len(), 512)]);
+            anyhow!(
+                "malformed llama-server HTTP response: missing header delimiter (\\r\\n\\r\\n). Received {} bytes: {:?}",
+                bytes.len(),
+                excerpt
+            )
+        })?;
+    let header = std::str::from_utf8(&bytes[..header_end]).with_context(|| {
+        let excerpt = String::from_utf8_lossy(&bytes[..std::cmp::min(bytes.len(), 512)]);
+        format!(
+            "invalid UTF-8 in HTTP response headers. Received {} bytes: {:?}",
+            bytes.len(),
+            excerpt
+        )
+    })?;
     let status = header
         .lines()
         .next()
         .and_then(|line| line.split_whitespace().nth(1))
         .and_then(|value| value.parse::<u16>().ok())
-        .ok_or_else(|| anyhow!("llama-server HTTP response omitted status"))?;
+        .ok_or_else(|| {
+            let excerpt = String::from_utf8_lossy(&bytes[..std::cmp::min(bytes.len(), 512)]);
+            anyhow!(
+                "llama-server HTTP response omitted status line. Received {} bytes: {:?}",
+                bytes.len(),
+                excerpt
+            )
+        })?;
     let body = &bytes[header_end + 4..];
     let chunked = header.lines().skip(1).any(|line| {
         line.split_once(':').is_some_and(|(name, value)| {
@@ -664,5 +773,44 @@ fn version_string(path: &Path) -> Option<String> {
         None
     } else {
         Some(text.chars().take(4096).collect())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn model_props_parses_semantic_readiness_fields() {
+        assert_eq!(
+            verify_model_props(200, br#"{"model_loaded": true, "model": "model.gguf"}"#)
+                .expect("loaded model"),
+            ModelPropsCheck::Verified
+        );
+        assert!(verify_model_props(200, br#"{"model_loaded": false}"#).is_err());
+        assert!(verify_model_props(200, br#"{"model": null}"#).is_err());
+        assert!(verify_model_props(200, br#"{"model": ""}"#).is_err());
+    }
+
+    #[test]
+    fn model_props_handles_errors_without_string_matching() {
+        assert!(
+            verify_model_props(200, br#"{"error": null, "nested": {"error": "metadata"}}"#).is_ok()
+        );
+        assert!(verify_model_props(200, br#"{"error": "load failed"}"#).is_err());
+        assert!(verify_model_props(200, b"not-json").is_err());
+    }
+
+    #[test]
+    fn model_props_tolerates_unsupported_endpoint_statuses() {
+        assert_eq!(
+            verify_model_props(404, b"not found").expect("404 compatibility"),
+            ModelPropsCheck::Unsupported
+        );
+        assert_eq!(
+            verify_model_props(405, b"method not allowed").expect("405 compatibility"),
+            ModelPropsCheck::Unsupported
+        );
+        assert!(verify_model_props(503, b"loading").is_err());
     }
 }

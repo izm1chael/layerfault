@@ -25,14 +25,7 @@ pub fn static_admit(path: &Path, allow_blocked: bool) -> Result<()> {
 
 pub(crate) fn resolve_gguf(path: &Path) -> Result<PathBuf> {
     if path.is_file() {
-        let snap = crate::modelmeta::build_snapshot(path)?;
-        if snap.format != "gguf" {
-            bail!(
-                "llama.cpp behavioural backend requires a GGUF artifact, got {}",
-                snap.format
-            );
-        }
-        return Ok(path.to_path_buf());
+        return validate_inference_gguf(path);
     }
     let report = crate::package::inspect(path)?;
     let ggufs: Vec<_> = report
@@ -47,12 +40,29 @@ pub(crate) fn resolve_gguf(path: &Path) -> Result<PathBuf> {
         );
     }
     // nosemgrep: rust.actix.path-traversal.tainted-path.tainted-path
-    crate::safeio::canonical_regular_file_within(
+    let resolved = crate::safeio::canonical_regular_file_within(
         // nosemgrep: rust.actix.path-traversal.tainted-path.tainted-path
         Path::new(&report.root),
         &ggufs[0].relative_path,
         false,
-    )
+    )?;
+    validate_inference_gguf(&resolved)
+}
+
+fn validate_inference_gguf(path: &Path) -> Result<PathBuf> {
+    let snap = crate::modelmeta::build_snapshot(path)?;
+    if snap.format != "gguf" {
+        bail!(
+            "llama.cpp behavioural backend requires a GGUF artifact, got {}",
+            snap.format
+        );
+    }
+    if snap.tensors.is_empty() {
+        bail!(
+            "llama.cpp behavioural backend requires a GGUF with at least one tensor; this model has zero tensors and cannot be used for inference"
+        );
+    }
+    Ok(path.to_path_buf())
 }
 
 pub(crate) fn synthetic_canary(identity: &str, seed: u64, label: &str) -> String {
