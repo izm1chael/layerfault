@@ -21,9 +21,11 @@ pub mod coverage;
 pub mod dataset;
 pub mod decision;
 pub mod dependencies;
+pub mod diagnostics;
 pub mod discovery;
 pub mod doctor;
 pub mod embedded;
+pub mod error;
 pub mod evidence;
 pub mod evidence_bundle;
 pub mod explain;
@@ -83,4 +85,5 @@ pub struct ThresholdConfig {
     pub max_predict: i64,
 }
 
+pub use error::{ContextLf, ErrorKind, LayerfaultError, Severity};
 pub use explain::{comparable, Comparability, FindingDescriptor};

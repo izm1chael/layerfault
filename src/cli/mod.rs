@@ -1,6 +1,7 @@
 mod args;
 mod commands;
 mod dispatch;
+mod error_report;
 mod output;
 mod scan_setup;
 mod validation;
@@ -28,6 +29,7 @@ use scan_setup::*;
 use validation::sigstore_request;
 
 pub(crate) fn run() -> Result<()> {
+    layerfault::diagnostics::init_from_env();
     let cli = Cli::parse();
     if cli.no_cache {
         std::env::set_var("LAYERFAULT_HASH_CACHE", "off");
@@ -37,6 +39,19 @@ pub(crate) fn run() -> Result<()> {
         std::env::set_var("LAYERFAULT_CACHE_DIR", cache_dir.as_os_str());
     }
     dispatch::dispatch(cli)
+}
+
+/// Render a bubbled command failure through the single structured chokepoint in
+/// `error_report`. The exit code is unchanged (the caller still fails with
+/// `ExitCode::FAILURE`); this only decides *how* the failure is formatted for
+/// the operator/automation (structured JSON envelope to stdout when `json`,
+/// otherwise a human-readable report to stderr).
+pub(crate) fn render_failure(error: &anyhow::Error, json: bool) {
+    if json {
+        error_report::render_json(error);
+    } else {
+        error_report::render_human(error);
+    }
 }
 
 #[cfg(test)]

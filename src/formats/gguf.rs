@@ -4,6 +4,7 @@
 //! snapshot, lineage, derivation and weight-analysis code all consume this
 //! inventory rather than reparsing attacker-controlled bytes independently.
 
+use crate::error::{ErrorKind, LayerfaultError, Severity};
 use anyhow::{anyhow, bail, Context, Result};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -269,7 +270,14 @@ fn parse_reader<R: Read + Seek>(mut raw: R, file_len: u64) -> Result<GgufInvento
 
     let minimum_header = if version == 1 { 16 } else { 24 };
     if file_len < minimum_header {
-        bail!("file is too small for a GGUF v{version} header");
+        return Err(LayerfaultError::new(
+            ErrorKind::FormatTruncated,
+            Severity::Error,
+            format!("file is too small for a GGUF v{version} header ({file_len} bytes < {minimum_header})"),
+        )
+        .with_code("LF-ERR-FORMAT-GGUF-TRUNCATED")
+        .with_hint("ensure model file was completely downloaded")
+        .into());
     }
 
     let mut reader = GgufReader {
@@ -280,10 +288,22 @@ fn parse_reader<R: Read + Seek>(mut raw: R, file_len: u64) -> Result<GgufInvento
     let tensor_count = reader.read_count()?;
     let metadata_count = reader.read_count()?;
     if tensor_count > MAX_TENSORS {
-        bail!("tensor count {tensor_count} exceeds safety cap {MAX_TENSORS}");
+        return Err(LayerfaultError::new(
+            ErrorKind::BudgetExceeded,
+            Severity::Error,
+            format!("tensor count {tensor_count} exceeds safety cap {MAX_TENSORS}"),
+        )
+        .with_code("LF-ERR-FORMAT-GGUF-TENSOR-CAP")
+        .into());
     }
     if metadata_count > MAX_METADATA_FIELDS {
-        bail!("metadata count {metadata_count} exceeds safety cap {MAX_METADATA_FIELDS}");
+        return Err(LayerfaultError::new(
+            ErrorKind::BudgetExceeded,
+            Severity::Error,
+            format!("metadata count {metadata_count} exceeds safety cap {MAX_METADATA_FIELDS}"),
+        )
+        .with_code("LF-ERR-FORMAT-GGUF-METADATA-CAP")
+        .into());
     }
 
     let mut metadata = BTreeMap::new();

@@ -17,17 +17,7 @@ fn main() -> ExitCode {
     match cli::run() {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
-            if wants_json_output() {
-                let payload = serde_json::json!({
-                    "error": {
-                        "message": error.to_string(),
-                        "causes": error.chain().skip(1).map(ToString::to_string).collect::<Vec<_>>(),
-                    }
-                });
-                let _ = layerfault::json_stream::write_stdout_json(&payload, true);
-            } else {
-                eprintln!("Error: {error:?}");
-            }
+            cli::render_failure(&error, wants_json_output());
             ExitCode::FAILURE
         }
     }

@@ -3,6 +3,7 @@ use super::types::{
 };
 mod range;
 
+use crate::error::{ErrorKind, LayerfaultError, Severity};
 use anyhow::{anyhow, bail, Context, Result};
 use reqwest::blocking::{Client, Response};
 use reqwest::header::{AUTHORIZATION, LOCATION, RETRY_AFTER, USER_AGENT};
@@ -403,17 +404,41 @@ impl HubClient {
                     break;
                 }
                 if !response.status().is_success() {
-                    bail!("Hub request returned HTTP {} for {url}", response.status());
+                    let status = response.status();
+                    return Err(LayerfaultError::new(
+                        ErrorKind::RemoteApi,
+                        Severity::Error,
+                        format!("Hub request returned HTTP {status} for {url}"),
+                    )
+                    .with_code("LF-ERR-HUB-HTTP-STATUS")
+                    .with_subject(format!("url={url}"))
+                    .with_hint("verify repository name, revision, and authentication token")
+                    .into());
                 }
                 if let Some(length) = response.content_length() {
                     if length > max_response_bytes {
-                        bail!("Hub response exceeds configured byte cap");
+                        return Err(LayerfaultError::new(
+                            ErrorKind::BudgetExceeded,
+                            Severity::Error,
+                            format!("Hub response length {length} exceeds configured byte cap {max_response_bytes}"),
+                        )
+                        .with_code("LF-ERR-HUB-RESPONSE-CAP")
+                        .with_subject(format!("url={url}"))
+                        .with_hint("increase byte limit or verify target file size")
+                        .into());
                     }
                 }
                 return Ok(response);
             }
         }
-        bail!("Hub redirect processing failed")
+        Err(LayerfaultError::new(
+            ErrorKind::RemoteApi,
+            Severity::Error,
+            "Hub redirect processing failed",
+        )
+        .with_code("LF-ERR-HUB-REDIRECT-LOOP")
+        .with_hint("check repository URL for cyclic redirects")
+        .into())
     }
 }
 

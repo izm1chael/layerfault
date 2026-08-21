@@ -135,6 +135,11 @@ fn every_emitted_rule_is_registered() {
         if literal.starts_with("LF-CORR-") {
             continue;
         }
+        // Operational error codes (src/error.rs) are a distinct namespace
+        // from finding rule ids and are exercised by error_report tests.
+        if literal.starts_with("LF-ERR-") {
+            continue;
+        }
         if KNOWN_NON_RULE_SENTINELS.contains(&literal.as_str()) {
             continue;
         }

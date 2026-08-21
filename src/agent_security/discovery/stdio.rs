@@ -366,15 +366,21 @@ fn run_discovery_sequence(child: &mut Child, timeout: Duration) -> Result<StdioD
     let initialize_response = transport.recv_response(init_id, deadline).ok();
     if initialize_response.is_none() {
         let stderr = transport.stderr_string();
-        if stderr.is_empty() {
-            limitations.push(
-                "MCP server did not respond to initialize within the discovery timeout".to_owned(),
-            );
+        let message = if stderr.is_empty() {
+            "MCP server did not respond to initialize within the discovery timeout".to_owned()
         } else {
-            limitations.push(format!(
+            format!(
                 "MCP server did not respond to initialize within the discovery timeout; process stderr: {stderr}"
-            ));
-        }
+            )
+        };
+        crate::diagnostics::emit_full(
+            crate::diagnostics::Level::Warn,
+            "mcp_discovery",
+            &message,
+            Some("initialize"),
+            Some("verify stdio command starts properly in isolated sandbox"),
+        );
+        limitations.push(message);
         return Ok(StdioDiscoveryOutcome {
             initialize: None,
             tools_list: None,

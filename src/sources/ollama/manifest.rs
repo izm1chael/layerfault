@@ -100,7 +100,11 @@ pub fn discover_all_models(base_dir: &Path) -> Result<Vec<ModelRef>> {
         let entry = match entry {
             Ok(entry) => entry,
             Err(error) => {
-                eprintln!("warning: unable to inspect manifest path: {error}");
+                crate::diagnostics::emit(
+                    crate::diagnostics::Level::Warn,
+                    "io_boundary",
+                    &format!("unable to inspect manifest path: {error}"),
+                );
                 continue;
             }
         };
@@ -120,7 +124,11 @@ pub fn discover_all_models(base_dir: &Path) -> Result<Vec<ModelRef>> {
         let name = match canonical_model_name(relative) {
             Ok(name) => name,
             Err(error) => {
-                eprintln!("warning: skipping '{}': {error}", path.display());
+                crate::diagnostics::emit(
+                    crate::diagnostics::Level::Warn,
+                    "io_boundary",
+                    &format!("skipping manifest '{}': {error}", path.display()),
+                );
                 continue;
             }
         };

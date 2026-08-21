@@ -3,6 +3,7 @@ use super::types::{
     BindingKind, BindingRecord, BoundMember, ComponentBinding, ExecutionManifest, StagedArtifact,
     StagedPackage, StagingMechanism,
 };
+use crate::error::{ErrorKind, LayerfaultError, Severity};
 use anyhow::{anyhow, bail, Context, Result};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -95,8 +96,24 @@ pub fn stale_staging_dirs(parent: &Path) -> Vec<PathBuf> {
 /// ignored: this is opportunistic cleanup, not a precondition for the
 /// current operation, and must never block or fail staging.
 fn sweep_stale_staging(parent: &Path) {
-    for path in stale_staging_dirs(parent) {
-        let _ = fs::remove_dir_all(path);
+    let stale = stale_staging_dirs(parent);
+    if !stale.is_empty() {
+        let mut removed = 0usize;
+        for path in &stale {
+            if fs::remove_dir_all(path).is_ok() {
+                removed = removed.saturating_add(1);
+            }
+        }
+        if removed == 0 {
+            return;
+        }
+        crate::diagnostics::emit_full(
+            crate::diagnostics::Level::Info,
+            "staging_sweep",
+            &format!("cleaned up {removed} orphaned staging directories"),
+            parent.to_str(),
+            None,
+        );
     }
 }
 
@@ -117,9 +134,15 @@ pub fn stage_verified_under(
     executable: bool,
 ) -> Result<StagedArtifact> {
     if !expected_sha256.starts_with("sha256:") {
-        return Err(anyhow!(
-            "Execution binding requires a canonical sha256 artifact digest"
-        ));
+        return Err(LayerfaultError::new(
+            ErrorKind::ExecutionBinding,
+            Severity::Error,
+            "Execution binding requires a canonical sha256 artifact digest",
+        )
+        .with_code("LF-ERR-BINDING-DIGEST-SCHEME")
+        .with_subject(format!("expected={expected_sha256}"))
+        .with_hint("format digest as 'sha256:<hex>'")
+        .into());
     }
     crate::paths::ensure_private_dir(parent)?;
     sweep_stale_staging(parent);

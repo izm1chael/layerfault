@@ -312,8 +312,15 @@ fn maybe_sample_gc() {
         return;
     }
     if let Err(error) = gc::maybe_run_sampled() {
-        // GC is a best-effort housekeeping pass; never let it fail a scan.
-        let _ = error;
+        // GC is a best-effort housekeeping pass; never let it fail a scan. The
+        // failure is emitted at `Info` (silent by default; visible under
+        // `LAYERFAULT_LOG=info`) so a failing sweep stops being invisible
+        // without adding noise to the default scan output.
+        crate::diagnostics::emit(
+            crate::diagnostics::Level::Info,
+            "cache_io",
+            &format!("background gc sweep skipped: {error:#}"),
+        );
     }
 }
 

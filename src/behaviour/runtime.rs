@@ -1,3 +1,4 @@
+use crate::error::{ErrorKind, LayerfaultError, Severity};
 use anyhow::{anyhow, bail, Context, Result};
 use sha2::{Digest, Sha256};
 use std::io::{Read, Write};
@@ -402,7 +403,15 @@ impl RuntimeSession<'_> {
                         ),
                         Err(error) => format!("{error:#}"),
                     };
-                    bail!("llama-server completed a probe but context reset failed; refusing stateful continuation ({reason})");
+                    return Err(LayerfaultError::new(
+                        ErrorKind::SubprocessExit,
+                        Severity::Error,
+                        format!("llama-server completed a probe but context reset failed; refusing stateful continuation ({reason})"),
+                    )
+                    .with_code("LF-ERR-BEHAV-RESET-FAILED")
+                    .with_subject("endpoint=/slots/0?action=erase")
+                    .with_hint("ensure llama-server is started with `--slots --slot-save-path <dir>`")
+                    .into());
                 }
                 let value: serde_json::Value = serde_json::from_slice(&bytes)
                     .context("invalid llama-server completion JSON")?;
@@ -422,13 +431,20 @@ impl RuntimeSession<'_> {
                     telemetry,
                 })
             }
-            Ok((status, bytes)) => Err(anyhow!(
-                "llama-server completion returned HTTP {status}: {}",
-                String::from_utf8_lossy(&bytes)
-                    .chars()
-                    .take(1024)
-                    .collect::<String>()
-            )),
+            Ok((status, bytes)) => Err(LayerfaultError::new(
+                ErrorKind::SubprocessExit,
+                Severity::Error,
+                format!(
+                    "llama-server completion returned HTTP {status}: {}",
+                    String::from_utf8_lossy(&bytes)
+                        .chars()
+                        .take(1024)
+                        .collect::<String>()
+                ),
+            )
+            .with_code("LF-ERR-BEHAV-COMPLETION-STATUS")
+            .with_subject("endpoint=/completion")
+            .into()),
             Err(error) => {
                 let timed_out = error.downcast_ref::<std::io::Error>().is_some_and(|io| {
                     matches!(
