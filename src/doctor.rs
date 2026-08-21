@@ -1,5 +1,5 @@
 use crate::sources;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
@@ -32,6 +32,18 @@ fn dir_size_bytes(path: &Path) -> Option<u64> {
     Some(total)
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ActiveAnalysisReadiness {
+    pub bwrap: bool,
+    pub user_namespaces: bool,
+    pub cgroup_v2: bool,
+    pub cgroup_delegated: bool,
+    pub strace: bool,
+    pub ebpf: bool,
+    pub kvm: bool,
+    pub recommended_memory_budget_bytes: Option<u64>,
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct CapabilityReport {
     pub os: String,
@@ -39,6 +51,8 @@ pub struct CapabilityReport {
     pub physical_memory_bytes: Option<u64>,
     pub available_memory_bytes: Option<u64>,
     pub recommended_active_memory_budget_bytes: Option<u64>,
+    pub active_analysis: ActiveAnalysisReadiness,
+    pub behaviour_profiles: BTreeMap<String, crate::behaviour::BehaviourProfileMetadata>,
     pub accelerator: String,
     pub static_analysis: bool,
     pub active_sandbox: bool,
@@ -401,12 +415,27 @@ pub fn capabilities() -> CapabilityReport {
         }
     }
 
+    let user_namespaces = probe_user_namespaces();
+    let cgroup_delegated = cgroup_caps.cgroup_v2 && cgroup_caps.delegated_writable;
+    let active_analysis = ActiveAnalysisReadiness {
+        bwrap: bwrap_verified,
+        user_namespaces,
+        cgroup_v2: cgroup_caps.cgroup_v2,
+        cgroup_delegated,
+        strace: tools.get("strace").copied().unwrap_or(false),
+        ebpf: ebpf_telemetry,
+        kvm: Path::new("/dev/kvm").exists(),
+        recommended_memory_budget_bytes: budget,
+    };
+
     CapabilityReport {
         os: std::env::consts::OS.to_owned(),
         architecture: std::env::consts::ARCH.to_owned(),
         physical_memory_bytes: physical,
         available_memory_bytes: available,
         recommended_active_memory_budget_bytes: budget,
+        active_analysis,
+        behaviour_profiles: crate::behaviour::BehaviourLimits::all_profiles(),
         accelerator,
         static_analysis: true,
         active_sandbox,
@@ -513,6 +542,26 @@ awk -F: 'NR > 2 { gsub(/[[:space:]]/, "", $1); if ($1 != "lo") exit 42 }' /proc/
             ))
         }
     }
+}
+
+fn probe_user_namespaces() -> bool {
+    #[cfg(target_os = "linux")]
+    {
+        if let Ok(content) = std::fs::read_to_string("/proc/sys/kernel/unprivileged_userns_clone") {
+            if content.trim() == "0" {
+                return false;
+            }
+        }
+        if let Ok(content) = std::fs::read_to_string("/proc/sys/user/max_user_namespaces") {
+            if content.trim() == "0" {
+                return false;
+            }
+        }
+        if let Some(bwrap) = sources::find_executable("bwrap") {
+            return bwrap_selftest(&bwrap).is_ok();
+        }
+    }
+    false
 }
 
 fn managed_python_runtime() -> Option<PathBuf> {

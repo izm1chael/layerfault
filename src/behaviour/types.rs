@@ -53,6 +53,28 @@ impl BehaviourLimits {
         }
     }
 
+    pub fn all_profiles() -> std::collections::BTreeMap<String, BehaviourProfileMetadata> {
+        let mut map = std::collections::BTreeMap::new();
+        for name in &["quick", "standard", "deep", "research"] {
+            if let Ok(limits) = Self::for_profile(name) {
+                map.insert(
+                    name.to_string(),
+                    BehaviourProfileMetadata {
+                        name: name.to_string(),
+                        max_prompts: limits.max_prompts,
+                        max_turns: limits.max_turns,
+                        max_tokens: limits.max_tokens,
+                        max_output_bytes: limits.max_output_bytes,
+                        timeout_seconds: limits.timeout_seconds,
+                        max_mutations: limits.max_mutations,
+                        repeat_count: limits.repeat_count,
+                    },
+                );
+            }
+        }
+        map
+    }
+
     pub fn clamp(
         mut self,
         prompts: usize,
@@ -196,6 +218,7 @@ mod deadline_tests {
 pub(crate) struct ProgressHeartbeat {
     stop: Arc<AtomicBool>,
     phase: Arc<Mutex<String>>,
+    started: Instant,
     thread: Option<std::thread::JoinHandle<()>>,
 }
 
@@ -228,13 +251,65 @@ impl ProgressHeartbeat {
         Self {
             stop,
             phase,
+            started,
             thread: Some(thread),
         }
     }
 
     pub(crate) fn update(&self, value: impl Into<String>) {
+        let text = value.into();
         if let Ok(mut phase) = self.phase.lock() {
-            *phase = value.into();
+            *phase = text;
+        }
+    }
+
+    pub(crate) fn notify_model_load(&self) {
+        self.update("phase=model_load");
+        let elapsed_ms = self.started.elapsed().as_millis() as u64;
+        let event = serde_json::json!({
+            "type": "progress",
+            "phase": "model_load",
+            "elapsed_ms": elapsed_ms,
+        });
+        emit_structured_progress(&event);
+    }
+
+    pub(crate) fn notify_probe(&self, probe_id: &str, completed: usize, total: usize) {
+        self.update(format!("probe={completed}/{total} id={probe_id}"));
+        let elapsed_ms = self.started.elapsed().as_millis() as u64;
+        let event = serde_json::json!({
+            "type": "progress",
+            "phase": "probe",
+            "probe_id": probe_id,
+            "completed": completed,
+            "total": total,
+            "elapsed_ms": elapsed_ms,
+        });
+        emit_structured_progress(&event);
+    }
+}
+
+fn emit_structured_progress(event: &serde_json::Value) {
+    if let Ok(line) = serde_json::to_string(event) {
+        use std::io::Write;
+        let mut stderr = std::io::stderr().lock();
+        let _ = writeln!(stderr, "{line}");
+        let _ = stderr.flush();
+
+        if let Ok(fd_str) = std::env::var("LAYERFAULT_PROGRESS_FD") {
+            if let Ok(fd) = fd_str.parse::<i32>() {
+                #[cfg(unix)]
+                {
+                    use std::fs::OpenOptions;
+                    if let Ok(mut file) = OpenOptions::new()
+                        .write(true)
+                        .open(format!("/proc/self/fd/{fd}"))
+                    {
+                        let _ = writeln!(file, "{line}");
+                        let _ = file.flush();
+                    }
+                }
+            }
         }
     }
 }
@@ -305,6 +380,16 @@ pub struct BehaviourReport {
     pub executions: Vec<ProbeExecution>,
     pub dynamic_observations: DynamicObservationSummary,
     pub state: crate::transformation::BehaviourState,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason_code: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub detail: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub estimated_memory_bytes: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub available_budget_bytes: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub safe_memory_budget_bytes: Option<u64>,
     pub findings: Vec<String>,
     pub boundary: String,
 }
@@ -348,7 +433,52 @@ pub struct DifferentialReport {
     pub derived: BehaviourReport,
     pub rows: Vec<DifferentialRow>,
     pub state: crate::transformation::DifferentialBehaviourState,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason_code: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub detail: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub estimated_memory_bytes: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub available_budget_bytes: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub safe_memory_budget_bytes: Option<u64>,
     pub findings: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BehaviourProfileMetadata {
+    pub name: String,
+    pub max_prompts: usize,
+    pub max_turns: usize,
+    pub max_tokens: u64,
+    pub max_output_bytes: usize,
+    pub timeout_seconds: u64,
+    pub max_mutations: usize,
+    pub repeat_count: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BehaviourPreflightProfile {
+    pub name: String,
+    pub prompts: usize,
+    pub repeats: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BehaviourPreflightResult {
+    pub state: String,
+    pub reason_code: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub detail: Option<String>,
+    pub estimated_memory_bytes: Option<u64>,
+    pub safe_memory_budget_bytes: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub available_budget_bytes: Option<u64>,
+    pub model_load_ms: Option<u64>,
+    pub pilot_execution_ms: Option<u64>,
+    pub tokens_per_second: Option<f64>,
+    pub profile: BehaviourPreflightProfile,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -1,5 +1,5 @@
 use super::*;
-pub(crate) fn static_admit(path: &Path, allow_blocked: bool) -> Result<()> {
+pub fn static_admit(path: &Path, allow_blocked: bool) -> Result<()> {
     if path.is_dir() {
         let report = crate::package::inspect(path)?;
         if report.blocking() && !allow_blocked {

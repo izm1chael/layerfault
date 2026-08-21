@@ -38,11 +38,13 @@ pub use external::{
     run_external_llama_active,
 };
 pub use replay::{load_replay, replay_manifest};
-pub(crate) use support::{bounded_excerpt, resolve_gguf, sha256, static_admit, synthetic_canary};
+pub use sandbox::{configured_memory_budget_bytes, estimate_active_target_memory};
+pub use support::static_admit;
+pub(crate) use support::{bounded_excerpt, resolve_gguf, sha256, synthetic_canary};
 pub use types::{
-    ActiveExecutionOptions, BehaviourLimits, BehaviourReplayManifest, BehaviourReport,
-    DifferentialReport, DifferentialRow, DynamicObservationSummary, ProbeExecution,
-    RuntimeIdentity,
+    ActiveExecutionOptions, BehaviourLimits, BehaviourPreflightProfile, BehaviourPreflightResult,
+    BehaviourProfileMetadata, BehaviourReplayManifest, BehaviourReport, DifferentialReport,
+    DifferentialRow, DynamicObservationSummary, ProbeExecution, RuntimeIdentity,
 };
 pub(crate) use types::{CommandDeadline, ProgressHeartbeat};
 
@@ -118,6 +120,11 @@ mod tests {
                 .collect(),
             dynamic_observations: DynamicObservationSummary::default(),
             state: BehaviourState::NoSuspiciousObserved,
+            reason_code: None,
+            detail: None,
+            estimated_memory_bytes: None,
+            available_budget_bytes: None,
+            safe_memory_budget_bytes: None,
             findings: Vec::new(),
             boundary: "test".to_owned(),
         }

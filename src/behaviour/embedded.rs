@@ -163,6 +163,11 @@ pub(crate) fn finalize_report(
         } else {
             crate::transformation::BehaviourState::NoSuspiciousObserved
         },
+        reason_code: None,
+        detail: None,
+        estimated_memory_bytes: None,
+        available_budget_bytes: None,
+        safe_memory_budget_bytes: None,
         findings,
         boundary: "No suspicious behaviour observed means only that no suspicious behaviour was observed under the executed probe suite; it does not prove absence of hidden triggers or backdoors.".to_owned(),
     })

@@ -474,7 +474,9 @@ pub fn search_external(
     limits.max_prompts = probe_count.min(limits.max_prompts);
     limits.max_mutations = 0;
     limits.repeat_count = 1;
-    limits.timeout_seconds = limits.timeout_seconds.min(timeout_seconds.max(1));
+    if timeout_seconds > 0 {
+        limits.timeout_seconds = timeout_seconds;
+    }
     let (report, executed) = match base {
         Some(base) => {
             let diff = crate::behaviour::compare_external_llama(
@@ -527,7 +529,9 @@ pub fn search_embedded(
     limits.max_prompts = probe_count.min(limits.max_prompts);
     limits.max_mutations = 0;
     limits.repeat_count = 1;
-    limits.timeout_seconds = limits.timeout_seconds.min(timeout_seconds.max(1));
+    if timeout_seconds > 0 {
+        limits.timeout_seconds = timeout_seconds;
+    }
     let (hits, executed) = match base {
         Some(base) => {
             let diff = crate::behaviour::compare_embedded(

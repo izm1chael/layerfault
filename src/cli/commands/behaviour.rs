@@ -1,9 +1,61 @@
-use super::super::{BehaviourArgs, CompareBehaviourArgs};
+use super::super::{
+    args::BehaviourCommand, BehaviourArgs, BehaviourPreflightArgs, CompareBehaviourArgs, OutputArgs,
+};
 use anyhow::{anyhow, bail, Result};
 use layerfault::json_stream::write_stdout_json;
-use std::path::Path;
+use std::path::{Path, PathBuf};
+use std::time::Instant;
 
 use layerfault::decision::SecurityDecision;
+
+/// Standardised machine-readable reason codes for unexecuted behavioural runs.
+pub(crate) fn classify_not_run_reason(error_message: &str) -> &'static str {
+    let lower = error_message.to_ascii_lowercase();
+    if lower.contains("exceeds safe host budget")
+        || lower.contains("estimated runtime memory")
+        || lower.contains("insufficient memory")
+        || lower.contains("out of memory")
+    {
+        "INSUFFICIENT_MEMORY"
+    } else if lower.contains("static check failed")
+        || lower.contains("static admission blocked")
+        || lower.contains("blocked by policy")
+        || lower.contains("lf-static-")
+        || lower.contains("static_blocked")
+        || lower.contains("static admission")
+    {
+        "STATIC_BLOCKED"
+    } else if lower.contains("cgroup") {
+        "CGROUP_UNAVAILABLE"
+    } else if lower.contains("bubblewrap")
+        || lower.contains("bwrap")
+        || lower.contains("user namespace")
+        || lower.contains("sandbox")
+        || lower.contains("microvm")
+    {
+        "SANDBOX_UNAVAILABLE"
+    } else if lower.contains("unsupported behaviour runtime")
+        || lower.contains("unsupported behaviour replay runtime")
+        || lower.contains("unsupported runtime")
+        || lower.contains("unsupported active trigger hunt runtime")
+    {
+        "UNSUPPORTED_RUNTIME"
+    } else if lower.contains("not found on path")
+        || lower.contains("not found")
+        || lower.contains("executable was not found")
+        || lower.contains("runtime was not found")
+        || lower.contains("managed python runtime not found")
+    {
+        "RUNTIME_UNAVAILABLE"
+    } else if lower.contains("timeout") || lower.contains("timed out") || lower.contains("deadline")
+    {
+        "TIME_BUDGET_EXCEEDED"
+    } else if lower.contains("stalled") || lower.contains("stall") {
+        "STALLED"
+    } else {
+        "PREREQUISITE_UNAVAILABLE"
+    }
+}
 
 /// A structured `BehaviourReport` for the case where behaviour never
 /// actually executed (static admission blocked it, the runner/sandbox was
@@ -31,6 +83,11 @@ fn not_run_behaviour_report(
     limits: &layerfault::behaviour::BehaviourLimits,
     reason: &str,
 ) -> layerfault::behaviour::BehaviourReport {
+    let reason_code = classify_not_run_reason(reason).to_owned();
+    let budget = layerfault::behaviour::configured_memory_budget_bytes();
+    let estimated =
+        layerfault::behaviour::estimate_active_target_memory("dummy", model_path, None).ok();
+
     layerfault::behaviour::BehaviourReport {
         schema_version: "1.0".to_owned(),
         model_identity: String::new(),
@@ -50,6 +107,11 @@ fn not_run_behaviour_report(
         executions: Vec::new(),
         dynamic_observations: Default::default(),
         state: layerfault::transformation::BehaviourState::NotRun,
+        reason_code: Some(reason_code),
+        detail: Some(reason.to_owned()),
+        estimated_memory_bytes: estimated,
+        available_budget_bytes: Some(budget),
+        safe_memory_budget_bytes: Some(budget),
         findings: vec![format!("LF-BEHAV-NOT-RUN: {reason}")],
         boundary: format!(
             "Behavioural execution did not occur: {reason}. This is not evidence the model is safe or unsafe; it means no dynamic observation was made."
@@ -65,16 +127,317 @@ fn not_run_differential_report(
     limits: &layerfault::behaviour::BehaviourLimits,
     reason: &str,
 ) -> layerfault::behaviour::DifferentialReport {
+    let reason_code = classify_not_run_reason(reason).to_owned();
+    let budget = layerfault::behaviour::configured_memory_budget_bytes();
+    let estimated = layerfault::behaviour::estimate_active_target_memory(
+        "dummy",
+        derived_path,
+        Some(base_path),
+    )
+    .ok();
+
     layerfault::behaviour::DifferentialReport {
         schema_version: "1.0".to_owned(),
         base: not_run_behaviour_report(base_path, limits, reason),
         derived: not_run_behaviour_report(derived_path, limits, reason),
         rows: Vec::new(),
         state: layerfault::transformation::DifferentialBehaviourState::NotRun,
+        reason_code: Some(reason_code),
+        detail: Some(reason.to_owned()),
+        estimated_memory_bytes: estimated,
+        available_budget_bytes: Some(budget),
+        safe_memory_budget_bytes: Some(budget),
         findings: vec![format!("LF-BEHAV-DIFF-NOT-RUN: {reason}")],
     }
 }
+
+pub(crate) fn run_behaviour_profiles(args: OutputArgs) -> Result<()> {
+    let profiles = layerfault::behaviour::BehaviourLimits::all_profiles();
+    if args.json {
+        write_stdout_json(&profiles, true)?;
+    } else {
+        println!("BEHAVIOURAL PROFILES\n");
+        for (name, meta) in &profiles {
+            println!(
+                "  {:<12} max_prompts={:<4} repeat_count={:<2} max_tokens={:<4} timeout_seconds={:<3}",
+                name, meta.max_prompts, meta.repeat_count, meta.max_tokens, meta.timeout_seconds
+            );
+        }
+    }
+    Ok(())
+}
+
+fn emit_preflight(
+    result: &layerfault::behaviour::BehaviourPreflightResult,
+    json: bool,
+) -> Result<()> {
+    if json {
+        write_stdout_json(result, true)?;
+    } else {
+        println!("BEHAVIOURAL PREFLIGHT: {}", result.state);
+        if let Some(code) = &result.reason_code {
+            println!("  reason_code: {code}");
+        }
+        if let Some(detail) = &result.detail {
+            println!("  detail: {detail}");
+        }
+        if let Some(est) = result.estimated_memory_bytes {
+            println!(
+                "  estimated_memory: {}",
+                layerfault::doctor::human_bytes(est)
+            );
+        }
+        if let Some(safe) = result.safe_memory_budget_bytes {
+            println!(
+                "  safe_memory_budget: {}",
+                layerfault::doctor::human_bytes(safe)
+            );
+        }
+        if let Some(load) = result.model_load_ms {
+            println!("  model_load_ms: {load} ms");
+        }
+        if let Some(pilot) = result.pilot_execution_ms {
+            println!("  pilot_execution_ms: {pilot} ms");
+        }
+        if let Some(tps) = result.tokens_per_second {
+            println!("  tokens_per_second: {tps:.1} tps");
+        }
+    }
+    Ok(())
+}
+
+pub(crate) fn run_behaviour_preflight(args: BehaviourPreflightArgs) -> Result<()> {
+    let limits = layerfault::behaviour::BehaviourLimits::for_profile(&args.profile)?;
+    let safe_budget = layerfault::behaviour::configured_memory_budget_bytes();
+    let estimated_memory = layerfault::behaviour::estimate_active_target_memory(
+        &args.runtime,
+        &args.model,
+        args.base.as_deref(),
+    )
+    .ok();
+    let profile_info = layerfault::behaviour::BehaviourPreflightProfile {
+        name: args.profile.clone(),
+        prompts: limits.max_prompts,
+        repeats: limits.repeat_count,
+    };
+
+    if let Some(est) = estimated_memory {
+        if est > safe_budget {
+            let res = layerfault::behaviour::BehaviourPreflightResult {
+                state: "NOT_RUN".to_owned(),
+                reason_code: Some("INSUFFICIENT_MEMORY".to_owned()),
+                detail: Some(format!(
+                    "active analysis skipped: estimated runtime memory {:.1} GiB exceeds safe host budget {:.1} GiB",
+                    est as f64 / 1073741824.0,
+                    safe_budget as f64 / 1073741824.0
+                )),
+                estimated_memory_bytes: Some(est),
+                safe_memory_budget_bytes: Some(safe_budget),
+                available_budget_bytes: Some(safe_budget),
+                model_load_ms: None,
+                pilot_execution_ms: None,
+                tokens_per_second: None,
+                profile: profile_info,
+            };
+            return emit_preflight(&res, args.json);
+        }
+    }
+
+    if let Err(err) = layerfault::behaviour::static_admit(&args.model, args.allow_static_blocked) {
+        let res = layerfault::behaviour::BehaviourPreflightResult {
+            state: "NOT_RUN".to_owned(),
+            reason_code: Some("STATIC_BLOCKED".to_owned()),
+            detail: Some(format!("static admission blocked: {err}")),
+            estimated_memory_bytes: estimated_memory,
+            safe_memory_budget_bytes: Some(safe_budget),
+            available_budget_bytes: Some(safe_budget),
+            model_load_ms: None,
+            pilot_execution_ms: None,
+            tokens_per_second: None,
+            profile: profile_info,
+        };
+        return emit_preflight(&res, args.json);
+    }
+
+    let executable = match args.runtime.as_str() {
+        "llama-cpp" => match args.runtime_path.as_deref() {
+            Some(path) => Some(path.to_path_buf()),
+            None => layerfault::sources::find_executable("llama-server")
+                .or_else(|| layerfault::sources::find_executable("llama-cli"))
+                .or_else(|| layerfault::sources::find_executable("main")),
+        },
+        "transformers" | "transformers-python" => match args.runtime_path.as_deref() {
+            Some(path) => Some(path.to_path_buf()),
+            None => layerfault::sources::find_executable("python3")
+                .or_else(|| layerfault::sources::find_executable("python")),
+        },
+        "embedded" => Some(PathBuf::from("embedded")),
+        _ => None,
+    };
+    if executable.is_none() {
+        let res = layerfault::behaviour::BehaviourPreflightResult {
+            state: "NOT_RUN".to_owned(),
+            reason_code: Some(
+                if args.runtime != "llama-cpp"
+                    && args.runtime != "transformers"
+                    && args.runtime != "transformers-python"
+                    && args.runtime != "embedded"
+                {
+                    "UNSUPPORTED_RUNTIME".to_owned()
+                } else {
+                    "RUNTIME_UNAVAILABLE".to_owned()
+                },
+            ),
+            detail: Some(format!("runtime '{}' is unavailable", args.runtime)),
+            estimated_memory_bytes: estimated_memory,
+            safe_memory_budget_bytes: Some(safe_budget),
+            available_budget_bytes: Some(safe_budget),
+            model_load_ms: None,
+            pilot_execution_ms: None,
+            tokens_per_second: None,
+            profile: profile_info,
+        };
+        return emit_preflight(&res, args.json);
+    }
+
+    let closure_level = layerfault::behaviour::closure::ClosureLevel::parse(&args.closure_level)?;
+    let active = layerfault::behaviour::ActiveExecutionOptions {
+        sandbox_kind: args.sandbox,
+        microvm_config: layerfault::behaviour::microvm::MicrovmConfig::from_env_and_args(
+            args.microvm_image.clone(),
+            args.microvm_image_hash.clone(),
+        ),
+        allow_static_blocked: args.allow_static_blocked,
+        execute_custom_code: args.execute_custom_code,
+        closure_level,
+        require_cgroup: require_cgroup_from_env_or_arg(args.require_cgroup),
+        telemetry_backend: args.telemetry_backend,
+    };
+
+    let backend = layerfault::behaviour::sandbox::get_backend(
+        active.sandbox_kind,
+        active.microvm_config.clone(),
+    );
+    if let Err(err) = backend.require_execution_stack(active.clone()) {
+        let res = layerfault::behaviour::BehaviourPreflightResult {
+            state: "NOT_RUN".to_owned(),
+            reason_code: Some("SANDBOX_UNAVAILABLE".to_owned()),
+            detail: Some(err.to_string()),
+            estimated_memory_bytes: estimated_memory,
+            safe_memory_budget_bytes: Some(safe_budget),
+            available_budget_bytes: Some(safe_budget),
+            model_load_ms: None,
+            pilot_execution_ms: None,
+            tokens_per_second: None,
+            profile: profile_info,
+        };
+        return emit_preflight(&res, args.json);
+    }
+
+    let pilot_start = Instant::now();
+    let pilot_limits = layerfault::behaviour::BehaviourLimits {
+        max_prompts: 1,
+        max_turns: 1,
+        max_tokens: 32,
+        max_output_bytes: 32 * 1024,
+        timeout_seconds: args.timeout_seconds.unwrap_or(60),
+        max_mutations: 0,
+        repeat_count: 1,
+    };
+
+    let report_result = match args.runtime.as_str() {
+        "llama-cpp" => {
+            if args.execute_custom_code {
+                bail!("--execute-custom-code is only supported by --runtime transformers");
+            }
+            layerfault::behaviour::run_external_llama_active(
+                &args.model,
+                args.runtime_path.as_deref(),
+                None,
+                0,
+                pilot_limits,
+                active,
+            )
+        }
+        "transformers" | "transformers-python" => layerfault::behaviour::python::run_transformers(
+            &args.model,
+            args.base.as_deref(),
+            args.runtime_path.as_deref(),
+            None,
+            0,
+            pilot_limits,
+            active,
+        ),
+        "embedded" => {
+            let tokenizer = args.tokenizer.as_deref().ok_or_else(|| {
+                anyhow!("--runtime embedded requires --tokenizer /path/to/tokenizer.json")
+            })?;
+            layerfault::behaviour::run_embedded(&args.model, tokenizer, None, 0, pilot_limits)
+        }
+        other => bail!("unsupported behaviour runtime '{other}'"),
+    };
+
+    match report_result {
+        Ok(rep) => {
+            let total_ms = pilot_start.elapsed().as_millis() as u64;
+            let probe_dur = rep.executions.first().map(|e| e.duration_ms).unwrap_or(0);
+            let model_load_ms = total_ms.saturating_sub(probe_dur);
+            let pilot_execution_ms = probe_dur.max(1);
+            let words = rep
+                .executions
+                .first()
+                .map(|e| e.response_excerpt.split_whitespace().count())
+                .unwrap_or(1);
+            let estimated_tokens = (words as f64 * 1.33).max(1.0);
+            let tokens_per_second =
+                ((estimated_tokens / (pilot_execution_ms as f64 / 1000.0).max(0.001)) * 10.0)
+                    .round()
+                    / 10.0;
+            let res = layerfault::behaviour::BehaviourPreflightResult {
+                state: "RUNNABLE".to_owned(),
+                reason_code: None,
+                detail: None,
+                estimated_memory_bytes: estimated_memory,
+                safe_memory_budget_bytes: Some(safe_budget),
+                available_budget_bytes: Some(safe_budget),
+                model_load_ms: Some(model_load_ms),
+                pilot_execution_ms: Some(pilot_execution_ms),
+                tokens_per_second: Some(tokens_per_second),
+                profile: profile_info,
+            };
+            emit_preflight(&res, args.json)
+        }
+        Err(err) => {
+            let reason = error_reason_with_chain(&err);
+            let reason_code = classify_not_run_reason(&reason).to_owned();
+            let res = layerfault::behaviour::BehaviourPreflightResult {
+                state: "NOT_RUN".to_owned(),
+                reason_code: Some(reason_code),
+                detail: Some(reason),
+                estimated_memory_bytes: estimated_memory,
+                safe_memory_budget_bytes: Some(safe_budget),
+                available_budget_bytes: Some(safe_budget),
+                model_load_ms: None,
+                pilot_execution_ms: None,
+                tokens_per_second: None,
+                profile: profile_info,
+            };
+            emit_preflight(&res, args.json)
+        }
+    }
+}
+
 pub(crate) fn run_behaviour(args: BehaviourArgs) -> Result<()> {
+    if let Some(cmd) = args.command {
+        return match cmd {
+            BehaviourCommand::Preflight(preflight_args) => run_behaviour_preflight(preflight_args),
+            BehaviourCommand::Profiles(output_args) => run_behaviour_profiles(output_args),
+        };
+    }
+    let model = args
+        .model
+        .as_ref()
+        .ok_or_else(|| anyhow!("model path is required"))?;
     let closure_level = layerfault::behaviour::closure::ClosureLevel::parse(&args.closure_level)?;
     if let Some(replay_path) = args.replay.as_deref() {
         let replay = layerfault::behaviour::load_replay(replay_path)?;
@@ -151,7 +514,7 @@ pub(crate) fn run_behaviour(args: BehaviourArgs) -> Result<()> {
                 bail!("--execute-custom-code is only supported by --runtime transformers");
             }
             layerfault::behaviour::run_external_llama_active(
-                &args.model,
+                model,
                 args.runtime_path.as_deref(),
                 args.probe_suite.as_deref(),
                 args.seed,
@@ -160,7 +523,7 @@ pub(crate) fn run_behaviour(args: BehaviourArgs) -> Result<()> {
             )
         }
         "transformers" | "transformers-python" => layerfault::behaviour::python::run_transformers(
-            &args.model,
+            model,
             args.base.as_deref(),
             args.runtime_path.as_deref(),
             args.probe_suite.as_deref(),
@@ -176,7 +539,7 @@ pub(crate) fn run_behaviour(args: BehaviourArgs) -> Result<()> {
                 anyhow!("--runtime embedded requires --tokenizer /path/to/tokenizer.json")
             })?;
             layerfault::behaviour::run_embedded(
-                &args.model,
+                model,
                 tokenizer,
                 args.probe_suite.as_deref(),
                 args.seed,
@@ -198,11 +561,7 @@ pub(crate) fn run_behaviour(args: BehaviourArgs) -> Result<()> {
         Ok(report) => report,
         Err(error) if args.json => {
             return emit_behaviour(
-                &not_run_behaviour_report(
-                    &args.model,
-                    &report_limits,
-                    &error_reason_with_chain(&error),
-                ),
+                &not_run_behaviour_report(model, &report_limits, &error_reason_with_chain(&error)),
                 args.json,
             );
         }

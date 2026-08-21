@@ -58,6 +58,7 @@ pub(crate) fn run_research(args: ResearchArgs) -> Result<()> {
             context_templates,
             json: emit_json,
         } => {
+            let timeout_seconds = timeout_seconds.unwrap_or(120);
             let templates = parse_context_templates(&context_templates)?;
             let space = layerfault::research::trigger_space_from_strings(
                 alphabet,
@@ -108,9 +109,11 @@ pub(crate) fn run_research(args: ResearchArgs) -> Result<()> {
             runtime_path,
             tokenizer,
             seed,
+            timeout_seconds,
             context_templates,
             json: emit_json,
         } => {
+            let timeout_seconds = timeout_seconds.unwrap_or(120);
             let templates = parse_context_templates(&context_templates)?;
             let seed_literals = vec![
                 "RFC-79".to_owned(),
@@ -163,7 +166,7 @@ pub(crate) fn run_research(args: ResearchArgs) -> Result<()> {
                     &candidates,
                     &templates,
                     seed,
-                    120,
+                    timeout_seconds,
                 )?,
                 "embedded" => {
                     let tokenizer = tokenizer.as_deref().ok_or_else(|| {
@@ -176,7 +179,7 @@ pub(crate) fn run_research(args: ResearchArgs) -> Result<()> {
                         &candidates,
                         &templates,
                         seed,
-                        120,
+                        timeout_seconds,
                     )?
                 }
                 other => bail!("unsupported research runtime '{other}'"),
@@ -187,6 +190,7 @@ pub(crate) fn run_research(args: ResearchArgs) -> Result<()> {
             base,
             derived,
             tokenizer,
+            timeout_seconds,
             json: emit_json,
         } => {
             let comparison = layerfault::lineage::compare_paths(&base, &derived, None, None)?;
@@ -203,13 +207,12 @@ pub(crate) fn run_research(args: ResearchArgs) -> Result<()> {
             } else {
                 None
             };
+            let mut limits = layerfault::behaviour::BehaviourLimits::for_profile("standard")?;
+            if let Some(timeout) = timeout_seconds {
+                limits.timeout_seconds = timeout;
+            }
             let behaviour = layerfault::behaviour::compare_embedded(
-                &base,
-                &derived,
-                &tokenizer,
-                None,
-                0,
-                layerfault::behaviour::BehaviourLimits::for_profile("standard")?,
+                &base, &derived, &tokenizer, None, 0, limits,
             )
             .ok();
             #[derive(serde::Serialize)]
@@ -340,6 +343,7 @@ pub(crate) fn run_research(args: ResearchArgs) -> Result<()> {
             beam_width,
             beam_rounds,
             profile,
+            timeout_seconds,
             context_templates,
             json: emit_json,
         } => {
@@ -349,6 +353,8 @@ pub(crate) fn run_research(args: ResearchArgs) -> Result<()> {
                     profile
                 );
             }
+            let timeout_seconds =
+                timeout_seconds.unwrap_or(if profile == "research" { 300 } else { 120 });
             let templates = parse_context_templates(&context_templates)?;
             let tokenizer_path = if model.is_dir() {
                 ["tokenizer.json", "tokenizer.model"]
@@ -415,11 +421,11 @@ pub(crate) fn run_research(args: ResearchArgs) -> Result<()> {
                 bail!("trigger hunt requires at least one --candidate or --from-tokenizer");
             }
             let mut report = match runtime.as_deref() {
-                Some("llama-cpp") => layerfault::research::search_external(&model, parent.as_deref(), None, &candidates, &templates, 0, 120)?,
+                Some("llama-cpp") => layerfault::research::search_external(&model, parent.as_deref(), None, &candidates, &templates, 0, timeout_seconds)?,
                 Some(other) => bail!("active trigger hunt runtime '{}' is not available through the current guarded behavioural backend; use llama-cpp or omit --runtime for embedded analysis", other),
                 None => {
                     let tokenizer = tokenizer_path.as_deref().ok_or_else(|| anyhow!("embedded trigger hunt is unavailable for this target; supply --runtime llama-cpp"))?;
-                    layerfault::research::search_embedded(&model, parent.as_deref(), tokenizer, &candidates, &templates, 0, 120)?
+                    layerfault::research::search_embedded(&model, parent.as_deref(), tokenizer, &candidates, &templates, 0, timeout_seconds)?
                 }
             };
             report.boundary = layerfault::model::research::HUNT_BOUNDARY.into();

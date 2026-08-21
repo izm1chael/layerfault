@@ -838,8 +838,8 @@ pub(crate) enum ResearchCommand {
         suffix: String,
         #[arg(long, default_value_t = 0)]
         seed: u64,
-        #[arg(long, default_value_t = 120)]
-        timeout_seconds: u64,
+        #[arg(long)]
+        timeout_seconds: Option<u64>,
         /// Which prompt-embedding context(s) to run each candidate through:
         /// `announced` (the original single template, one model call per
         /// candidate — the default, to keep run cost predictable), `full`
@@ -862,6 +862,8 @@ pub(crate) enum ResearchCommand {
         tokenizer: Option<PathBuf>,
         #[arg(long, default_value_t = 0)]
         seed: u64,
+        #[arg(long)]
+        timeout_seconds: Option<u64>,
         #[arg(long, default_value = "announced")]
         context_templates: String,
         #[arg(long, default_value_t = false)]
@@ -872,6 +874,8 @@ pub(crate) enum ResearchCommand {
         derived: PathBuf,
         #[arg(long)]
         tokenizer: PathBuf,
+        #[arg(long)]
+        timeout_seconds: Option<u64>,
         #[arg(long, default_value_t = false)]
         json: bool,
     },
@@ -910,6 +914,8 @@ pub(crate) enum ResearchCommand {
         beam_rounds: usize,
         #[arg(long, default_value = "standard")]
         profile: String,
+        #[arg(long)]
+        timeout_seconds: Option<u64>,
         #[arg(long, default_value = "announced")]
         context_templates: String,
         #[arg(long, default_value_t = false)]
@@ -1161,7 +1167,9 @@ pub(crate) struct CompareArgs {
 
 #[derive(clap::Args, Debug)]
 pub(crate) struct BehaviourArgs {
-    pub(crate) model: PathBuf,
+    #[command(subcommand)]
+    pub(crate) command: Option<BehaviourCommand>,
+    pub(crate) model: Option<PathBuf>,
     /// Optional local base model package for PEFT/LoRA adapter execution.
     #[arg(long)]
     pub(crate) base: Option<PathBuf>,
@@ -1223,6 +1231,60 @@ pub(crate) struct BehaviourArgs {
     /// Sandbox telemetry backend: auto, strace, or ebpf.
     #[arg(long, default_value = "auto")]
     pub(crate) telemetry_backend: layerfault::behaviour::telemetry_backend::TelemetryBackendMode,
+    #[arg(long, default_value_t = false)]
+    pub(crate) json: bool,
+}
+
+#[derive(Subcommand, Debug)]
+pub(crate) enum BehaviourCommand {
+    /// Measure model runnable status, load time, pilot tokens/sec and host budget compatibility.
+    Preflight(BehaviourPreflightArgs),
+    /// List available behavioural profiles and their default parameter bounds.
+    Profiles(OutputArgs),
+}
+
+#[derive(clap::Args, Debug)]
+pub(crate) struct BehaviourPreflightArgs {
+    pub(crate) model: PathBuf,
+    /// Optional local base model package for PEFT/LoRA adapter execution.
+    #[arg(long)]
+    pub(crate) base: Option<PathBuf>,
+    #[arg(long, default_value = "llama-cpp")]
+    pub(crate) runtime: String,
+    /// Absolute/local external runtime path for llama.cpp or the Python executable for Transformers.
+    #[arg(long)]
+    pub(crate) runtime_path: Option<PathBuf>,
+    /// Local tokenizer.json required by the embedded backend.
+    #[arg(long)]
+    pub(crate) tokenizer: Option<PathBuf>,
+    #[arg(long, default_value = "standard")]
+    pub(crate) profile: String,
+    /// Sandbox isolation backend (bwrap or microvm).
+    #[arg(long, default_value = "bwrap")]
+    pub(crate) sandbox: layerfault::behaviour::sandbox::SandboxKind,
+    /// Path to local microVM guest image file (for --sandbox microvm).
+    #[arg(long)]
+    pub(crate) microvm_image: Option<PathBuf>,
+    /// Expected SHA-256 hash of microVM guest image file.
+    #[arg(long)]
+    pub(crate) microvm_image_hash: Option<String>,
+    /// Permit execution of a model/package that static admission BLOCKed.
+    #[arg(long, default_value_t = false)]
+    pub(crate) allow_static_blocked: bool,
+    /// Permit Hugging Face custom loader Python (`trust_remote_code=True`).
+    #[arg(long, default_value_t = false)]
+    pub(crate) execute_custom_code: bool,
+    /// Software environment runtime closure level (minimal, standard, deep).
+    #[arg(long, default_value = "standard")]
+    pub(crate) closure_level: String,
+    /// Require cgroup v2 process-tree resource controls. Fail closed if unavailable.
+    #[arg(long, default_value_t = false)]
+    pub(crate) require_cgroup: bool,
+    /// Sandbox telemetry backend: auto, strace, or ebpf.
+    #[arg(long, default_value = "auto")]
+    pub(crate) telemetry_backend: layerfault::behaviour::telemetry_backend::TelemetryBackendMode,
+    #[arg(long)]
+    pub(crate) timeout_seconds: Option<u64>,
     #[arg(long, default_value_t = false)]
     pub(crate) json: bool,
 }

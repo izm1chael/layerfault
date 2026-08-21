@@ -249,7 +249,7 @@ fn run_transformers_deadline(
     if hash_path(&executable)? != admitted_runtime_sha256 {
         bail!("Python runtime executable changed during version admission");
     }
-    heartbeat.update(format!("phase={phase_label} model-loading"));
+    heartbeat.notify_model_load();
     let started = Instant::now();
     // Revalidate the exact executable bytes and staged packages immediately before launch.
     if hash_path(&executable)? != admitted_runtime_sha256 {
@@ -433,10 +433,7 @@ fn run_transformers_deadline(
                         break 'probes;
                     }
                     probe_index = probe_index.saturating_add(1);
-                    heartbeat.update(format!(
-                        "phase={phase_label} probe={probe_index}/{planned} id={}",
-                        probe.id
-                    ));
+                    heartbeat.notify_probe(&probe.id, probe_index, planned);
                     let system = super::probes::render(&probe.system, &canary_a, &canary_b);
                     let prompt = super::probes::render(&probe.prompt, &canary_a, &canary_b);
                     let combined =

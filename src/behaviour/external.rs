@@ -79,7 +79,7 @@ fn run_external_llama_active_deadline(
     let identity = runtime.identity_with_closure(active.closure_level);
     let canary_a = synthetic_canary(&model_identity, seed, "A");
     let canary_b = synthetic_canary(&model_identity, seed, "B");
-    heartbeat.update(format!("phase={phase_label} model-loading"));
+    heartbeat.notify_model_load();
     staged_model.revalidate()?;
     let mut session = runtime.open(
         staged_model.path(),
@@ -102,10 +102,7 @@ fn run_external_llama_active_deadline(
                 bail!("behaviour command hard total timeout expired before probe execution");
             }
             probe_index = probe_index.saturating_add(1);
-            heartbeat.update(format!(
-                "phase={phase_label} probe={probe_index}/{planned} id={}",
-                probe.id
-            ));
+            heartbeat.notify_probe(&probe.id, probe_index, planned);
             let system = probes::render(&probe.system, &canary_a, &canary_b);
             let prompt = probes::render(&probe.prompt, &canary_a, &canary_b);
             let combined = format!("<system>\n{system}\n</system>\n<user>\n{prompt}\n</user>");

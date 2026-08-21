@@ -415,6 +415,11 @@ mod tests {
             executions: Vec::new(),
             dynamic_observations: DynamicObservationSummary::default(),
             state: BehaviourState::NoSuspiciousObserved,
+            reason_code: None,
+            detail: None,
+            estimated_memory_bytes: None,
+            available_budget_bytes: None,
+            safe_memory_budget_bytes: None,
             findings: Vec::new(),
             boundary: "test".to_owned(),
         }

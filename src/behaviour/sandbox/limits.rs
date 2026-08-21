@@ -6,7 +6,7 @@ const MIN_ADDRESS_SPACE_LIMIT_MB: u64 = 512;
 const MAX_ADDRESS_SPACE_LIMIT_MB: u64 = 256 * 1024;
 const ACTIVE_MODEL_ENTRY_LIMIT: usize = 100_000;
 
-pub(crate) fn configured_memory_budget_bytes() -> u64 {
+pub fn configured_memory_budget_bytes() -> u64 {
     crate::doctor::recommended_active_memory_budget_bytes()
         .unwrap_or(4 * 1024 * 1024 * 1024)
         .clamp(
@@ -127,6 +127,27 @@ fn estimated_runtime_memory_bytes(
     } else {
         (5_u64, 4_u64, 768_u64 * 1024 * 1024)
     };
+    Ok((weights.saturating_mul(numerator) / denominator).saturating_add(overhead))
+}
+
+pub fn estimate_active_target_memory(
+    runtime_name_or_path: &str,
+    model_path: &Path,
+    base_path: Option<&Path>,
+) -> Result<u64> {
+    let model_bytes = active_target_bytes(model_path)?;
+    let base_bytes = match base_path {
+        Some(base) => active_target_bytes(base)?,
+        None => 0,
+    };
+    let weights = model_bytes.saturating_add(base_bytes);
+    let lower = runtime_name_or_path.to_ascii_lowercase();
+    let (numerator, denominator, overhead) =
+        if lower.contains("python") || lower.contains("transformers") {
+            (2_u64, 1_u64, 1024_u64 * 1024 * 1024)
+        } else {
+            (5_u64, 4_u64, 768_u64 * 1024 * 1024)
+        };
     Ok((weights.saturating_mul(numerator) / denominator).saturating_add(overhead))
 }
 

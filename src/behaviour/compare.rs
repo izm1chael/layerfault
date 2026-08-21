@@ -271,6 +271,11 @@ pub fn compare_reports(
         derived: derived_report,
         rows,
         state: overall,
+        reason_code: None,
+        detail: None,
+        estimated_memory_bytes: None,
+        available_budget_bytes: None,
+        safe_memory_budget_bytes: None,
         findings,
     })
 }

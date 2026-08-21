@@ -13,7 +13,7 @@ pub use backend::{
 };
 pub(crate) use command::pin_active_path;
 pub use command::{command_for, SandboxedCommand};
-pub(crate) use limits::configured_memory_budget_bytes;
+pub use limits::{configured_memory_budget_bytes, estimate_active_target_memory};
 pub use process::{configure_process_group, terminate_process_tree};
 pub(crate) use seccomp::{seccomp_filter_file, seccomp_profile_sha256};
 pub(crate) use telemetry::{
