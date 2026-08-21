@@ -11,6 +11,48 @@ pub struct HubLfsMetadata {
     pub pointer_size: Option<u64>,
 }
 
+/// Mirrors the real Hub `?blobs=true` sibling shape, which carries the LFS
+/// digest under `sha256` (bare hex, no algorithm prefix) rather than `oid`.
+#[derive(Debug, Clone, Deserialize)]
+struct RawHubLfsMetadata {
+    #[serde(default)]
+    oid: Option<String>,
+    #[serde(default)]
+    sha256: Option<String>,
+    size: u64,
+    #[serde(default, rename = "pointerSize")]
+    pointer_size: Option<u64>,
+}
+
+impl TryFrom<RawHubLfsMetadata> for HubLfsMetadata {
+    type Error = anyhow::Error;
+
+    fn try_from(raw: RawHubLfsMetadata) -> Result<Self> {
+        let oid = match (raw.oid, raw.sha256) {
+            (Some(oid), Some(sha256)) => {
+                let normalized_sha256 = if sha256.contains(':') {
+                    sha256
+                } else {
+                    format!("sha256:{sha256}")
+                };
+                if oid != normalized_sha256 {
+                    bail!("LFS metadata has conflicting 'oid' and 'sha256' values");
+                }
+                oid
+            }
+            (Some(oid), None) => oid,
+            (None, Some(sha256)) if sha256.contains(':') => sha256,
+            (None, Some(sha256)) => format!("sha256:{sha256}"),
+            (None, None) => bail!("LFS metadata missing both 'oid' and 'sha256' fields"),
+        };
+        Ok(HubLfsMetadata {
+            oid,
+            size: raw.size,
+            pointer_size: raw.pointer_size,
+        })
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum IntegrityExpectationSource {
@@ -56,9 +98,9 @@ impl HubFile {
         if val.is_null() {
             return Ok(None);
         }
-        let meta: HubLfsMetadata = serde_json::from_value(val.clone())
+        let raw: RawHubLfsMetadata = serde_json::from_value(val.clone())
             .context("invalid LFS metadata structure in Hub file record")?;
-        Ok(Some(meta))
+        Ok(Some(HubLfsMetadata::try_from(raw)?))
     }
 
     pub fn expectation(&self) -> Result<RemoteObjectExpectation> {
@@ -419,6 +461,74 @@ mod tests {
             })),
         };
         assert!(file.expectation().is_err());
+    }
+
+    #[test]
+    fn lfs_expectation_from_real_hub_blobs_true_shape() {
+        // The real `?blobs=true` API response carries the digest under
+        // `sha256` (bare hex, no algorithm prefix), not `oid`.
+        let file = HubFile {
+            path: "model.safetensors".to_owned(),
+            size: Some(453864),
+            blob_id: Some("cdebb9016e0099550c661ad5d7b4b0db174d2da7".to_owned()),
+            lfs: Some(serde_json::json!({
+                "sha256": "8111d5afb0715dbf5a31396d31432cb56370ba23f6650a035ea0fc8a20b4e500",
+                "size": 453864,
+                "pointerSize": 131
+            })),
+        };
+        let exp = file.expectation().unwrap();
+        assert_eq!(
+            exp.sha256,
+            Some(
+                "sha256:8111d5afb0715dbf5a31396d31432cb56370ba23f6650a035ea0fc8a20b4e500"
+                    .to_owned()
+            )
+        );
+        assert_eq!(exp.size, Some(453864));
+        assert_eq!(exp.source, IntegrityExpectationSource::GitLfs);
+    }
+
+    #[test]
+    fn lfs_expectation_oid_and_sha256_agree() {
+        let file = HubFile {
+            path: "model.safetensors".to_owned(),
+            size: Some(453864),
+            blob_id: None,
+            lfs: Some(serde_json::json!({
+                "oid": "sha256:8111d5afb0715dbf5a31396d31432cb56370ba23f6650a035ea0fc8a20b4e500",
+                "sha256": "8111d5afb0715dbf5a31396d31432cb56370ba23f6650a035ea0fc8a20b4e500",
+                "size": 453864
+            })),
+        };
+        let exp = file.expectation().unwrap();
+        assert_eq!(
+            exp.sha256,
+            Some(
+                "sha256:8111d5afb0715dbf5a31396d31432cb56370ba23f6650a035ea0fc8a20b4e500"
+                    .to_owned()
+            )
+        );
+    }
+
+    #[test]
+    fn lfs_expectation_oid_and_sha256_conflict() {
+        let file = HubFile {
+            path: "model.safetensors".to_owned(),
+            size: Some(453864),
+            blob_id: None,
+            lfs: Some(serde_json::json!({
+                "oid": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+                "sha256": "8111d5afb0715dbf5a31396d31432cb56370ba23f6650a035ea0fc8a20b4e500",
+                "size": 453864
+            })),
+        };
+        let err = file.expectation().unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("conflicting 'oid' and 'sha256' values"),
+            "unexpected error: {err}"
+        );
     }
 
     #[test]
