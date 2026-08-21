@@ -24,7 +24,7 @@ fn main() -> ExitCode {
                         "causes": error.chain().skip(1).map(ToString::to_string).collect::<Vec<_>>(),
                     }
                 });
-                let _ = layerfault::json_stream::write_json(std::io::stderr(), &payload, true);
+                let _ = layerfault::json_stream::write_stdout_json(&payload, true);
             } else {
                 eprintln!("Error: {error:?}");
             }

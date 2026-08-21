@@ -610,3 +610,25 @@ fn artifact_json_exposes_cache_diagnostics() {
     assert!(value["cache"]["evidence_min_bytes"].is_number());
     let _ = fs::remove_file(path);
 }
+
+#[test]
+fn top_level_error_payload_written_to_stdout_when_json_requested() {
+    let output = run(&[
+        "verify-package",
+        "/nonexistent/path/that/does/not/exist",
+        "--policy",
+        "workstation",
+        "--json",
+    ]);
+    assert_eq!(
+        output.status.code(),
+        Some(1),
+        "stdout={} stderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let value: Value = serde_json::from_slice(&output.stdout)
+        .expect("top-level error payload must be valid JSON on stdout");
+    assert!(value["error"]["message"].is_string());
+    assert!(value["error"]["causes"].is_array());
+}
