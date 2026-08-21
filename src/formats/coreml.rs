@@ -267,7 +267,8 @@ pub fn scan_package(path: &Path, identity: &str, media: &str) -> Result<Vec<Laye
                 } else {
                     let target_path = path.join(item_path_str);
                     if let Ok(meta) = std::fs::symlink_metadata(&target_path) {
-                        if meta.file_type().is_symlink() && is_escaping_symlink(path, &target_path)
+                        if meta.file_type().is_symlink()
+                            && find_escaping_symlink_target(path, &target_path).is_some()
                         {
                             unsafe_manifest_refs.push(format!(
                                 "item '{item_key}' references escaping symlink: '{item_path_str}'"
@@ -286,17 +287,16 @@ pub fn scan_package(path: &Path, identity: &str, media: &str) -> Result<Vec<Laye
         .max_depth(32)
         .into_iter();
     for entry in walker.flatten() {
-        if entry.file_type().is_symlink() && is_escaping_symlink(path, entry.path()) {
-            let rel = entry
-                .path()
-                .strip_prefix(path)
-                .unwrap_or_else(|_| entry.path())
-                .display()
-                .to_string();
-            let target_str = std::fs::read_link(entry.path())
-                .map(|t| t.display().to_string())
-                .unwrap_or_else(|_| "<unreadable>".to_owned());
-            escaping_bundle_symlinks.push(format!("'{rel}' -> '{target_str}'"));
+        if entry.file_type().is_symlink() {
+            if let Some(target_str) = find_escaping_symlink_target(path, entry.path()) {
+                let rel = entry
+                    .path()
+                    .strip_prefix(path)
+                    .unwrap_or_else(|_| entry.path())
+                    .display()
+                    .to_string();
+                escaping_bundle_symlinks.push(format!("'{rel}' -> '{target_str}'"));
+            }
         }
     }
 
@@ -351,9 +351,10 @@ pub fn scan_package(path: &Path, identity: &str, media: &str) -> Result<Vec<Laye
     Ok(results)
 }
 
-fn is_escaping_symlink(bundle_root: &Path, link_path: &Path) -> bool {
-    let Ok(target) = std::fs::read_link(link_path) else {
-        return true;
+fn find_escaping_symlink_target(bundle_root: &Path, link_path: &Path) -> Option<String> {
+    let target = match std::fs::read_link(link_path) {
+        Ok(t) => t,
+        Err(_) => return Some("<unreadable>".to_owned()),
     };
     let target_str = target.to_string_lossy();
     if target_str.starts_with('/')
@@ -361,14 +362,16 @@ fn is_escaping_symlink(bundle_root: &Path, link_path: &Path) -> bool {
         || target_str.contains("../")
         || target_str.contains("..\\")
     {
-        return true;
+        return Some(target_str.into_owned());
     }
     let parent = link_path.parent().unwrap_or(bundle_root);
     let resolved = parent.join(&target);
     if let (Ok(canon_root), Ok(canon_resolved)) =
         (bundle_root.canonicalize(), resolved.canonicalize())
     {
-        !canon_resolved.starts_with(canon_root)
+        if !canon_resolved.starts_with(canon_root) {
+            return Some(target_str.into_owned());
+        }
     } else {
         // If canonicalization fails, check relative path components
         let mut normal_depth: isize = 0;
@@ -379,15 +382,17 @@ fn is_escaping_symlink(bundle_root: &Path, link_path: &Path) -> bool {
             match comp {
                 std::path::Component::ParentDir => normal_depth -= 1,
                 std::path::Component::Normal(_) => normal_depth += 1,
-                std::path::Component::RootDir | std::path::Component::Prefix(_) => return true,
+                std::path::Component::RootDir | std::path::Component::Prefix(_) => {
+                    return Some(target_str.into_owned())
+                }
                 _ => {}
             }
             if normal_depth < 0 {
-                return true;
+                return Some(target_str.into_owned());
             }
         }
-        false
     }
+    None
 }
 
 fn read_varint(buf: &[u8]) -> Option<(u64, usize)> {
