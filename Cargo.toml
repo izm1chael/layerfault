@@ -69,7 +69,7 @@ chrono = { version = "0.4", default-features = false, features = ["clock"] }
 # TOML parsing for pyproject.toml / poetry.lock / uv.lock: a data-only Value
 # tree via toml::Value, no arbitrary type construction. No default features
 # to disable beyond the parser itself.
-toml = "0.8"
+toml = "1.1"
 # Safe, tag-free, data-only YAML 1.1 parser for environment.yml / Conda
 # lockfiles. Returns a plain Yaml enum (Array/Hash/String/Integer/Real/
 # Boolean/Null/BadValue) with no arbitrary Rust type construction from YAML
