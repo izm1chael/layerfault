@@ -108,8 +108,40 @@ fn parse_server(name: &str, value: &Value) -> Result<McpServer> {
     credential_names.sort();
     credential_names.dedup();
     literal_credential_env_names.sort();
-    literal_credential_env_names.dedup();
-    let authentication = auth_state(object, transport, &credential_names);
+    let mut passthrough_sources = Vec::new();
+    for key in [
+        "tokenFrom",
+        "token_from",
+        "passToken",
+        "pass_token",
+        "forwardToken",
+        "forward_token",
+        "authFrom",
+        "auth_from",
+        "tokenSource",
+        "token_source",
+        "inheritAuth",
+        "inherit_auth",
+    ] {
+        if let Some(val) = object.get(key) {
+            match val {
+                Value::String(s) if !s.trim().is_empty() => {
+                    passthrough_sources.push(s.trim().to_owned());
+                }
+                Value::Array(arr) => {
+                    for item in arr {
+                        if let Some(s) = item.as_str() {
+                            if !s.trim().is_empty() {
+                                passthrough_sources.push(s.trim().to_owned());
+                            }
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+    let authentication = auth_state(object, transport, &credential_names, &passthrough_sources);
     let tls = tls_state(transport, endpoint.as_deref());
     let origin_dns_rebinding_exposed = tls == SecurityState::Absent
         && endpoint.as_deref().is_some_and(endpoint_is_local)
@@ -157,6 +189,7 @@ fn parse_server(name: &str, value: &Value) -> Result<McpServer> {
         origin_dns_rebinding_exposed,
         oauth,
         supply_chain: supply_chain_posture,
+        passthrough_sources,
         tools,
         completeness,
         limitations,
@@ -269,6 +302,21 @@ pub(super) fn parse_tool(name_hint: Option<&String>, value: &Value) -> Result<To
                 .get("requiresConfirmation")
                 .and_then(Value::as_bool)
         });
+    let declared_effects = object
+        .get("declared_effects")
+        .or_else(|| object.get("declaredEffects"))
+        .or_else(|| object.get("effects"))
+        .and_then(|v| match v {
+            Value::Array(arr) => Some(
+                arr.iter()
+                    .filter_map(Value::as_str)
+                    .map(str::to_owned)
+                    .collect(),
+            ),
+            Value::String(s) => Some(vec![s.clone()]),
+            _ => None,
+        })
+        .unwrap_or_default();
     Ok(ToolDefinition {
         name,
         description: object
@@ -277,6 +325,7 @@ pub(super) fn parse_tool(name_hint: Option<&String>, value: &Value) -> Result<To
             .map(str::to_owned),
         input_schema,
         annotations,
+        declared_effects,
         confirmation_required,
     })
 }
@@ -331,6 +380,7 @@ fn auth_state(
     object: &Map<String, Value>,
     transport: McpTransport,
     credential_names: &[String],
+    passthrough_sources: &[String],
 ) -> SecurityState {
     if transport == McpTransport::Stdio {
         return SecurityState::NotApplicable;
@@ -338,7 +388,10 @@ fn auth_state(
     if object.contains_key("authorization")
         || object.contains_key("oauth")
         || object.contains_key("auth")
+        || object.contains_key("scopes")
+        || object.contains_key("scope")
         || !credential_names.is_empty()
+        || !passthrough_sources.is_empty()
     {
         SecurityState::Present
     } else if matches!(
@@ -436,24 +489,60 @@ fn endpoint_is_local(endpoint: &str) -> bool {
         .unwrap_or(false)
 }
 
-/// Parse a declared `oauth`-shaped configuration block, if present. `None`
-/// means the server declares no OAuth configuration at all — not that its
-/// OAuth posture is fine, and not that it has none in reality (Layerfault
-/// never fetches live authorization-server metadata to find out).
+/// Parse a declared `oauth`-shaped configuration block, or declared scopes.
+/// `None` means the server declares no OAuth or scope configuration to assess.
 fn parse_oauth_posture(object: &Map<String, Value>) -> Option<OAuthPosture> {
-    let oauth = object.get("oauth").and_then(Value::as_object)?;
+    let oauth = object.get("oauth").and_then(Value::as_object);
+    let top_scope = object.get("scope").or_else(|| object.get("scopes"));
+    let auth_scope = object
+        .get("auth")
+        .and_then(Value::as_object)
+        .and_then(|a| a.get("scope").or_else(|| a.get("scopes")));
+
+    if oauth.is_none() && top_scope.is_none() && auth_scope.is_none() {
+        return None;
+    }
+
+    let oauth_declared = oauth.is_some();
+    let resource_declared = oauth
+        .map(|o| nonempty_string(o.get("resource")))
+        .unwrap_or(false);
+    let authorization_servers_declared = oauth
+        .map(|o| {
+            nonempty_string_array(
+                o.get("authorization_servers")
+                    .or_else(|| o.get("authorizationServers")),
+            )
+        })
+        .unwrap_or(false);
+    let audience_declared = oauth
+        .map(|o| nonempty_string(o.get("audience")))
+        .unwrap_or(false);
+
+    let scope_val = oauth
+        .and_then(|o| o.get("scope").or_else(|| o.get("scopes")))
+        .or(top_scope)
+        .or(auth_scope);
+
+    let scope = match scope_val {
+        Some(Value::String(s)) if !s.trim().is_empty() => Some(s.clone()),
+        Some(Value::Array(arr)) => {
+            let parts: Vec<&str> = arr.iter().filter_map(Value::as_str).collect();
+            if parts.is_empty() {
+                None
+            } else {
+                Some(parts.join(" "))
+            }
+        }
+        _ => None,
+    };
+
     Some(OAuthPosture {
-        resource_declared: nonempty_string(oauth.get("resource")),
-        authorization_servers_declared: nonempty_string_array(
-            oauth
-                .get("authorization_servers")
-                .or_else(|| oauth.get("authorizationServers")),
-        ),
-        audience_declared: nonempty_string(oauth.get("audience")),
-        scope: oauth
-            .get("scope")
-            .and_then(Value::as_str)
-            .map(str::to_owned),
+        oauth_declared,
+        resource_declared,
+        authorization_servers_declared,
+        audience_declared,
+        scope,
     })
 }
 

@@ -86,6 +86,21 @@ pub fn capabilities_for_tool(
     if let Some(description) = &tool.description {
         classify_text(description, &mut lexical_signals);
     }
+    for effect in &tool.declared_effects {
+        classify_text(effect, &mut lexical_signals);
+        let lower = effect.trim().to_ascii_lowercase();
+        if matches!(
+            lower.as_str(),
+            "write" | "modify" | "create" | "update" | "edit" | "save" | "patch"
+        ) {
+            lexical_signals.insert(CapabilityKind::FilesystemWrite);
+        } else if matches!(
+            lower.as_str(),
+            "delete" | "remove" | "destroy" | "drop" | "unlink"
+        ) {
+            lexical_signals.insert(CapabilityKind::FilesystemDelete);
+        }
+    }
 
     let mut schema_states = BTreeMap::<CapabilityKind, SchemaCapabilityState>::new();
     let mut walker = SchemaWalker {
@@ -460,6 +475,7 @@ fn classify_text(raw: &str, out: &mut BTreeSet<CapabilityKind>) {
     if any(
         &tokens,
         &[
+            "write",
             "write_file",
             "save_file",
             "create_file",
@@ -470,7 +486,17 @@ fn classify_text(raw: &str, out: &mut BTreeSet<CapabilityKind>) {
     ) {
         out.insert(CapabilityKind::FilesystemWrite);
     }
-    if any(&tokens, &["delete", "remove_file", "unlink", "rmdir"]) {
+    if any(
+        &tokens,
+        &[
+            "delete",
+            "remove_file",
+            "unlink",
+            "rmdir",
+            "destroy",
+            "drop",
+        ],
+    ) {
         out.insert(CapabilityKind::FilesystemDelete);
     }
     if any(
@@ -682,6 +708,7 @@ mod tests {
             description: None,
             input_schema: serde_json::json!({"type":"object","properties":{"command":{"type":"string"}}}),
             annotations: Value::Null,
+            declared_effects: Vec::new(),
             confirmation_required: None,
         };
         let (grants, _outcome) = capabilities_for_tool("local", &tool);
@@ -697,6 +724,7 @@ mod tests {
             description: Some("Show repository status".into()),
             input_schema: serde_json::json!({"type":"object","properties":{}}),
             annotations: Value::Null,
+            declared_effects: Vec::new(),
             confirmation_required: None,
         };
         let (grants, _outcome) = capabilities_for_tool("git", &tool);
@@ -717,6 +745,7 @@ mod tests {
             description: None,
             input_schema: serde_json::json!({"type":"object","properties":{"max_tokens":{"type":"integer"}}}),
             annotations: Value::Null,
+            declared_effects: Vec::new(),
             confirmation_required: None,
         };
         let (grants, _outcome) = capabilities_for_tool("model", &tool);
@@ -733,6 +762,7 @@ mod tests {
             description: None,
             input_schema: serde_json::json!({"type":"object","properties":{"api_key":{"type":"string"}}}),
             annotations: Value::Null,
+            declared_effects: Vec::new(),
             confirmation_required: None,
         };
         let (grants, _outcome) = capabilities_for_tool("model", &tool);
@@ -795,6 +825,7 @@ mod tests {
             description: None,
             input_schema: schema,
             annotations: Value::Null,
+            declared_effects: Vec::new(),
             confirmation_required: None,
         }
     }

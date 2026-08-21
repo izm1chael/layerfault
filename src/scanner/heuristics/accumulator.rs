@@ -258,11 +258,14 @@ impl ScanAccumulator {
             .collect();
         evidence.truncate(crate::finding_evidence::MAX_EVIDENCE_PER_FINDING);
 
-        let rule_id = self
-            .hits
-            .first()
-            .map(|hit| hit.signature.id.to_owned())
-            .unwrap_or_else(|| "LF-HEUR-CLEAR".to_owned());
+        let rule_id = if self.hits.iter().any(|hit| hit.decoded_via.is_some()) {
+            "LF-HEUR-DECODED-MATCH".to_owned()
+        } else {
+            self.hits
+                .first()
+                .map(|hit| hit.signature.id.to_owned())
+                .unwrap_or_else(|| "LF-HEUR-CLEAR".to_owned())
+        };
 
         let mut finding = LayerScanResult {
             layer_digest: layer_digest.to_owned(),

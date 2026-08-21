@@ -65,6 +65,8 @@ pub struct McpServer {
     /// [`super::SupplyChainPosture`].
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub supply_chain: Option<super::SupplyChainPosture>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub passthrough_sources: Vec<String>,
     #[serde(default)]
     pub tools: Vec<ToolDefinition>,
     pub completeness: AnalysisCompleteness,
@@ -79,6 +81,8 @@ pub struct McpServer {
 /// authorization flow to populate this.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OAuthPosture {
+    #[serde(default)]
+    pub oauth_declared: bool,
     /// A `resource` (RFC 8707 resource indicator) is declared.
     pub resource_declared: bool,
     /// An `authorization_servers`/`authorizationServers` list is declared.
@@ -98,6 +102,8 @@ pub struct ToolDefinition {
     pub input_schema: Value,
     #[serde(default)]
     pub annotations: Value,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub declared_effects: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub confirmation_required: Option<bool>,
 }

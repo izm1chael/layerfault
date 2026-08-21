@@ -80,27 +80,29 @@ pub fn assess(graph: CapabilityGraph) -> AgentSecurityAssessment {
             ));
         }
         if let Some(oauth) = &server.oauth {
-            if !oauth.resource_declared || !oauth.authorization_servers_declared {
-                findings.push(server_finding(
-                    "LF-MCP-AUTH-METADATA-MISSING",
-                    ScanStatus::Warn,
-                    FindingClass::Policy,
-                    Confidence::Medium,
-                    &subject,
-                    server,
-                    "MCP server declares OAuth configuration without protected-resource metadata (a declared resource indicator and authorization server list)",
-                ));
-            }
-            if !oauth.audience_declared {
-                findings.push(server_finding(
-                    "LF-MCP-TOKEN-AUDIENCE-UNBOUND",
-                    ScanStatus::Warn,
-                    FindingClass::Policy,
-                    Confidence::Medium,
-                    &subject,
-                    server,
-                    "MCP server declares OAuth configuration without a declared token audience binding; an unbound token may be replayable against a different resource",
-                ));
+            if oauth.oauth_declared {
+                if !oauth.resource_declared || !oauth.authorization_servers_declared {
+                    findings.push(server_finding(
+                        "LF-MCP-AUTH-METADATA-MISSING",
+                        ScanStatus::Warn,
+                        FindingClass::Policy,
+                        Confidence::Medium,
+                        &subject,
+                        server,
+                        "MCP server declares OAuth configuration without protected-resource metadata (a declared resource indicator and authorization server list)",
+                    ));
+                }
+                if !oauth.audience_declared {
+                    findings.push(server_finding(
+                        "LF-MCP-TOKEN-AUDIENCE-UNBOUND",
+                        ScanStatus::Warn,
+                        FindingClass::Policy,
+                        Confidence::Medium,
+                        &subject,
+                        server,
+                        "MCP server declares OAuth configuration without a declared token audience binding; an unbound token may be replayable against a different resource",
+                    ));
+                }
             }
             if let Some(scope) = &oauth.scope {
                 if scope_is_overbroad(scope) {
@@ -381,6 +383,55 @@ fn token_passthrough_findings(
             .finish(),
         );
     }
+    for server in &graph.servers {
+        for source_ref in &server.passthrough_sources {
+            let source_server_name = source_ref.split('.').next().unwrap_or(source_ref);
+            let source_server = graph.servers.iter().find(|s| s.name == source_server_name);
+            let distinct = match source_server {
+                Some(src) => {
+                    let src_id = src
+                        .endpoint
+                        .as_deref()
+                        .or(src.executable.as_deref())
+                        .unwrap_or("");
+                    let tgt_id = server
+                        .endpoint
+                        .as_deref()
+                        .or(server.executable.as_deref())
+                        .unwrap_or("");
+                    src_id != tgt_id || src.name != server.name
+                }
+                None => true,
+            };
+            if distinct {
+                findings.push(
+                    FindingBuilder::new(
+                        "LF-MCP-TOKEN-PASSTHROUGH-RISK",
+                        CheckType::McpSecurity,
+                        ScanStatus::Warn,
+                    )
+                    .class(FindingClass::Policy)
+                    .confidence(Confidence::High)
+                    .subject(subject.clone())
+                    .detail(format!(
+                        "Server '{}' passes through or forwards credentials from '{}' ('{source_ref}') across distinct endpoints/executables",
+                        server.name, source_server_name
+                    ))
+                    .evidence(structural_invariant(
+                        subject.clone(),
+                        "cross-server token passthrough",
+                        serde_json::json!({
+                            "server": server.name,
+                            "source_reference": source_ref,
+                            "source_server": source_server_name,
+                        }),
+                    ))
+                    .finish(),
+                );
+            }
+        }
+    }
+
     findings
 }
 
@@ -423,8 +474,18 @@ fn annotation_contradiction_findings(
             let Some(annotations) = tool.annotations.as_object() else {
                 continue;
             };
-            let read_only_hint = annotations.get("readOnlyHint").and_then(|v| v.as_bool());
-            let destructive_hint = annotations.get("destructiveHint").and_then(|v| v.as_bool());
+            let read_only_hint = annotations
+                .get("readOnlyHint")
+                .or_else(|| annotations.get("read_only_hint"))
+                .or_else(|| annotations.get("readOnly"))
+                .or_else(|| annotations.get("read_only"))
+                .and_then(|v| v.as_bool());
+            let destructive_hint = annotations
+                .get("destructiveHint")
+                .or_else(|| annotations.get("destructive_hint"))
+                .or_else(|| annotations.get("destructive"))
+                .or_else(|| annotations.get("isDestructive"))
+                .and_then(|v| v.as_bool());
             if read_only_hint != Some(true) && destructive_hint != Some(false) {
                 continue;
             }
