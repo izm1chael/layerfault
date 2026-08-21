@@ -92,7 +92,7 @@ yaml-rust2 = "0.11"
 # default feature (a full ECMA regex-syntax validator/AST), which this
 # frontend does not need — it only classifies call targets and string-literal
 # arguments, never regex literals.
-oxc_parser = { version = "=0.96.0", default-features = false }
+oxc_parser = { version = "=0.144.0", default-features = false }
 oxc_allocator = "=0.96.0"
 oxc_ast = "=0.96.0"
 oxc_span = "=0.96.0"
