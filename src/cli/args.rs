@@ -1238,7 +1238,7 @@ pub(crate) struct BehaviourArgs {
 #[derive(Subcommand, Debug)]
 pub(crate) enum BehaviourCommand {
     /// Measure model runnable status, load time, pilot tokens/sec and host budget compatibility.
-    Preflight(BehaviourPreflightArgs),
+    Preflight(Box<BehaviourPreflightArgs>),
     /// List available behavioural profiles and their default parameter bounds.
     Profiles(OutputArgs),
 }

@@ -430,7 +430,7 @@ pub(crate) fn run_behaviour_preflight(args: BehaviourPreflightArgs) -> Result<()
 pub(crate) fn run_behaviour(args: BehaviourArgs) -> Result<()> {
     if let Some(cmd) = args.command {
         return match cmd {
-            BehaviourCommand::Preflight(preflight_args) => run_behaviour_preflight(preflight_args),
+            BehaviourCommand::Preflight(preflight_args) => run_behaviour_preflight(*preflight_args),
             BehaviourCommand::Profiles(output_args) => run_behaviour_profiles(output_args),
         };
     }
