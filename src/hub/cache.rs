@@ -16,8 +16,9 @@ use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
 const OBJECT_CACHE_SCHEMA_VERSION: u32 = 1;
-const DEFAULT_MAX_CACHE_BYTES: u64 = 50 * 1024 * 1024 * 1024; // 50 GiB
-const DEFAULT_MIN_FREE_BYTES: u64 = 5 * 1024 * 1024 * 1024; // 5 GiB
+const MAX_CACHE_BYTES: u64 = 50 * 1024 * 1024 * 1024;
+const MAX_MIN_FREE_BYTES: u64 = 5 * 1024 * 1024 * 1024;
+const MIN_MIN_FREE_BYTES: u64 = 1024 * 1024 * 1024;
 const GUARD_BYTES: usize = 4096;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -65,14 +66,35 @@ pub fn max_cache_bytes() -> u64 {
     std::env::var("LAYERFAULT_OBJECT_CACHE_MAX_BYTES")
         .ok()
         .and_then(|v| v.parse::<u64>().ok())
-        .unwrap_or(DEFAULT_MAX_CACHE_BYTES)
+        .unwrap_or_else(|| {
+            object_store_dir()
+                .ok()
+                .and_then(|path| total_disk_space(&path).ok())
+                .map(|total| cache_limits_for_capacity(total).0)
+                .unwrap_or(MAX_CACHE_BYTES)
+        })
 }
 
 pub fn min_free_bytes() -> u64 {
     std::env::var("LAYERFAULT_OBJECT_CACHE_MIN_FREE_BYTES")
         .ok()
         .and_then(|v| v.parse::<u64>().ok())
-        .unwrap_or(DEFAULT_MIN_FREE_BYTES)
+        .unwrap_or_else(|| {
+            object_store_dir()
+                .ok()
+                .and_then(|path| total_disk_space(&path).ok())
+                .map(|total| cache_limits_for_capacity(total).1)
+                .unwrap_or(MAX_MIN_FREE_BYTES)
+        })
+}
+
+pub fn cache_limits_for_capacity(total_bytes: u64) -> (u64, u64) {
+    let max_cache = (total_bytes / 4).min(MAX_CACHE_BYTES);
+    let min_free = (total_bytes / 10).clamp(
+        MIN_MIN_FREE_BYTES.min(total_bytes),
+        MAX_MIN_FREE_BYTES.min(total_bytes),
+    );
+    (max_cache, min_free)
 }
 
 pub fn parse_canonical_sha256(raw: &str) -> Result<(String, String)> {
@@ -650,5 +672,52 @@ pub fn free_disk_space(path: &Path) -> Result<u64> {
     {
         let _ = path;
         Ok(u64::MAX)
+    }
+}
+
+pub fn total_disk_space(path: &Path) -> Result<u64> {
+    #[cfg(unix)]
+    {
+        let target = filesystem_probe_path(path);
+        let stat = rustix::fs::statvfs(&target)?;
+        Ok((stat.f_blocks as u64).saturating_mul(stat.f_frsize as u64))
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = path;
+        Ok(u64::MAX)
+    }
+}
+
+#[cfg(unix)]
+fn filesystem_probe_path(path: &Path) -> PathBuf {
+    if path.exists() {
+        path.to_path_buf()
+    } else if let Ok(cache) = cache_dir() {
+        cache
+    } else {
+        PathBuf::from(".")
+    }
+}
+
+#[cfg(test)]
+mod limit_tests {
+    use super::*;
+
+    const GIB: u64 = 1024 * 1024 * 1024;
+
+    #[test]
+    fn cache_defaults_scale_with_the_host_filesystem() {
+        assert_eq!(cache_limits_for_capacity(8 * GIB), (2 * GIB, GIB));
+        assert_eq!(cache_limits_for_capacity(40 * GIB), (10 * GIB, 4 * GIB));
+        assert_eq!(cache_limits_for_capacity(400 * GIB), (50 * GIB, 5 * GIB));
+    }
+
+    #[test]
+    fn cache_defaults_remain_bounded_on_tiny_filesystems() {
+        assert_eq!(
+            cache_limits_for_capacity(512 * 1024 * 1024).1,
+            512 * 1024 * 1024
+        );
     }
 }

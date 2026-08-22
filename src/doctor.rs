@@ -291,14 +291,51 @@ pub fn run() -> Vec<DoctorCheck> {
         });
     }
     if let Ok(plan) = crate::object_cache::gc::plan() {
+        let root = crate::object_cache::object_store_dir().ok();
+        let total_disk = root
+            .as_deref()
+            .and_then(|path| crate::object_cache::total_disk_space(path).ok());
+        let max_cache = crate::object_cache::max_cache_bytes();
+        let min_free = crate::object_cache::min_free_bytes();
+        let warning = object_cache_needs_attention(
+            plan.total_bytes,
+            plan.free_disk_bytes,
+            total_disk,
+            max_cache,
+            min_free,
+        );
+        let disk_fraction = total_disk
+            .filter(|total| *total > 0)
+            .map(|total| plan.total_bytes.saturating_mul(100) / total);
         checks.push(DoctorCheck {
             name: "object-cache".to_owned(),
-            status: "present".to_owned(),
-            detail: "reclaimable via `gc --target object-cache`".to_owned(),
+            status: if warning { "warning" } else { "present" }.to_owned(),
+            detail: format!(
+                "limit={} free-reserve={} disk-share={}%; reclaimable via `gc --target object-cache`",
+                human_bytes(max_cache),
+                human_bytes(min_free),
+                disk_fraction
+                    .map(|value| value.to_string())
+                    .unwrap_or_else(|| "unknown".to_owned())
+            ),
             size_bytes: Some(plan.total_bytes),
         });
     }
     checks
+}
+
+fn object_cache_needs_attention(
+    cache_bytes: u64,
+    free_bytes: u64,
+    total_disk_bytes: Option<u64>,
+    max_cache_bytes: u64,
+    min_free_bytes: u64,
+) -> bool {
+    cache_bytes > max_cache_bytes
+        || free_bytes < min_free_bytes
+        || total_disk_bytes
+            .filter(|total| *total > 0)
+            .is_some_and(|total| cache_bytes.saturating_mul(5) >= total)
 }
 
 pub fn capabilities() -> CapabilityReport {
@@ -610,6 +647,35 @@ pub fn human_bytes(bytes: u64) -> String {
         format!("{:.1}GiB", bytes as f64 / GIB)
     } else {
         format!("{:.0}MiB", bytes as f64 / MIB)
+    }
+}
+
+#[cfg(test)]
+mod cache_pressure_tests {
+    use super::*;
+
+    const GIB: u64 = 1024 * 1024 * 1024;
+
+    #[test]
+    fn object_cache_warns_at_one_fifth_of_disk() {
+        assert!(object_cache_needs_attention(
+            20 * GIB,
+            40 * GIB,
+            Some(100 * GIB),
+            25 * GIB,
+            5 * GIB,
+        ));
+    }
+
+    #[test]
+    fn object_cache_stays_informational_below_pressure_thresholds() {
+        assert!(!object_cache_needs_attention(
+            10 * GIB,
+            40 * GIB,
+            Some(100 * GIB),
+            25 * GIB,
+            5 * GIB,
+        ));
     }
 }
 

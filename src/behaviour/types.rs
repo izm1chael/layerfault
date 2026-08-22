@@ -478,6 +478,12 @@ pub struct BehaviourPreflightResult {
     pub model_load_ms: Option<u64>,
     pub pilot_execution_ms: Option<u64>,
     pub tokens_per_second: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub projected_execution_ms: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effective_timeout_seconds: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub throughput_sufficient: Option<bool>,
     pub profile: BehaviourPreflightProfile,
 }
 

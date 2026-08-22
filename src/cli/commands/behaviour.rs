@@ -202,12 +202,27 @@ fn emit_preflight(
         if let Some(tps) = result.tokens_per_second {
             println!("  tokens_per_second: {tps:.1} tps");
         }
+        if let Some(projected) = result.projected_execution_ms {
+            println!("  projected_execution_ms: {projected} ms");
+        }
+        if let Some(timeout) = result.effective_timeout_seconds {
+            println!("  effective_timeout_seconds: {timeout} s");
+        }
+        if let Some(sufficient) = result.throughput_sufficient {
+            println!("  throughput_sufficient: {sufficient}");
+        }
     }
     Ok(())
 }
 
 pub(crate) fn run_behaviour_preflight(args: BehaviourPreflightArgs) -> Result<()> {
     let limits = layerfault::behaviour::BehaviourLimits::for_profile(&args.profile)?;
+    let transformers_runtime = matches!(
+        args.runtime.as_str(),
+        "transformers" | "transformers-python"
+    );
+    let effective_timeout_seconds = transformers_runtime
+        .then(|| layerfault::behaviour::python::effective_timeout_seconds(limits.timeout_seconds));
     let safe_budget = layerfault::behaviour::configured_memory_budget_bytes();
     let estimated_memory = layerfault::behaviour::estimate_active_target_memory(
         &args.runtime,
@@ -237,6 +252,9 @@ pub(crate) fn run_behaviour_preflight(args: BehaviourPreflightArgs) -> Result<()
                 model_load_ms: None,
                 pilot_execution_ms: None,
                 tokens_per_second: None,
+                projected_execution_ms: None,
+                effective_timeout_seconds,
+                throughput_sufficient: None,
                 profile: profile_info,
             };
             return emit_preflight(&res, args.json);
@@ -254,6 +272,9 @@ pub(crate) fn run_behaviour_preflight(args: BehaviourPreflightArgs) -> Result<()
             model_load_ms: None,
             pilot_execution_ms: None,
             tokens_per_second: None,
+            projected_execution_ms: None,
+            effective_timeout_seconds,
+            throughput_sufficient: None,
             profile: profile_info,
         };
         return emit_preflight(&res, args.json);
@@ -295,6 +316,9 @@ pub(crate) fn run_behaviour_preflight(args: BehaviourPreflightArgs) -> Result<()
             model_load_ms: None,
             pilot_execution_ms: None,
             tokens_per_second: None,
+            projected_execution_ms: None,
+            effective_timeout_seconds,
+            throughput_sufficient: None,
             profile: profile_info,
         };
         return emit_preflight(&res, args.json);
@@ -329,16 +353,20 @@ pub(crate) fn run_behaviour_preflight(args: BehaviourPreflightArgs) -> Result<()
             model_load_ms: None,
             pilot_execution_ms: None,
             tokens_per_second: None,
+            projected_execution_ms: None,
+            effective_timeout_seconds,
+            throughput_sufficient: None,
             profile: profile_info,
         };
         return emit_preflight(&res, args.json);
     }
 
     let pilot_start = Instant::now();
+    let pilot_max_tokens = 32;
     let pilot_limits = layerfault::behaviour::BehaviourLimits {
         max_prompts: 1,
         max_turns: 1,
-        max_tokens: 32,
+        max_tokens: pilot_max_tokens,
         max_output_bytes: 32 * 1024,
         timeout_seconds: args.timeout_seconds.unwrap_or(60),
         max_mutations: 0,
@@ -380,12 +408,44 @@ pub(crate) fn run_behaviour_preflight(args: BehaviourPreflightArgs) -> Result<()
     match report_result {
         Ok(rep) => {
             let total_ms = pilot_start.elapsed().as_millis() as u64;
-            let probe_dur = rep.executions.first().map(|e| e.duration_ms).unwrap_or(0);
+            let pilot = rep
+                .executions
+                .iter()
+                .find(|execution| execution.probe_id != "runtime-side-effects");
+            if let Some(failed) = pilot.filter(|execution| {
+                execution.timed_out
+                    || execution.exit_code != Some(0)
+                    || execution
+                        .evaluation
+                        .rule_ids
+                        .iter()
+                        .any(|rule| rule == "LF-BEHAV-RUNTIME-FAILURE")
+            }) {
+                let detail = format!(
+                    "Transformers pilot failed on probe '{}': {}",
+                    failed.probe_id, failed.response_excerpt
+                );
+                let res = layerfault::behaviour::BehaviourPreflightResult {
+                    state: "NOT_RUN".to_owned(),
+                    reason_code: Some(classify_not_run_reason(&detail).to_owned()),
+                    detail: Some(detail),
+                    estimated_memory_bytes: estimated_memory,
+                    safe_memory_budget_bytes: Some(safe_budget),
+                    available_budget_bytes: Some(safe_budget),
+                    model_load_ms: None,
+                    pilot_execution_ms: Some(failed.duration_ms),
+                    tokens_per_second: None,
+                    projected_execution_ms: None,
+                    effective_timeout_seconds,
+                    throughput_sufficient: Some(false),
+                    profile: profile_info,
+                };
+                return emit_preflight(&res, args.json);
+            }
+            let probe_dur = pilot.map(|execution| execution.duration_ms).unwrap_or(0);
             let model_load_ms = total_ms.saturating_sub(probe_dur);
             let pilot_execution_ms = probe_dur.max(1);
-            let words = rep
-                .executions
-                .first()
+            let words = pilot
                 .map(|e| e.response_excerpt.split_whitespace().count())
                 .unwrap_or(1);
             let estimated_tokens = (words as f64 * 1.33).max(1.0);
@@ -393,16 +453,47 @@ pub(crate) fn run_behaviour_preflight(args: BehaviourPreflightArgs) -> Result<()
                 ((estimated_tokens / (pilot_execution_ms as f64 / 1000.0).max(0.001)) * 10.0)
                     .round()
                     / 10.0;
+            let projection = effective_timeout_seconds.map(|timeout| {
+                layerfault::behaviour::python::profile_runtime_projection(
+                    model_load_ms,
+                    pilot_execution_ms,
+                    pilot_max_tokens,
+                    limits.max_tokens,
+                    limits.max_prompts,
+                    limits.repeat_count,
+                    timeout,
+                )
+            });
+            let throughput_sufficient = projection.map(|(_, sufficient)| sufficient);
+            let state = if throughput_sufficient == Some(false) {
+                "NOT_RUN"
+            } else {
+                "RUNNABLE"
+            };
+            let reason_code = (throughput_sufficient == Some(false))
+                .then(|| "INSUFFICIENT_CPU_THROUGHPUT".to_owned());
+            let detail = projection.and_then(|(projected, sufficient)| {
+                (!sufficient).then(|| {
+                    format!(
+                        "projected Transformers profile runtime {:.1}s exceeds the admitted {:.1}s throughput budget on this host",
+                        projected as f64 / 1000.0,
+                        effective_timeout_seconds.unwrap_or_default() as f64 * 0.8
+                    )
+                })
+            });
             let res = layerfault::behaviour::BehaviourPreflightResult {
-                state: "RUNNABLE".to_owned(),
-                reason_code: None,
-                detail: None,
+                state: state.to_owned(),
+                reason_code,
+                detail,
                 estimated_memory_bytes: estimated_memory,
                 safe_memory_budget_bytes: Some(safe_budget),
                 available_budget_bytes: Some(safe_budget),
                 model_load_ms: Some(model_load_ms),
                 pilot_execution_ms: Some(pilot_execution_ms),
                 tokens_per_second: Some(tokens_per_second),
+                projected_execution_ms: projection.map(|(projected, _)| projected),
+                effective_timeout_seconds,
+                throughput_sufficient,
                 profile: profile_info,
             };
             emit_preflight(&res, args.json)
@@ -420,6 +511,9 @@ pub(crate) fn run_behaviour_preflight(args: BehaviourPreflightArgs) -> Result<()
                 model_load_ms: None,
                 pilot_execution_ms: None,
                 tokens_per_second: None,
+                projected_execution_ms: None,
+                effective_timeout_seconds,
+                throughput_sufficient: None,
                 profile: profile_info,
             };
             emit_preflight(&res, args.json)

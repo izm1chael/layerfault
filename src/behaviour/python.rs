@@ -117,7 +117,7 @@ fn reported_exit_code(status: std::process::ExitStatus, timed_out: bool) -> Opti
 /// on CPU-only hosts rather than raising every profile's timeout globally.
 /// CPU-only hosts scale from available cores. The environment override takes
 /// precedence when hardware-specific tuning is needed.
-fn effective_timeout_seconds(base_seconds: u64) -> u64 {
+pub fn effective_timeout_seconds(base_seconds: u64) -> u64 {
     let multiplier: f64 = std::env::var("LAYERFAULT_BEHAVIOUR_CPU_TIMEOUT_MULTIPLIER")
         .ok()
         .and_then(|value| value.parse().ok())
@@ -136,6 +136,27 @@ fn effective_timeout_seconds(base_seconds: u64) -> u64 {
             }
         });
     ((base_seconds as f64) * multiplier).round() as u64
+}
+
+pub fn profile_runtime_projection(
+    model_load_ms: u64,
+    pilot_execution_ms: u64,
+    pilot_max_tokens: u64,
+    profile_max_tokens: u64,
+    prompts: usize,
+    repeats: usize,
+    effective_timeout_seconds: u64,
+) -> (u64, bool) {
+    let executions = u64::try_from(prompts.saturating_mul(repeats)).unwrap_or(u64::MAX);
+    let projected_probe_ms = pilot_execution_ms
+        .saturating_mul(profile_max_tokens)
+        .div_ceil(pilot_max_tokens.max(1));
+    let projected_ms = model_load_ms.saturating_add(projected_probe_ms.saturating_mul(executions));
+    let admitted_ms = effective_timeout_seconds
+        .saturating_mul(1000)
+        .saturating_mul(4)
+        / 5;
+    (projected_ms, projected_ms <= admitted_ms)
 }
 
 pub fn run_transformers(
@@ -1216,5 +1237,17 @@ mod protocol_tests {
         assert!((100..=600).contains(&scaled));
 
         std::env::remove_var(TIMEOUT_MULTIPLIER_ENV);
+    }
+
+    #[test]
+    fn profile_projection_rejects_a_pilot_that_cannot_fit_the_selected_profile() {
+        assert_eq!(
+            profile_runtime_projection(20_000, 5_000, 32, 256, 8, 1, 120),
+            (340_000, false)
+        );
+        assert_eq!(
+            profile_runtime_projection(5_000, 500, 32, 256, 8, 1, 120),
+            (37_000, true)
+        );
     }
 }
