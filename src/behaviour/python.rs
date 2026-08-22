@@ -18,16 +18,48 @@ use std::time::{Duration, Instant};
 const PROTOCOL_PREFIX: &str = "LAYERFAULT_JSON:";
 const MAX_RUNNER_LOG_BYTES: usize = 2 * 1024 * 1024;
 
-/// When `recv_protocol` fails, the reader thread's channel disconnecting and
-/// a genuine wall-clock timeout look identical from the channel's side alone
-/// — both surface as "no line arrived in time". A process that was killed
-/// (OOM, a host resource limit, a crash) closes its stdout immediately, so
-/// the reader thread's sender drops right away rather than after the full
-/// timeout window. Checking whether the child has *already* exited at the
-/// moment of failure distinguishes "genuinely still running but slow" from
-/// "already dead", which is exactly the ambiguity that previously made a
-/// resource-limit kill get reported as an indistinguishable generic
-/// timeout with no evidence of what actually happened.
+#[derive(Debug)]
+enum ProtocolReceiveError {
+    Timeout,
+    Disconnected,
+    Stream(anyhow::Error),
+    InvalidJson(serde_json::Error),
+}
+
+impl std::fmt::Display for ProtocolReceiveError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Timeout => formatter.write_str("Transformers runner protocol timed out"),
+            Self::Disconnected => {
+                formatter.write_str("Transformers runner protocol stream closed before a response")
+            }
+            Self::Stream(error) => write!(
+                formatter,
+                "Transformers runner protocol stream failed: {error}"
+            ),
+            Self::InvalidJson(error) => {
+                write!(
+                    formatter,
+                    "invalid Transformers runner protocol JSON: {error}"
+                )
+            }
+        }
+    }
+}
+
+impl std::error::Error for ProtocolReceiveError {}
+
+#[derive(Debug)]
+struct FailedProbe {
+    id: String,
+    category: String,
+    comparison_group: Option<String>,
+    comparison_role: Option<String>,
+    expected_boundary: Option<String>,
+    prompt_sha256: String,
+    duration_ms: u64,
+}
+
 fn describe_if_child_already_exited(child: &mut std::process::Child) -> Option<String> {
     let status = child.try_wait().ok().flatten()?;
     if status.success() {
@@ -51,6 +83,30 @@ fn describe_if_child_already_exited(child: &mut std::process::Child) -> Option<S
         "sandboxed Transformers runtime process already exited ({:?}) before a response arrived",
         status.code()
     ))
+}
+
+fn describe_child_exit_with_grace(
+    child: &mut std::process::Child,
+    grace: Duration,
+) -> Option<String> {
+    let started = Instant::now();
+    loop {
+        if let Some(reason) = describe_if_child_already_exited(child) {
+            return Some(reason);
+        }
+        if started.elapsed() >= grace {
+            return None;
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+}
+
+fn reported_exit_code(status: std::process::ExitStatus, timed_out: bool) -> Option<i32> {
+    if timed_out {
+        None
+    } else {
+        status.code()
+    }
 }
 
 /// CPU-only Transformers inference (no CUDA/ROCm tooling detected) is
@@ -373,6 +429,7 @@ fn run_transformers_deadline(
     let mut request_id = 0_u64;
     let mut timed_out = false;
     let mut session_error: Option<String> = None;
+    let mut failed_probe: Option<FailedProbe> = None;
     // Model loading gets its own budget, starting now rather than inheriting
     // whatever this run has already spent on admission/staging/spawn. A slow
     // load must not eat into the time probes get, and a probe must not be
@@ -469,18 +526,46 @@ fn run_transformers_deadline(
                     let response = match recv_protocol(&line_rx, probe_deadline.remaining()) {
                         Ok(value) => value,
                         Err(error) => {
-                            match describe_if_child_already_exited(&mut child) {
+                            let disconnected = matches!(error, ProtocolReceiveError::Disconnected);
+                            let exit_reason = if disconnected {
+                                describe_child_exit_with_grace(
+                                    &mut child,
+                                    Duration::from_millis(250),
+                                )
+                            } else {
+                                describe_if_child_already_exited(&mut child)
+                            };
+                            match exit_reason {
                                 Some(exit_reason) => {
                                     session_error =
-                                        Some(format!("{exit_reason} (probe '{}')", probe.id));
+                                        Some(format!("{exit_reason} (probe '{}')", probe.id))
                                 }
-                                None => {
+                                None if matches!(error, ProtocolReceiveError::Timeout) => {
                                     timed_out = true;
                                     session_error = Some(format!(
                                         "sandboxed Transformers inference timed out/failed on probe '{}': {error}",
                                         probe.id
                                     ));
                                 }
+                                None => {
+                                    session_error = Some(format!(
+                                        "sandboxed Transformers inference protocol failed on probe '{}': {error}",
+                                        probe.id
+                                    ));
+                                }
+                            }
+                            failed_probe = Some(FailedProbe {
+                                id: probe.id.clone(),
+                                category: probe.category.clone(),
+                                comparison_group: probe.comparison_group.clone(),
+                                comparison_role: probe.comparison_role.clone(),
+                                expected_boundary: probe.expected_boundary.clone(),
+                                prompt_sha256: super::sha256(combined.as_bytes()),
+                                duration_ms: u64::try_from(request_started.elapsed().as_millis())
+                                    .unwrap_or(u64::MAX),
+                            });
+                            if disconnected {
+                                timed_out = false;
                             }
                             break 'probes;
                         }
@@ -622,17 +707,34 @@ fn run_transformers_deadline(
         Some(error) => format!("{error}\n{stderr_text}"),
         None => stderr_text,
     };
+    let failed_duration = failed_probe.as_ref().map(|probe| probe.duration_ms);
     executions.push(super::ProbeExecution {
-        probe_id: "runtime-side-effects".to_owned(),
-        category: "runtime_side_effects".to_owned(),
-        comparison_group: None,
-        comparison_role: None,
-        expected_boundary: None,
-        prompt_sha256: super::sha256(b"runtime-side-effects"),
+        probe_id: failed_probe
+            .as_ref()
+            .map(|probe| probe.id.clone())
+            .unwrap_or_else(|| "runtime-side-effects".to_owned()),
+        category: failed_probe
+            .as_ref()
+            .map(|probe| probe.category.clone())
+            .unwrap_or_else(|| "runtime_side_effects".to_owned()),
+        comparison_group: failed_probe
+            .as_ref()
+            .and_then(|probe| probe.comparison_group.clone()),
+        comparison_role: failed_probe
+            .as_ref()
+            .and_then(|probe| probe.comparison_role.clone()),
+        expected_boundary: failed_probe
+            .as_ref()
+            .and_then(|probe| probe.expected_boundary.clone()),
+        prompt_sha256: failed_probe
+            .as_ref()
+            .map(|probe| probe.prompt_sha256.clone())
+            .unwrap_or_else(|| super::sha256(b"runtime-side-effects")),
         response_sha256: super::sha256(side_effect_detail.as_bytes()),
         response_excerpt: super::bounded_excerpt(&side_effect_detail, 4096),
-        duration_ms: u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX),
-        exit_code: status.code(),
+        duration_ms: failed_duration
+            .unwrap_or_else(|| u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX)),
+        exit_code: reported_exit_code(status, timed_out),
         timed_out,
         telemetry,
         evaluation: telemetry_eval,
@@ -734,20 +836,24 @@ fn python_site_packages(runtime: &Path) -> Vec<PathBuf> {
 fn recv_protocol(
     rx: &mpsc::Receiver<Result<String>>,
     timeout: Duration,
-) -> Result<serde_json::Value> {
+) -> std::result::Result<serde_json::Value, ProtocolReceiveError> {
     let started = Instant::now();
     loop {
         let remaining = timeout.saturating_sub(started.elapsed());
         if remaining.is_zero() {
-            bail!("Transformers runner protocol timed out");
+            return Err(ProtocolReceiveError::Timeout);
         }
-        let line = rx
-            .recv_timeout(remaining)
-            .map_err(|_| anyhow!("Transformers runner protocol timed out"))??;
+        let line = match rx.recv_timeout(remaining) {
+            Ok(line) => line.map_err(ProtocolReceiveError::Stream)?,
+            Err(mpsc::RecvTimeoutError::Timeout) => return Err(ProtocolReceiveError::Timeout),
+            Err(mpsc::RecvTimeoutError::Disconnected) => {
+                return Err(ProtocolReceiveError::Disconnected)
+            }
+        };
         let Some(payload) = line.strip_prefix(PROTOCOL_PREFIX) else {
             continue;
         };
-        return serde_json::from_str(payload).context("invalid Transformers runner protocol JSON");
+        return serde_json::from_str(payload).map_err(ProtocolReceiveError::InvalidJson);
     }
 }
 
@@ -981,7 +1087,8 @@ mod protocol_tests {
         let rx = spawn_feeder(vec!["some trailing log output".to_owned()]);
         let error = recv_protocol(&rx, Duration::from_secs(2))
             .expect_err("a runner that exits mid-probe without responding must be a structured error, not a hang or a fabricated success");
-        assert!(error.to_string().contains("timed out"));
+        assert!(matches!(error, ProtocolReceiveError::Disconnected));
+        assert!(error.to_string().contains("stream closed"));
     }
 
     #[test]
@@ -992,6 +1099,7 @@ mod protocol_tests {
         let started = Instant::now();
         let error = recv_protocol(&rx, Duration::from_millis(150))
             .expect_err("a stalled runner must time out, not hang indefinitely");
+        assert!(matches!(error, ProtocolReceiveError::Timeout));
         assert!(error.to_string().contains("timed out"));
         assert!(started.elapsed() < Duration::from_secs(2));
     }
@@ -1059,6 +1167,30 @@ mod protocol_tests {
         // failure, so this must not be reported as an exit reason at all.
         assert!(describe_if_child_already_exited(&mut child).is_none());
         let _ = child.wait();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn protocol_disconnect_grace_captures_a_child_exit_race() {
+        let mut child = std::process::Command::new("sh")
+            .args(["-c", "sleep 0.05; exit 7"])
+            .spawn()
+            .expect("spawn delayed exit");
+        let description = describe_child_exit_with_grace(&mut child, Duration::from_secs(1))
+            .expect("delayed child exit must be observed");
+        assert!(description.contains("Some(7)"));
+        let _ = child.wait();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn forced_timeout_cleanup_does_not_report_a_natural_exit_code() {
+        let status = std::process::Command::new("sh")
+            .args(["-c", "exit 7"])
+            .status()
+            .expect("run exit fixture");
+        assert_eq!(reported_exit_code(status, false), Some(7));
+        assert_eq!(reported_exit_code(status, true), None);
     }
 
     const TIMEOUT_MULTIPLIER_ENV: &str = "LAYERFAULT_BEHAVIOUR_CPU_TIMEOUT_MULTIPLIER";
