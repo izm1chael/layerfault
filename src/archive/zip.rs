@@ -2,6 +2,7 @@ use super::detect::ArchiveFormat;
 use super::limits::ArchiveBudgetTracker;
 use super::member::{format_virtual_subject, normalize_member_path, ArchiveMemberTracker};
 use super::{ArchiveCoverage, ArchiveMemberReport, ArchiveReport, CoverageState};
+use crate::finding_evidence::{structural_invariant, EvidenceSubject, FindingBuilder};
 use crate::safeio::open_readonly_nofollow;
 use crate::scanner::{CheckType, Confidence, FindingClass, LayerScanResult, ScanStatus};
 use anyhow::{anyhow, bail, Context, Result};
@@ -11,6 +12,8 @@ use std::fs::File;
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::Path;
 use tempfile::NamedTempFile;
+
+const MIN_AGGREGATE_RATIO_BYTES: u64 = 16 * 1024 * 1024;
 
 #[derive(Debug, Clone)]
 struct RawZipEntry {
@@ -282,6 +285,7 @@ pub fn inspect_zip(
     let mut inspected_members = 0usize;
     let mut skipped_members = 0usize;
     let mut total_uncompressed = 0u64;
+    let mut total_compressed = 0u64;
 
     // Wheel RECORD map: relative_path -> (expected_sha256, expected_size)
     let mut wheel_record_map: BTreeMap<String, (String, u64)> = BTreeMap::new();
@@ -522,19 +526,22 @@ pub fn inspect_zip(
                 size_uncompressed,
                 budget.limits.max_uncompressed_member_bytes
             ));
-            findings.push(make_finding(
+            findings.push(archive_bomb_finding(
+                identity,
                 &virt_path,
-                CheckType::PackageSecurity,
-                ScanStatus::Fail,
-                FindingClass::Structural,
-                Confidence::High,
-                "LF-ARCHIVE-BOMB",
                 format!(
                     "ZIP entry '{}' declared size {} bytes exceeds member safety limit {}",
                     norm_path.virtual_path,
                     size_uncompressed,
                     budget.limits.max_uncompressed_member_bytes
                 ),
+                serde_json::json!({
+                    "condition": "declared_member_size_limit",
+                    "member": norm_path.virtual_path,
+                    "compressed_bytes": size_compressed,
+                    "declared_uncompressed_bytes": size_uncompressed,
+                    "member_limit_bytes": budget.limits.max_uncompressed_member_bytes,
+                }),
             ));
             skipped_members += 1;
             continue;
@@ -590,17 +597,21 @@ pub fn inspect_zip(
                     "Decompression cap/ratio error on '{}': {}",
                     norm_path.virtual_path, err_msg
                 ));
-                findings.push(make_finding(
+                findings.push(archive_bomb_finding(
+                    identity,
                     &virt_path,
-                    CheckType::PackageSecurity,
-                    ScanStatus::Fail,
-                    FindingClass::Structural,
-                    Confidence::High,
-                    "LF-ARCHIVE-BOMB",
                     format!(
                         "ZIP entry '{}' failed streaming decompression limits: {}",
                         norm_path.virtual_path, err_msg
                     ),
+                    serde_json::json!({
+                        "condition": "streaming_decompression_limit",
+                        "member": norm_path.virtual_path,
+                        "compressed_bytes": size_compressed,
+                        "declared_uncompressed_bytes": size_uncompressed,
+                        "member_limit_bytes": budget.limits.max_uncompressed_member_bytes,
+                        "error": err_msg,
+                    }),
                 ));
                 skipped_members += 1;
                 continue;
@@ -608,7 +619,40 @@ pub fn inspect_zip(
         };
 
         total_uncompressed = total_uncompressed.saturating_add(actual_uncompressed);
+        total_compressed = total_compressed.saturating_add(size_compressed);
         inspected_members += 1;
+
+        if aggregate_ratio_exceeded(
+            total_compressed,
+            total_uncompressed,
+            budget.limits.max_compression_ratio,
+        ) {
+            let ratio = total_uncompressed as f64 / total_compressed as f64;
+            coverage_state = CoverageState::Incomplete;
+            coverage_details.push(format!(
+                "Aggregate ZIP expansion ratio {ratio:.1}x exceeds limit {:.1}x",
+                budget.limits.max_compression_ratio
+            ));
+            findings.push(archive_bomb_finding(
+                identity,
+                identity,
+                format!(
+                    "ZIP aggregate expansion ratio {ratio:.1}x exceeds safety limit {:.1}x",
+                    budget.limits.max_compression_ratio
+                ),
+                serde_json::json!({
+                    "condition": "aggregate_compression_ratio",
+                    "compressed_bytes": total_compressed,
+                    "uncompressed_bytes": total_uncompressed,
+                    "compression_ratio": ratio,
+                    "ratio_limit": budget.limits.max_compression_ratio,
+                    "minimum_expansion_bytes": MIN_AGGREGATE_RATIO_BYTES,
+                    "members_inspected": inspected_members,
+                }),
+            ));
+            skipped_members += member_count.saturating_sub(i + 1);
+            break;
+        }
 
         member_digests.insert(
             norm_path.virtual_path.clone(),
@@ -692,10 +736,16 @@ pub fn inspect_zip(
     })
 }
 
+fn aggregate_ratio_exceeded(compressed: u64, uncompressed: u64, limit: f64) -> bool {
+    uncompressed >= MIN_AGGREGATE_RATIO_BYTES
+        && compressed > 0
+        && uncompressed as f64 / compressed as f64 > limit
+}
+
 fn decompress_member_to_tempfile<R: Read>(
     reader: &mut R,
     _member_path: &str,
-    compressed_size: u64,
+    _compressed_size: u64,
     _declared_uncompressed: u64,
     budget: &mut ArchiveBudgetTracker,
     global_budget: &crate::budget::ScanBudget,
@@ -738,17 +788,6 @@ fn decompress_member_to_tempfile<R: Read>(
             )
             .map_err(|error| error.to_string())?;
 
-        // Compression ratio check
-        if compressed_size > 0 && total_read > 256 * 1024 {
-            let ratio = (total_read as f64) / (compressed_size as f64);
-            if ratio > budget.limits.max_compression_ratio {
-                return Err(format!(
-                    "Decompression ratio ({:.1}x) exceeded max limit ({:.1}x)",
-                    ratio, budget.limits.max_compression_ratio
-                ));
-            }
-        }
-
         hasher.update(&buffer[..count]);
         temp.write_all(&buffer[..count])
             .map_err(|e| e.to_string())?;
@@ -759,6 +798,34 @@ fn decompress_member_to_tempfile<R: Read>(
 
     let hash_hex = format!("sha256:{}", hex::encode(hasher.finalize()));
     Ok((temp, hash_hex, total_read))
+}
+
+fn archive_bomb_finding(
+    digest: &str,
+    subject_path: &str,
+    detail: String,
+    facts: serde_json::Value,
+) -> LayerScanResult {
+    let media_type = "application/vnd.layerfault.archive";
+    let subject = EvidenceSubject::member(subject_path).with_media_type(media_type);
+    FindingBuilder::new(
+        "LF-ARCHIVE-BOMB",
+        CheckType::PackageSecurity,
+        ScanStatus::Fail,
+    )
+    .class(FindingClass::Structural)
+    .confidence(Confidence::High)
+    .digest(digest)
+    .media_type(media_type)
+    .subject(subject.clone())
+    .detail(detail)
+    .match_note("bounded archive expansion limit exceeded")
+    .evidence(structural_invariant(
+        subject,
+        "bounded archive expansion limit exceeded",
+        facts,
+    ))
+    .finish()
 }
 
 fn dispatch_member_scan(
@@ -1121,4 +1188,38 @@ fn make_finding(
             "archive-level structural/coverage condition without a single attributable member",
         )
         .finish()
+}
+
+#[cfg(test)]
+mod bomb_tests {
+    use super::*;
+
+    #[test]
+    fn small_high_ratio_tensor_member_is_not_an_archive_bomb() {
+        assert!(!aggregate_ratio_exceeded(1024, 1024 * 1024, 100.0));
+    }
+
+    #[test]
+    fn meaningful_aggregate_expansion_is_an_archive_bomb() {
+        assert!(aggregate_ratio_exceeded(
+            128 * 1024,
+            MIN_AGGREGATE_RATIO_BYTES,
+            100.0,
+        ));
+    }
+
+    #[test]
+    fn archive_bomb_finding_has_structured_evidence() {
+        let finding = archive_bomb_finding(
+            "sha256:test",
+            "model.zip!/weights",
+            "ratio exceeded".to_owned(),
+            serde_json::json!({ "compression_ratio": 128.0 }),
+        );
+        assert_eq!(finding.evidence.len(), 1);
+        assert_eq!(
+            finding.evidence_state,
+            Some(crate::finding_evidence::EvidenceState::Available)
+        );
+    }
 }

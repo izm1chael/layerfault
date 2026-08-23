@@ -219,7 +219,7 @@
         rule_version: 1,
         detector_family: "pickle-static",
         title: "Dangerous pickle callable",
-        meaning: "Static opcode analysis resolved a pickle global/callable associated with code execution or another explicitly dangerous primitive.",
+        meaning: "Static opcode analysis resolved an explicitly dangerous primitive or an untrusted external callable used for object construction.",
         why_it_matters: "A pickle stream that references a code-execution callable will invoke it when an unsafe loader reconstructs the object graph.",
         remediation: "Block the artifact. Review the named global and provenance without deserializing the pickle.",
         limitations: "Evidence comes solely from bounded static opcode disassembly; Layerfault never deserialized the stream. A resolved reference does not prove any loader reaches it.",

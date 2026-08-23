@@ -43,6 +43,20 @@ const ALLOWLIST_PREFIXES: &[&str] = &[
     "sklearn.utils._bunch.Bunch",
 ];
 
+const SAFE_VALUE_CONSTRUCTORS: &[&str] = &[
+    "_codecs.encode",
+    "argparse.Namespace",
+    "signal.Signals",
+    "miles.utils.eval_config.EvalDatasetConfig",
+];
+
+const SAFE_VALUE_CONSTRUCTOR_PREFIXES: &[&str] = &[
+    "__torch__.",
+    "megatron.core.enums.",
+    "megatron.core.transformer.enums.",
+    "peft.utils.peft_types.",
+];
+
 const SAFE_BUILTINS: &[&str] = &[
     "builtins.dict",
     "builtins.list",
@@ -431,7 +445,7 @@ fn finding_from_analysis(
         .media_type(media)
         .subject(subject.clone())
         .detail(format!(
-            "{label} references dangerous or non-allowlisted callable(s): {}",
+            "{label} references dangerous or untrusted callable(s): {}",
             dangerous.join(", ")
         ))
         .match_note(dangerous.first().cloned().unwrap_or_default())
@@ -919,7 +933,6 @@ fn analyze_reader_inner<R: Read + Seek>(
                     state.push(StackValue::Constructed(name.to_owned()))?;
                 } else {
                     state.record_unresolved("REDUCE", "callable could not be resolved statically");
-                    state.mark_dangerous("unresolved callable used by REDUCE".to_owned());
                     state.push(StackValue::Other)?;
                 }
             }
@@ -1273,9 +1286,12 @@ impl ParserState {
 
     fn record_global(&mut self, value: &str) {
         self.analysis.globals.insert(value.to_owned());
+        if is_allowlisted(value) {
+            return;
+        }
         if is_explicit_danger(value) {
             self.mark_dangerous(value.to_owned());
-        } else if !is_allowlisted(value) {
+        } else {
             self.note_site(value);
             self.analysis.unknown_globals.insert(value.to_owned());
         }
@@ -1318,13 +1334,11 @@ impl ParserState {
     fn record_constructor(&mut self, name: Option<&str>, opcode: &str) {
         match name {
             Some(name) if is_allowlisted(name) => {}
-            Some(name) => {
-                self.mark_dangerous(format!(
-                    "non-allowlisted constructor {name} used by {opcode}"
-                ));
-            }
+            Some(name) => self.mark_dangerous(format!(
+                "non-allowlisted constructor {name} used by {opcode}"
+            )),
             None => {
-                self.mark_dangerous(format!("unresolved callable used by {opcode}"));
+                self.record_unresolved(opcode, "constructor could not be resolved statically");
             }
         }
     }
@@ -1339,6 +1353,10 @@ fn callable_name(value: &StackValue) -> Option<String> {
 
 fn is_allowlisted(value: &str) -> bool {
     SAFE_BUILTINS.contains(&value)
+        || SAFE_VALUE_CONSTRUCTORS.contains(&value)
+        || SAFE_VALUE_CONSTRUCTOR_PREFIXES
+            .iter()
+            .any(|prefix| value.starts_with(prefix))
         || ALLOWLIST_PREFIXES
             .iter()
             .any(|prefix| value.starts_with(prefix))
@@ -1646,22 +1664,61 @@ mod tests {
     }
 
     #[test]
-    fn non_allowlisted_newobj_is_dangerous() -> Result<()> {
+    fn non_allowlisted_newobj_remains_dangerous() -> Result<()> {
         let analysis = analyze_bytes(b"\x80\x02cacme.model\nCustomTensor\n)\x81.")?;
         assert!(analysis
             .dangerous
             .iter()
             .any(|value| value.contains("CustomTensor used by NEWOBJ")));
+        assert!(analysis.unknown_globals.contains("acme.model.CustomTensor"));
         Ok(())
     }
 
     #[test]
-    fn unresolved_newobj_is_dangerous() -> Result<()> {
+    fn unresolved_newobj_is_an_assurance_failure_not_a_dangerous_global() -> Result<()> {
         let analysis = analyze_bytes(b"\x80\x02N)\x81.")?;
-        assert!(analysis
-            .dangerous
-            .iter()
-            .any(|value| value.contains("unresolved callable used by NEWOBJ")));
+        assert!(analysis.dangerous.is_empty());
+        assert_eq!(analysis.unresolved_execution.len(), 1);
+        assert_eq!(analysis.unresolved_execution[0].opcode, "NEWOBJ");
+        Ok(())
+    }
+
+    #[test]
+    fn routine_value_constructors_do_not_become_dangerous_globals() -> Result<()> {
+        for (module, name) in [
+            ("_codecs", "encode"),
+            ("argparse", "Namespace"),
+            ("signal", "Signals"),
+        ] {
+            let bytes = format!("c{module}\n{name}\n)R.");
+            let analysis = analyze_bytes(bytes.as_bytes())?;
+            assert!(analysis.dangerous.is_empty(), "{module}.{name}");
+            assert!(analysis.unknown_globals.is_empty(), "{module}.{name}");
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn torchscript_local_class_is_allowlisted_for_value_construction() -> Result<()> {
+        let analysis = analyze_bytes(&global("__torch__.eddie_model", "Attention"))?;
+        assert!(analysis.dangerous.is_empty());
+        assert!(analysis.unknown_globals.is_empty());
+        Ok(())
+    }
+
+    #[test]
+    fn framework_enum_and_config_constructors_are_allowlisted() -> Result<()> {
+        for (module, name) in [
+            ("megatron.core.transformer.enums", "AttnBackend"),
+            ("megatron.core.enums", "ModelType"),
+            ("peft.utils.peft_types", "PeftType"),
+            ("miles.utils.eval_config", "EvalDatasetConfig"),
+        ] {
+            let bytes = format!("c{module}\n{name}\n)R.");
+            let analysis = analyze_bytes(bytes.as_bytes())?;
+            assert!(analysis.dangerous.is_empty(), "{module}.{name}");
+            assert!(analysis.unknown_globals.is_empty(), "{module}.{name}");
+        }
         Ok(())
     }
 

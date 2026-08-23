@@ -18,7 +18,7 @@ use zip::ZipArchive;
 
 const MAX_ZIP_MEMBERS: usize = 16_384;
 const MAX_MEMBER_BYTES: u64 = 64 * 1024 * 1024;
-const MAX_TOTAL_DECOMPRESSED_BYTES: u64 = 256 * 1024 * 1024;
+const MAX_TOTAL_DECOMPRESSED_BYTES: u64 = 2 * 1024 * 1024 * 1024;
 const MAX_MEMBER_PATH_BYTES: usize = 4096;
 
 /// Inspect a PyTorch ZIP container, TorchScript model, or torch.package archive.
@@ -170,8 +170,8 @@ pub fn scan(
         }
 
         let entry_size = entry.size();
-        total_decompressed = match total_decompressed.checked_add(entry_size) {
-            Some(sum) if sum <= MAX_TOTAL_DECOMPRESSED_BYTES => sum,
+        total_decompressed = match bounded_total_decompressed(total_decompressed, entry_size) {
+            Some(sum) => sum,
             _ => {
                 let subject = EvidenceSubject::member(&path.display().to_string());
                 results.push(
@@ -184,8 +184,21 @@ pub fn scan(
                     .confidence(Confidence::High)
                     .digest(identity)
                     .media_type(media)
-                    .subject(subject)
-                    .detail("PyTorch ZIP uncompressed byte count exceeds limit".to_owned())
+                    .subject(subject.clone())
+                    .detail(format!(
+                        "PyTorch ZIP uncompressed byte count would exceed {} byte limit",
+                        MAX_TOTAL_DECOMPRESSED_BYTES
+                    ))
+                    .evidence(structural_invariant(
+                        subject,
+                        "PyTorch ZIP cumulative uncompressed size limit exceeded",
+                        serde_json::json!({
+                            "member": raw_name,
+                            "member_uncompressed_bytes": entry_size,
+                            "prior_uncompressed_bytes": total_decompressed,
+                            "total_limit_bytes": MAX_TOTAL_DECOMPRESSED_BYTES,
+                        }),
+                    ))
                     .finish(),
                 );
                 break;
@@ -391,4 +404,29 @@ pub fn scan(
     );
 
     Ok(results)
+}
+
+fn bounded_total_decompressed(current: u64, next: u64) -> Option<u64> {
+    current
+        .checked_add(next)
+        .filter(|sum| *sum <= MAX_TOTAL_DECOMPRESSED_BYTES)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ordinary_large_checkpoint_fits_the_cumulative_bound() {
+        assert_eq!(
+            bounded_total_decompressed(256 * 1024 * 1024, 256 * 1024 * 1024),
+            Some(512 * 1024 * 1024)
+        );
+    }
+
+    #[test]
+    fn cumulative_bound_rejects_overflow_and_excess() {
+        assert!(bounded_total_decompressed(MAX_TOTAL_DECOMPRESSED_BYTES, 1).is_none());
+        assert!(bounded_total_decompressed(u64::MAX, 1).is_none());
+    }
 }

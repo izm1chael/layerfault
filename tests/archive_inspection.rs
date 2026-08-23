@@ -357,12 +357,41 @@ fn test_actual_decompression_exceeds_cap_bomb() -> anyhow::Result<()> {
 
     let report = archive::inspect(&zip_path, &limits)?;
 
-    assert!(report.findings.iter().any(|f| f
+    let finding = report
+        .findings
+        .iter()
+        .find(|f| {
+            f.matches.iter().any(|m| m.contains("LF-ARCHIVE-BOMB")) && f.status == ScanStatus::Fail
+        })
+        .expect("archive bomb finding");
+    let facts = finding.evidence[0]
+        .structured
+        .as_ref()
+        .expect("structured bomb evidence");
+    assert_eq!(facts["condition"], "declared_member_size_limit");
+    assert_eq!(facts["member_limit_bytes"], 1024 * 1024);
+    assert_eq!(report.coverage.state, CoverageState::Incomplete);
+    Ok(())
+}
+
+#[test]
+fn test_small_high_ratio_tensor_member_is_not_a_bomb() -> anyhow::Result<()> {
+    let dir = tempdir()?;
+    let zip_path = dir.path().join("tensor-shard.zip");
+
+    create_zip_archive(&zip_path, |zip| {
+        let options = zip::write::SimpleFileOptions::default()
+            .compression_method(zip::CompressionMethod::Deflated);
+        zip.start_file("model/data/1", options)?;
+        zip.write_all(&vec![0_u8; 1024 * 1024])?;
+        Ok(())
+    })?;
+
+    let report = archive::inspect(&zip_path, &ArchiveLimits::default())?;
+    assert!(!report.findings.iter().any(|finding| finding
         .matches
         .iter()
-        .any(|m| m.contains("LF-ARCHIVE-BOMB"))
-        && f.status == ScanStatus::Fail));
-    assert_eq!(report.coverage.state, CoverageState::Incomplete);
+        .any(|value| value.contains("LF-ARCHIVE-BOMB"))));
     Ok(())
 }
 
