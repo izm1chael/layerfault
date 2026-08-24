@@ -1,16 +1,14 @@
 use super::UnicodeControlRecord;
-fn bidi_control(c: char) -> bool {
-    matches!(c, '\u{202a}'..='\u{202e}' | '\u{2066}'..='\u{2069}')
-}
 
 fn suspicious(c: char, role_boundary: bool) -> bool {
     // Joiners and zero-width spaces are ordinary vocabulary content in many
     // writing systems. Reporting each occurrence from tokenizer.json turns a
-    // legitimate multilingual tokenizer into hundreds of false warnings.
-    // They matter when they alter a role boundary, while bidi controls remain
-    // relevant anywhere because they can change how tokenizer metadata is
-    // displayed to a reviewer.
-    (role_boundary && crate::finding_evidence::is_invisible_or_bidi(c)) || bidi_control(c)
+    // legitimate multilingual tokenizer into false warnings. The same is true
+    // of bidi-format characters: a vocabulary token is data, whereas a control
+    // embedded in a special-token or chat-template role boundary can alter how
+    // that boundary is presented to a reviewer. Only the latter is a security
+    // signal for this detector.
+    role_boundary && crate::finding_evidence::is_invisible_or_bidi(c)
 }
 pub fn scan_text(
     path: &str,
@@ -65,10 +63,21 @@ mod tests {
     }
 
     #[test]
-    fn bidi_controls_remain_visible_outside_role_boundaries() {
+    fn ordinary_vocabulary_bidi_controls_do_not_create_findings() {
         let controls = scan_text("tokenizer.json", "vocab", "safe\u{202e}hidden", false);
+        assert!(controls.is_empty());
+    }
+
+    #[test]
+    fn bidi_controls_at_role_boundaries_remain_visible() {
+        let controls = scan_text(
+            "tokenizer_config.json",
+            "chat_template",
+            "<\u{202e}|user|>",
+            true,
+        );
         assert_eq!(controls.len(), 1);
-        assert!(!controls[0].role_boundary);
+        assert!(controls[0].role_boundary);
         assert_eq!(controls[0].codepoint, 0x202e);
     }
 }

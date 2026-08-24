@@ -48,6 +48,21 @@ const SAFE_VALUE_CONSTRUCTORS: &[&str] = &[
     "argparse.Namespace",
     "signal.Signals",
     "miles.utils.eval_config.EvalDatasetConfig",
+    // These are data-only checkpoint constructors seen in standard PyTorch
+    // and Transformers training artefacts. They are deliberately exact names;
+    // arbitrary application classes and executable primitives remain unknown
+    // or dangerous rather than being covered by a broad framework prefix.
+    "torch.device",
+    "torch.nn.modules.activation.SiLU",
+    "torch.nn.modules.batchnorm.BatchNorm2d",
+    "torch.nn.modules.container.ModuleList",
+    "torch.nn.modules.container.Sequential",
+    "torch.nn.modules.conv.Conv2d",
+    "torch.nn.modules.pooling.MaxPool2d",
+    "torch.nn.modules.upsampling.Upsample",
+    "transformers.training_args.TrainingArguments",
+    "transformers.trainer_utils.IntervalStrategy",
+    "transformers.trainer_utils.SchedulerType",
 ];
 
 const SAFE_VALUE_CONSTRUCTOR_PREFIXES: &[&str] = &[
@@ -927,9 +942,7 @@ fn analyze_reader_inner<R: Read + Seek>(
                 let callable = state.pop();
                 let name = callable_name(&callable);
                 if let Some(name) = name.as_deref() {
-                    if !is_allowlisted(name) {
-                        state.mark_dangerous(format!("{name} used by REDUCE"));
-                    }
+                    state.record_constructor(Some(name), "REDUCE");
                     state.push(StackValue::Constructed(name.to_owned()))?;
                 } else {
                     state.record_unresolved("REDUCE", "callable could not be resolved statically");
@@ -940,9 +953,7 @@ fn analyze_reader_inner<R: Read + Seek>(
                 state.pop(); // state
                 let instance = state.pop();
                 if let Some(name) = callable_name(&instance) {
-                    if !is_allowlisted(&name) {
-                        state.mark_dangerous(format!("{name} used with BUILD"));
-                    }
+                    state.record_constructor(Some(&name), "BUILD");
                     state.push(StackValue::Constructed(name.to_owned()))?;
                 } else {
                     state.push(instance)?;
@@ -1334,9 +1345,15 @@ impl ParserState {
     fn record_constructor(&mut self, name: Option<&str>, opcode: &str) {
         match name {
             Some(name) if is_allowlisted(name) => {}
-            Some(name) => self.mark_dangerous(format!(
-                "non-allowlisted constructor {name} used by {opcode}"
-            )),
+            // A GLOBAL is already classified when resolved. Reconstructing an
+            // unfamiliar class is not by itself proof of code execution:
+            // common framework checkpoints contain their own module classes.
+            // Keep such names as reviewable unknown globals; only an explicit
+            // execution primitive is allowed to produce the blocking rule.
+            Some(name) if is_explicit_danger(name) => {
+                self.mark_dangerous(format!("{name} used by {opcode}"))
+            }
+            Some(_) => {}
             None => {
                 self.record_unresolved(opcode, "constructor could not be resolved statically");
             }
@@ -1376,7 +1393,10 @@ fn is_explicit_danger(value: &str) -> bool {
         || value.contains(".__setstate__")
         || value
             .split('.')
-            .any(|part| part.starts_with("__") && part.ends_with("__"))
+            // __builtin__ is Python 2's ordinary builtins module name, not
+            // a user-defined dunder method. Its explicitly dangerous members
+            // are covered above by the exact-danger list.
+            .any(|part| part != "__builtin__" && part.starts_with("__") && part.ends_with("__"))
 }
 
 fn read_u8<R: Read>(reader: &mut R, pos: &mut u64, len: u64) -> Result<u8> {
@@ -1664,13 +1684,18 @@ mod tests {
     }
 
     #[test]
-    fn non_allowlisted_newobj_remains_dangerous() -> Result<()> {
+    fn non_allowlisted_newobj_remains_an_unknown_global() -> Result<()> {
         let analysis = analyze_bytes(b"\x80\x02cacme.model\nCustomTensor\n)\x81.")?;
-        assert!(analysis
-            .dangerous
-            .iter()
-            .any(|value| value.contains("CustomTensor used by NEWOBJ")));
+        assert!(analysis.dangerous.is_empty());
         assert!(analysis.unknown_globals.contains("acme.model.CustomTensor"));
+        Ok(())
+    }
+
+    #[test]
+    fn legacy_builtin_getattr_is_unknown_not_an_explicit_execution_primitive() -> Result<()> {
+        let analysis = analyze_bytes(b"c__builtin__\ngetattr\n)R.")?;
+        assert!(analysis.dangerous.is_empty());
+        assert!(analysis.unknown_globals.contains("__builtin__.getattr"));
         Ok(())
     }
 
@@ -1713,6 +1738,29 @@ mod tests {
             ("megatron.core.enums", "ModelType"),
             ("peft.utils.peft_types", "PeftType"),
             ("miles.utils.eval_config", "EvalDatasetConfig"),
+        ] {
+            let bytes = format!("c{module}\n{name}\n)R.");
+            let analysis = analyze_bytes(bytes.as_bytes())?;
+            assert!(analysis.dangerous.is_empty(), "{module}.{name}");
+            assert!(analysis.unknown_globals.is_empty(), "{module}.{name}");
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn common_torch_and_transformers_checkpoint_constructors_are_allowlisted() -> Result<()> {
+        for (module, name) in [
+            ("torch", "device"),
+            ("torch.nn.modules.activation", "SiLU"),
+            ("torch.nn.modules.batchnorm", "BatchNorm2d"),
+            ("torch.nn.modules.container", "ModuleList"),
+            ("torch.nn.modules.container", "Sequential"),
+            ("torch.nn.modules.conv", "Conv2d"),
+            ("torch.nn.modules.pooling", "MaxPool2d"),
+            ("torch.nn.modules.upsampling", "Upsample"),
+            ("transformers.training_args", "TrainingArguments"),
+            ("transformers.trainer_utils", "IntervalStrategy"),
+            ("transformers.trainer_utils", "SchedulerType"),
         ] {
             let bytes = format!("c{module}\n{name}\n)R.");
             let analysis = analyze_bytes(bytes.as_bytes())?;

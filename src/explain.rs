@@ -66,7 +66,7 @@ pub fn risk_lookup(rule: &str) -> RiskExplanation {
         "LF-PICKLE-DANGEROUS-GLOBAL" => (
             "Dangerous pickle callable detected",
             vec!["Code Execution", "Supply Chain"],
-            "Bounded pickle opcode analysis resolved an explicitly dangerous primitive or an untrusted external callable used for object construction.",
+            "Bounded pickle opcode analysis resolved an explicitly dangerous code-execution primitive used by the pickle stream.",
             "Deserializing the object graph may invoke attacker-controlled code.",
             vec!["arbitrary command execution", "filesystem/network access", "credential theft"],
             vec!["Do not unpickle this artifact.", "Review the named callable and provenance.", "Prefer a data-only serialization format."],
