@@ -13,6 +13,12 @@ use std::path::Path;
 use tar::Archive;
 use tempfile::NamedTempFile;
 
+// A full temporary filesystem prevents complete inspection, but is not a
+// characteristic of the archive itself and must not be reported as a bomb.
+fn is_temp_disk_limit(error: &str) -> bool {
+    error.contains("ExhaustedTempDisk")
+}
+
 pub fn inspect_tar(
     display_path: &Path,
     file: &File,
@@ -326,18 +332,20 @@ pub fn inspect_tar(
                     "Decompression cap error on TAR entry '{}': {}",
                     norm_path.virtual_path, err_msg
                 ));
-                findings.push(make_finding(
-                    &virt_path,
-                    CheckType::PackageSecurity,
-                    ScanStatus::Fail,
-                    FindingClass::Structural,
-                    Confidence::High,
-                    "LF-ARCHIVE-BOMB",
-                    format!(
-                        "TAR entry '{}' failed streaming decompression limits: {}",
-                        norm_path.virtual_path, err_msg
-                    ),
-                ));
+                if !is_temp_disk_limit(&err_msg) {
+                    findings.push(make_finding(
+                        &virt_path,
+                        CheckType::PackageSecurity,
+                        ScanStatus::Fail,
+                        FindingClass::Structural,
+                        Confidence::High,
+                        "LF-ARCHIVE-BOMB",
+                        format!(
+                            "TAR entry '{}' failed streaming decompression limits: {}",
+                            norm_path.virtual_path, err_msg
+                        ),
+                    ));
+                }
                 skipped_members += 1;
                 continue;
             }

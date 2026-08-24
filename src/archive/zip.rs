@@ -15,6 +15,13 @@ use tempfile::NamedTempFile;
 
 const MIN_AGGREGATE_RATIO_BYTES: u64 = 16 * 1024 * 1024;
 
+// A full temporary filesystem is an operational coverage limitation, not
+// evidence that the archive is malicious.  Keep the scan incomplete so the
+// caller can retry it, but do not emit a security finding for this condition.
+fn is_temp_disk_limit(error: &str) -> bool {
+    error.contains("ExhaustedTempDisk")
+}
+
 #[derive(Debug, Clone)]
 struct RawZipEntry {
     raw_name: String,
@@ -597,22 +604,24 @@ pub fn inspect_zip(
                     "Decompression cap/ratio error on '{}': {}",
                     norm_path.virtual_path, err_msg
                 ));
-                findings.push(archive_bomb_finding(
-                    identity,
-                    &virt_path,
-                    format!(
-                        "ZIP entry '{}' failed streaming decompression limits: {}",
-                        norm_path.virtual_path, err_msg
-                    ),
-                    serde_json::json!({
-                        "condition": "streaming_decompression_limit",
-                        "member": norm_path.virtual_path,
-                        "compressed_bytes": size_compressed,
-                        "declared_uncompressed_bytes": size_uncompressed,
-                        "member_limit_bytes": budget.limits.max_uncompressed_member_bytes,
-                        "error": err_msg,
-                    }),
-                ));
+                if !is_temp_disk_limit(&err_msg) {
+                    findings.push(archive_bomb_finding(
+                        identity,
+                        &virt_path,
+                        format!(
+                            "ZIP entry '{}' failed streaming decompression limits: {}",
+                            norm_path.virtual_path, err_msg
+                        ),
+                        serde_json::json!({
+                            "condition": "streaming_decompression_limit",
+                            "member": norm_path.virtual_path,
+                            "compressed_bytes": size_compressed,
+                            "declared_uncompressed_bytes": size_uncompressed,
+                            "member_limit_bytes": budget.limits.max_uncompressed_member_bytes,
+                            "error": err_msg,
+                        }),
+                    ));
+                }
                 skipped_members += 1;
                 continue;
             }
@@ -1221,5 +1230,11 @@ mod bomb_tests {
             finding.evidence_state,
             Some(crate::finding_evidence::EvidenceState::Available)
         );
+    }
+
+    #[test]
+    fn temp_disk_limit_is_operational_not_a_bomb_condition() {
+        assert!(is_temp_disk_limit("ExhaustedTempDisk"));
+        assert!(!is_temp_disk_limit("member exceeded decompression limit"));
     }
 }
