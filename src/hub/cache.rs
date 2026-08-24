@@ -536,7 +536,14 @@ pub mod gc {
             }
         }
 
-        entries.sort_by_key(|c| c.last_accessed_unix);
+        // Filesystems can legitimately give rapid inserts the same timestamp.
+        // Keep LRU eviction reproducible in that case instead of inheriting
+        // WalkDir's platform-dependent traversal order.
+        entries.sort_by(|left, right| {
+            left.last_accessed_unix
+                .cmp(&right.last_accessed_unix)
+                .then_with(|| left.canonical_key.cmp(&right.canonical_key))
+        });
 
         let mut stale_parts = Vec::new();
         if let Ok(base_cache) = cache_dir() {

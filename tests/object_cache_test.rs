@@ -323,12 +323,14 @@ fn quota_gc_evicts_oldest() {
     let obj_1_path = object_cache::object_path(&sha_1).unwrap();
     let meta_1_path = object_cache::meta_path(&sha_1).unwrap();
     let past = std::time::SystemTime::now() - std::time::Duration::from_secs(60);
-    if let Ok(f) = File::options().write(true).open(&obj_1_path) {
-        let _ = f.set_times(std::fs::FileTimes::new().set_modified(past));
-    }
-    if let Ok(f) = File::options().write(true).open(&meta_1_path) {
-        let _ = f.set_times(std::fs::FileTimes::new().set_modified(past));
-    }
+    File::open(&obj_1_path)
+        .unwrap()
+        .set_times(std::fs::FileTimes::new().set_modified(past))
+        .unwrap();
+    File::open(&meta_1_path)
+        .unwrap()
+        .set_times(std::fs::FileTimes::new().set_modified(past))
+        .unwrap();
 
     let payload_2 = vec![2_u8; 60];
     let sha_2 = compute_sha256(&payload_2);
