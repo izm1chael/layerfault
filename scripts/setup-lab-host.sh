@@ -17,11 +17,25 @@ if [[ "$VERIFY_ONLY" -eq 0 ]]; then
   [[ "$(id -u)" -eq 0 ]] || { echo "Provisioning mode must run as root; use --verify-only for non-root checks" >&2; exit 2; }
   script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
   "$script_dir/install/active-runtime.sh" --device "$DEVICE" --llama auto
+  # Ubuntu's AppArmor user-namespace restriction prevents Bubblewrap from
+  # creating the non-root sandbox Layerfault requires.  Keep the setting
+  # explicit and persistent rather than silently falling back to unsandboxed
+  # execution (which Layerfault deliberately refuses to do).
+  install -d -m 0755 /etc/sysctl.d
+  printf '%s\n' \
+    'kernel.apparmor_restrict_unprivileged_userns = 0' \
+    'kernel.apparmor_restrict_unprivileged_unconfined = 0' \
+    > /etc/sysctl.d/99-layerfault-bwrap-userns.conf
+  sysctl -q -p /etc/sysctl.d/99-layerfault-bwrap-userns.conf
 fi
 missing=0
 for tool in bwrap strace prlimit; do
   if ! command -v "$tool" >/dev/null 2>&1; then echo "MISSING: $tool" >&2; missing=1; fi
 done
+if ! unshare --user --map-root-user -- true >/dev/null 2>&1; then
+  echo "MISSING: unprivileged user namespaces required by Bubblewrap; run this setup script as root" >&2
+  missing=1
+fi
 if ! command -v llama-server >/dev/null 2>&1; then
   echo "MISSING: llama-server (persistent GGUF active runtime)" >&2
   missing=1
