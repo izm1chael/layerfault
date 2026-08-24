@@ -267,7 +267,12 @@ pub(super) fn analyze_member(
     let parser_failure = member_findings.iter().any(|finding| {
         matches!(
             finding.rule_id.as_deref(),
-            Some("LF-ARCHIVE-MALFORMED" | "LF-PACKAGE-ARTIFACT")
+            Some(
+                "LF-ARCHIVE-MALFORMED"
+                    | "LF-PACKAGE-ARTIFACT"
+                    | "LF-PICKLE-OPAQUE-COMPRESSED"
+                    | "LF-PICKLE-OPAQUE-CONTAINER"
+            )
         )
     });
     let incomplete_reason = if changed {

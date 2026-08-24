@@ -274,10 +274,15 @@ pub(crate) fn run_pipeline(args: PipelineArgs) -> Result<()> {
             &context,
         );
         let exit = package_report_exit(&report, Some(&decision));
+        let report_context = PipelineReportContext {
+            merkle_identity: Some(&report.merkle_identity),
+            coverage: Some(&report.coverage),
+        };
         let evidence_details = pipeline_evidence_details(
             &args.evidence,
             &report.root,
             Some(&report.fingerprint),
+            report_context,
             &report.findings,
             &decision,
             exit,
@@ -310,6 +315,7 @@ pub(crate) fn run_pipeline(args: PipelineArgs) -> Result<()> {
             &args,
             &report.root,
             &report.fingerprint,
+            report_context,
             &report.findings,
             &decision,
             exit,
@@ -343,10 +349,16 @@ pub(crate) fn run_pipeline(args: PipelineArgs) -> Result<()> {
         decision.action == policy::PolicyAction::Block,
         decision.action == policy::PolicyAction::Warn,
     );
+    let coverage = artifact_pipeline_coverage(&report);
+    let report_context = PipelineReportContext {
+        merkle_identity: None,
+        coverage: Some(&coverage),
+    };
     let evidence_details = pipeline_evidence_details(
         &args.evidence,
         &report.path,
         Some(&identity),
+        report_context,
         &report.results,
         &decision,
         exit,
@@ -373,12 +385,13 @@ pub(crate) fn run_pipeline(args: PipelineArgs) -> Result<()> {
         &pipeline_decision(exit),
         &report.results,
         &layerfault::correlate::correlate(&report.results),
-        None,
+        Some(&coverage),
     )?;
     emit_pipeline(
         &args,
         &report.path,
         &identity,
+        report_context,
         &report.results,
         &decision,
         exit,
@@ -440,6 +453,10 @@ struct PipelineReport<'a, S: serde::Serialize> {
     tool_version: &'static str,
     target: &'a str,
     identity: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    merkle_identity: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    coverage: Option<&'a layerfault::coverage::Coverage>,
     decision: String,
     exit_code: i32,
     policy: &'a policy::PolicyDecision,
@@ -447,9 +464,47 @@ struct PipelineReport<'a, S: serde::Serialize> {
     findings: S,
 }
 
+#[derive(Clone, Copy)]
+struct PipelineReportContext<'a> {
+    merkle_identity: Option<&'a str>,
+    coverage: Option<&'a layerfault::coverage::Coverage>,
+}
+
+fn artifact_pipeline_coverage(report: &artifact::ArtifactReport) -> layerfault::coverage::Coverage {
+    let mut coverage = layerfault::coverage::Coverage::complete(1, report.size);
+    let parser_failed = report.results.iter().any(|finding| {
+        matches!(
+            finding.rule_id.as_deref(),
+            Some(
+                "LF-ARCHIVE-MALFORMED"
+                    | "LF-PACKAGE-ARTIFACT"
+                    | "LF-PICKLE-OPAQUE-COMPRESSED"
+                    | "LF-PICKLE-OPAQUE-CONTAINER"
+            )
+        )
+    });
+    let incomplete_reason = if report.format == layerfault::formats::ArtifactFormat::Unknown {
+        Some("no structural parser is available for the artifact format")
+    } else if parser_failed {
+        Some("the artifact could not be parsed completely")
+    } else {
+        None
+    };
+    if let Some(reason) = incomplete_reason {
+        coverage.files_scanned = 0;
+        coverage.omit(1, reason, std::slice::from_ref(&report.name));
+        if parser_failed {
+            coverage.parser_failure("the artifact parser failed safely");
+        }
+    }
+    coverage.budget = report.budget.clone();
+    coverage
+}
+
 fn pipeline_report<'a>(
     target: &'a str,
     identity: Option<&'a str>,
+    report_context: PipelineReportContext<'a>,
     findings: &'a [layerfault::scanner::LayerScanResult],
     decision: &'a policy::PolicyDecision,
     exit: i32,
@@ -476,6 +531,8 @@ fn pipeline_report<'a>(
         tool_version: env!("CARGO_PKG_VERSION"),
         target,
         identity,
+        merkle_identity: report_context.merkle_identity,
+        coverage: report_context.coverage,
         decision: pipeline_decision(exit),
         exit_code: exit,
         policy: decision,
@@ -498,6 +555,7 @@ fn pipeline_evidence_details(
     evidence_args: &EvidenceWriteArgs,
     target: &str,
     identity: Option<&str>,
+    report_context: PipelineReportContext<'_>,
     findings: &[layerfault::scanner::LayerScanResult],
     decision: &policy::PolicyDecision,
     exit: i32,
@@ -506,7 +564,12 @@ fn pipeline_evidence_details(
         return Ok(serde_json::Value::Null);
     }
     Ok(serde_json::to_value(pipeline_report(
-        target, identity, findings, decision, exit,
+        target,
+        identity,
+        report_context,
+        findings,
+        decision,
+        exit,
     ))?)
 }
 
@@ -514,13 +577,21 @@ fn emit_pipeline(
     args: &PipelineArgs,
     target: &str,
     identity: &str,
+    report_context: PipelineReportContext<'_>,
     findings: &[layerfault::scanner::LayerScanResult],
     decision: &policy::PolicyDecision,
     exit: i32,
 ) -> Result<()> {
     if args.json {
         json_stream::write_stdout_json(
-            &pipeline_report(target, Some(identity), findings, decision, exit),
+            &pipeline_report(
+                target,
+                Some(identity),
+                report_context,
+                findings,
+                decision,
+                exit,
+            ),
             true,
         )?;
     } else if args.jsonl {
@@ -528,7 +599,7 @@ fn emit_pipeline(
         layerfault::jsonl::emit_pipeline_jsonl(target, findings, &correlations, exit)?;
     } else if args.evidence_report {
         let correlations = layerfault::correlate::correlate(findings);
-        report::emit_evidence_report(identity, findings, &correlations, None);
+        report::emit_evidence_report(identity, findings, &correlations, report_context.coverage);
     } else if args.sarif {
         report::emit_sarif(&[report::ModelReport {
             model_name: target.to_owned(),

@@ -267,37 +267,7 @@ pub fn scan(
             .is_ok()
         {
             if let Ok(analysis) = pickle::analyze_bytes(&buf) {
-                if !analysis.dangerous.is_empty() {
-                    for danger in &analysis.dangerous {
-                        let subject = EvidenceSubject::member(&name);
-                        let site = analysis.site_for(danger);
-                        results.push(
-                            FindingBuilder::new(
-                                "LF-PICKLE-DANGEROUS-GLOBAL",
-                                CheckType::PickleStructure,
-                                ScanStatus::Fail,
-                            )
-                            .class(FindingClass::Structural)
-                            .confidence(Confidence::High)
-                            .digest(identity)
-                            .media_type(media)
-                            .subject(subject.clone())
-                            .detail(format!(
-                                "Pickle entry '{name}' references unsafe construct '{danger}'"
-                            ))
-                            .evidence(serialization_opcode(
-                                subject,
-                                site.map(|s| s.opcode_index).unwrap_or(0),
-                                site.map(|s| s.byte_offset).unwrap_or(0),
-                                serde_json::json!({
-                                    "opcode": site.map(|s| s.opcode).unwrap_or("GLOBAL"),
-                                    "dangerous": danger,
-                                }),
-                            ))
-                            .finish(),
-                        );
-                    }
-                }
+                append_pickle_analysis_findings(&mut results, &analysis, &name, identity, media);
             }
         }
     }
@@ -466,6 +436,77 @@ pub fn scan(
     Ok(results)
 }
 
+fn append_pickle_analysis_findings(
+    results: &mut Vec<LayerScanResult>,
+    analysis: &pickle::PickleAnalysis,
+    name: &str,
+    identity: &str,
+    media: &str,
+) {
+    if !analysis.dangerous.is_empty() {
+        for danger in &analysis.dangerous {
+            let subject = EvidenceSubject::member(name);
+            let site = analysis.site_for(danger);
+            results.push(
+                FindingBuilder::new(
+                    "LF-PICKLE-DANGEROUS-GLOBAL",
+                    CheckType::PickleStructure,
+                    ScanStatus::Fail,
+                )
+                .class(FindingClass::Structural)
+                .confidence(Confidence::High)
+                .digest(identity)
+                .media_type(media)
+                .subject(subject.clone())
+                .detail(format!(
+                    "Pickle entry '{name}' references unsafe construct '{danger}'"
+                ))
+                .evidence(serialization_opcode(
+                    subject,
+                    site.map(|s| s.opcode_index).unwrap_or(0),
+                    site.map(|s| s.byte_offset).unwrap_or(0),
+                    serde_json::json!({
+                        "opcode": site.map(|s| s.opcode).unwrap_or("GLOBAL"),
+                        "dangerous": danger,
+                    }),
+                ))
+                .finish(),
+            );
+        }
+        return;
+    }
+
+    for unknown in &analysis.unknown_globals {
+        let subject = EvidenceSubject::member(name);
+        let site = analysis.site_for(unknown);
+        results.push(
+            FindingBuilder::new(
+                "LF-PICKLE-UNKNOWN-GLOBAL",
+                CheckType::PickleStructure,
+                ScanStatus::Warn,
+            )
+            .class(FindingClass::ContentIndicator)
+            .confidence(Confidence::High)
+            .digest(identity)
+            .media_type(media)
+            .subject(subject.clone())
+            .detail(format!(
+                "Pickle entry '{name}' references custom class or callable '{unknown}'; review provenance before deserializing"
+            ))
+            .evidence(serialization_opcode(
+                subject,
+                site.map(|s| s.opcode_index).unwrap_or(0),
+                site.map(|s| s.byte_offset).unwrap_or(0),
+                serde_json::json!({
+                    "opcode": site.map(|s| s.opcode).unwrap_or("GLOBAL"),
+                    "unknown_global": unknown,
+                }),
+            ))
+            .finish(),
+        );
+    }
+}
+
 fn bounded_total_decompressed(current: u64, next: u64) -> Option<u64> {
     current
         .checked_add(next)
@@ -523,5 +564,24 @@ mod tests {
 
         let mut truncated = Cursor::new(vec![7u8; 1023]);
         assert!(stream_storage_entry(&mut truncated, 1024).is_err());
+    }
+
+    #[test]
+    fn pytorch_zip_preserves_unknown_pickle_globals_as_review_warnings() {
+        let analysis = pickle::analyze_bytes(b"c__main__\nPolicy\n.").expect("valid pickle");
+        let mut findings = Vec::new();
+        append_pickle_analysis_findings(
+            &mut findings,
+            &analysis,
+            "archive/data.pkl",
+            "sha256:test",
+            "application/x-pytorch",
+        );
+        assert_eq!(findings.len(), 1);
+        assert_eq!(
+            crate::policy::rule_id(&findings[0]),
+            "LF-PICKLE-UNKNOWN-GLOBAL"
+        );
+        assert_eq!(findings[0].status, ScanStatus::Warn);
     }
 }

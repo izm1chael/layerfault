@@ -23,6 +23,12 @@ pub const MAX_PRIORITY_TEXT_BYTES: usize = 32 * 1024 * 1024;
 pub const MAX_ARRAY_DEPTH: usize = 8;
 pub const DEFAULT_ALIGNMENT: u64 = 32;
 const MAX_CAPTURED_STRING_BYTES: usize = 1024 * 1024;
+// Microsoft's BitNet GGUF fork declares its I2_S dialect with file type 40.
+// In that dialect tensor type 36 is packed ternary data plus a 32-byte scale
+// trailer. Upstream ggml reserves 36 for a removed runtime-repacked type, so
+// the tensor type alone is not sufficient to opt into this layout.
+const BITNET_I2_S_FILE_TYPE: u64 = 40;
+const BITNET_I2_S_TENSOR_TYPE: u32 = 36;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -353,6 +359,10 @@ fn parse_reader<R: Read + Seek>(mut raw: R, file_len: u64) -> Result<GgufInvento
 
     let mut tensors = Vec::with_capacity(usize::try_from(tensor_count.min(100_000)).unwrap_or(0));
     let mut tensor_names = BTreeSet::new();
+    let uses_bitnet_i2_s_dialect = metadata
+        .get("general.file_type")
+        .and_then(GgufMetadataEntry::as_u64)
+        == Some(BITNET_I2_S_FILE_TYPE);
     for _ in 0..tensor_count {
         let name = reader.read_string(16 * 1024)?;
         if name.is_empty() {
@@ -374,7 +384,9 @@ fn parse_reader<R: Read + Seek>(mut raw: R, file_len: u64) -> Result<GgufInvento
             dimensions.push(dimension);
         }
         let tensor_type = reader.read_u32()?;
-        if matches!(tensor_type, 4 | 5 | 31 | 32 | 33 | 36 | 37 | 38) {
+        if matches!(tensor_type, 4 | 5 | 31 | 32 | 33 | 37 | 38)
+            || (tensor_type == BITNET_I2_S_TENSOR_TYPE && !uses_bitnet_i2_s_dialect)
+        {
             bail!("tensor '{name}' uses removed GGML type {tensor_type}");
         }
         let offset = reader.read_u64()?;
@@ -385,22 +397,35 @@ fn parse_reader<R: Read + Seek>(mut raw: R, file_len: u64) -> Result<GgufInvento
             .iter()
             .try_fold(1_u64, |acc, v| acc.checked_mul(*v))
             .ok_or_else(|| anyhow!("tensor '{name}' dimension product overflows u64"))?;
-        let byte_len = match tensor_layout(tensor_type) {
-            Some((block_elements, block_bytes)) => {
-                let first_dimension = dimensions[0];
-                if first_dimension % block_elements != 0 {
-                    bail!("tensor '{name}' first dimension {first_dimension} is not divisible by block size {block_elements} for type {tensor_type}");
-                }
-                if elements % block_elements != 0 {
-                    bail!("tensor '{name}' element count {elements} is not divisible by block size {block_elements} for type {tensor_type}");
-                }
-                let blocks = elements / block_elements;
-                let bytes = blocks.checked_mul(block_bytes).ok_or_else(|| {
-                    anyhow!("tensor '{name}' byte-size calculation overflows u64")
-                })?;
-                Some(bytes)
+        let byte_len = if tensor_type == BITNET_I2_S_TENSOR_TYPE {
+            if elements % 4 != 0 {
+                bail!(
+                    "tensor '{name}' element count {elements} is not divisible by 4 for BitNet I2_S"
+                );
             }
-            None => None,
+            Some(
+                (elements / 4).checked_add(32).ok_or_else(|| {
+                    anyhow!("tensor '{name}' byte-size calculation overflows u64")
+                })?,
+            )
+        } else {
+            match tensor_layout(tensor_type) {
+                Some((block_elements, block_bytes)) => {
+                    let first_dimension = dimensions[0];
+                    if first_dimension % block_elements != 0 {
+                        bail!("tensor '{name}' first dimension {first_dimension} is not divisible by block size {block_elements} for type {tensor_type}");
+                    }
+                    if elements % block_elements != 0 {
+                        bail!("tensor '{name}' element count {elements} is not divisible by block size {block_elements} for type {tensor_type}");
+                    }
+                    let blocks = elements / block_elements;
+                    let bytes = blocks.checked_mul(block_bytes).ok_or_else(|| {
+                        anyhow!("tensor '{name}' byte-size calculation overflows u64")
+                    })?;
+                    Some(bytes)
+                }
+                None => None,
+            }
         };
         tensors.push(GgufTensor {
             name,
@@ -777,6 +802,50 @@ mod tests {
         bytes.extend_from_slice(&tensor_type.to_le_bytes());
         bytes.extend_from_slice(&0_u64.to_le_bytes()); // offset
         bytes
+    }
+
+    fn bitnet_i2_s_gguf(name: &str, dimensions: &[u64]) -> Vec<u8> {
+        let key = b"general.file_type";
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(b"GGUF");
+        bytes.extend_from_slice(&3_u32.to_le_bytes());
+        bytes.extend_from_slice(&1_u64.to_le_bytes()); // tensor count
+        bytes.extend_from_slice(&1_u64.to_le_bytes()); // metadata count
+        bytes.extend_from_slice(&(key.len() as u64).to_le_bytes());
+        bytes.extend_from_slice(key);
+        bytes.extend_from_slice(&4_u32.to_le_bytes()); // UINT32 metadata
+        bytes.extend_from_slice(&(BITNET_I2_S_FILE_TYPE as u32).to_le_bytes());
+        bytes.extend_from_slice(&(name.len() as u64).to_le_bytes());
+        bytes.extend_from_slice(name.as_bytes());
+        bytes.extend_from_slice(&(dimensions.len() as u32).to_le_bytes());
+        for dimension in dimensions {
+            bytes.extend_from_slice(&dimension.to_le_bytes());
+        }
+        bytes.extend_from_slice(&BITNET_I2_S_TENSOR_TYPE.to_le_bytes());
+        bytes.extend_from_slice(&0_u64.to_le_bytes()); // offset
+        while !bytes.len().is_multiple_of(DEFAULT_ALIGNMENT as usize) {
+            bytes.push(0);
+        }
+        let elements = dimensions.iter().product::<u64>();
+        bytes.resize(bytes.len() + (elements / 4 + 32) as usize, 0);
+        bytes
+    }
+
+    #[test]
+    fn bitnet_i2_s_dialect_has_an_exact_bounded_layout() {
+        let bytes = bitnet_i2_s_gguf("bitnet_weight", &[4, 4]);
+        let inventory = parse_reader(Cursor::new(&bytes), bytes.len() as u64)
+            .expect("declared BitNet I2_S must parse");
+        assert_eq!(inventory.tensors[0].tensor_type, BITNET_I2_S_TENSOR_TYPE);
+        assert_eq!(inventory.tensors[0].byte_len, Some(36));
+        assert!(inventory.warnings.is_empty());
+    }
+
+    #[test]
+    fn upstream_type_36_remains_a_removed_structural_failure() {
+        let bytes = single_tensor_gguf("removed", &[4, 4], BITNET_I2_S_TENSOR_TYPE);
+        let err = validate_gguf_bytes(&bytes).expect_err("undeclared type 36 must stay removed");
+        assert!(err.to_string().contains("uses removed GGML type 36"));
     }
 
     /// Regression for corpus case 08-gguf-integer-overflow: a known tensor layout

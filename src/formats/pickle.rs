@@ -18,6 +18,7 @@ use std::path::Path;
 use std::time::Instant;
 
 const MAX_PICKLE_MEMBERS: usize = 256;
+const MAX_JOBLIB_FRAME_CANDIDATES: usize = 4_096;
 const MAX_PICKLE_MEMBER_BYTES: u64 = 64 * 1024 * 1024;
 const MAX_TOTAL_PICKLE_BYTES: u64 = 256 * 1024 * 1024;
 const MAX_DIFFERENTIAL_BYTES: u64 = 32 * 1024 * 1024;
@@ -53,11 +54,14 @@ const SAFE_VALUE_CONSTRUCTORS: &[&str] = &[
     // arbitrary application classes and executable primitives remain unknown
     // or dangerous rather than being covered by a broad framework prefix.
     "torch.device",
+    "torch.FloatStorage",
     "torch.nn.modules.activation.SiLU",
+    "torch.nn.modules.activation.ReLU",
     "torch.nn.modules.batchnorm.BatchNorm2d",
     "torch.nn.modules.container.ModuleList",
     "torch.nn.modules.container.Sequential",
     "torch.nn.modules.conv.Conv2d",
+    "torch.nn.modules.linear.Linear",
     "torch.nn.modules.pooling.MaxPool2d",
     "torch.nn.modules.upsampling.Upsample",
     "transformers.training_args.TrainingArguments",
@@ -218,7 +222,7 @@ pub fn scan(
         });
     }
     if count >= 2 && magic[0] == 0x1f && magic[1] == 0x8b {
-        return Ok(match scan_gzip(file, identity, media, budget) {
+        return Ok(match scan_gzip(path, file, identity, media, budget) {
             Ok(results) => results,
             Err(error) => vec![FindingBuilder::new(
                 "LF-PICKLE-MALFORMED",
@@ -238,6 +242,16 @@ pub fn scan(
             .finish()],
         });
     }
+    if count >= 2 && looks_like_zlib(&magic[..2]) {
+        return Ok(match scan_zlib(path, file, identity, media, budget) {
+            Ok(results) => results,
+            Err(error) => vec![opaque_compressed_finding(
+                identity,
+                media,
+                format!("raw zlib-compressed pickle stream could not be inspected: {error}"),
+            )],
+        });
+    }
     let mut results = vec![scan_stream(
         file.try_clone()?,
         size,
@@ -252,12 +266,197 @@ pub fn scan(
     Ok(results)
 }
 
-/// A gzip-compressed pickle/joblib stream: joblib's default `compress=True`
-/// wraps the pickle bytes in gzip, and can additionally wrap them in zlib
-/// underneath (e.g. `gzip(zlib(pickle))`). Decompress transparently, bounded
-/// by [`MAX_PICKLE_MEMBER_BYTES`], so real pickle opcode evidence is produced
-/// instead of failing to parse the compressed bytes as if they were raw pickle.
+/// A raw zlib-compressed pickle/joblib stream. Joblib's default compressor
+/// writes this envelope directly (without a gzip header), so treating its
+/// leading `0x78` byte as a pickle opcode produces a false malformed-stream
+/// BLOCK. Decompress and analyze the actual opcode stream under the same
+/// bounded resource accounting used for archive members.
+fn scan_zlib(
+    path: &Path,
+    file: &File,
+    identity: &str,
+    media: &str,
+    budget: &crate::budget::ScanBudget,
+) -> Result<Vec<LayerScanResult>> {
+    let compressed_len = file.metadata()?.len();
+    if compressed_len < 6 {
+        bail!("raw zlib stream is truncated before its checksum");
+    }
+    let mut trailer_reader = file.try_clone()?;
+    trailer_reader.seek(SeekFrom::End(-4))?;
+    let mut trailer = [0u8; 4];
+    trailer_reader.read_exact(&mut trailer)?;
+
+    let mut reader = file.try_clone()?;
+    reader.seek(SeekFrom::Start(0))?;
+    let bytes = read_bounded_decompressed(
+        ZlibDecoder::new(reader),
+        "raw zlib-compressed pickle stream",
+    )?;
+    let expected_checksum = u32::from_be_bytes(trailer);
+    let actual_checksum = adler32(&bytes);
+    if actual_checksum != expected_checksum {
+        bail!(
+            "raw zlib stream checksum mismatch (expected {expected_checksum:08x}, got {actual_checksum:08x})"
+        );
+    }
+    scan_decompressed_pickle(
+        bytes,
+        identity,
+        media,
+        budget,
+        "raw zlib-compressed pickle stream",
+        is_joblib_path(path),
+    )
+}
+
+fn adler32(bytes: &[u8]) -> u32 {
+    const MOD_ADLER: u32 = 65_521;
+    let mut a = 1u32;
+    let mut b = 0u32;
+    for chunk in bytes.chunks(5_552) {
+        for byte in chunk {
+            a += u32::from(*byte);
+            b += a;
+        }
+        a %= MOD_ADLER;
+        b %= MOD_ADLER;
+    }
+    (b << 16) | a
+}
+
+fn scan_decompressed_pickle(
+    bytes: Vec<u8>,
+    identity: &str,
+    media: &str,
+    budget: &crate::budget::ScanBudget,
+    operation: &str,
+    joblib_framing: bool,
+) -> Result<Vec<LayerScanResult>> {
+    budget
+        .consume(
+            crate::budget::BudgetDimension::DecompressedBytes,
+            bytes.len() as u64,
+            operation,
+        )
+        .map_err(|error| anyhow!("decompressed-bytes budget exhausted: {error}"))?;
+    let len = bytes.len() as u64;
+    let mut results = if joblib_framing {
+        scan_joblib_stream(&bytes, identity, media, budget)
+    } else {
+        vec![scan_stream(
+            Cursor::new(bytes.as_slice()),
+            len,
+            identity,
+            media,
+            None,
+            budget,
+        )]
+    };
+    if !joblib_framing {
+        results.extend(parser_differential_bytes(
+            &bytes, identity, media, None, budget,
+        ));
+    }
+    Ok(results)
+}
+
+fn is_joblib_path(path: &Path) -> bool {
+    path.file_name()
+        .and_then(|name| name.to_str())
+        .is_some_and(|name| name.to_ascii_lowercase().contains(".joblib"))
+}
+
+fn scan_joblib_stream(
+    bytes: &[u8],
+    identity: &str,
+    media: &str,
+    budget: &crate::budget::ScanBudget,
+) -> Vec<LayerScanResult> {
+    let subject = pickle_subject(identity, media, None);
+    let started = Instant::now();
+    match analyze_reader_inner(
+        Cursor::new(bytes),
+        bytes.len() as u64,
+        Some(budget),
+        None,
+        true,
+    ) {
+        Ok(analysis) => {
+            let partial = analysis.completeness == AnalysisCompleteness::Partial;
+            let mut results = vec![finding_from_analysis(
+                analysis,
+                identity,
+                media,
+                "joblib pickle stream",
+                subject,
+                started,
+            )];
+            if partial {
+                results.push(opaque_joblib_regions_finding(identity, media));
+            }
+            results
+        }
+        Err(error) => vec![malformed_pickle_finding(
+            identity,
+            media,
+            "joblib pickle stream",
+            subject,
+            error,
+            started,
+        )],
+    }
+}
+
+fn opaque_joblib_regions_finding(identity: &str, media: &str) -> LayerScanResult {
+    FindingBuilder::new(
+        "LF-PICKLE-OPAQUE-COMPRESSED",
+        CheckType::PickleStructure,
+        ScanStatus::Warn,
+    )
+    .class(FindingClass::Compatibility)
+    .confidence(Confidence::High)
+    .digest(identity)
+    .media_type(media)
+    .subject(EvidenceSubject::identity(identity, media).with_sha256(Some(identity.to_owned())))
+    .detail(
+        "Joblib opcode segments were analyzed, but embedded NumPy array regions are data-framed outside the pickle opcode stream",
+    )
+    .match_note("joblib NumPy array data regions required bounded frame resynchronization")
+    .evidence_unavailable(
+        "the opaque regions are raw array data rather than pickle opcodes; surrounding opcode segments were still analyzed",
+    )
+    .finish()
+}
+
+fn opaque_compressed_finding(identity: &str, media: &str, reason: String) -> LayerScanResult {
+    FindingBuilder::new(
+        "LF-PICKLE-OPAQUE-COMPRESSED",
+        CheckType::PickleStructure,
+        ScanStatus::Warn,
+    )
+    .class(FindingClass::Compatibility)
+    .confidence(Confidence::High)
+    .digest(identity)
+    .media_type(media)
+    .subject(EvidenceSubject::identity(identity, media).with_sha256(Some(identity.to_owned())))
+    .detail(format!(
+        "Compressed pickle/joblib content could not be inspected safely: {reason}"
+    ))
+    .match_note(reason)
+    .evidence_unavailable(
+        "the compressed stream could not be decoded within the configured bounds, so no pickle opcode could be attributed",
+    )
+    .finish()
+}
+
+/// A gzip-compressed pickle/joblib stream. Some producers use gzip directly,
+/// and legacy/nested packages can additionally wrap zlib underneath (for
+/// example `gzip(zlib(pickle))`). Decompress transparently, bounded by
+/// [`MAX_PICKLE_MEMBER_BYTES`], so real pickle opcode evidence is produced
+/// instead of failing to parse compressed bytes as if they were raw pickle.
 fn scan_gzip(
+    path: &Path,
     file: &File,
     identity: &str,
     media: &str,
@@ -275,19 +474,14 @@ fn scan_gzip(
     } else {
         decompressed
     };
-    let len = bytes.len() as u64;
-    let mut results = vec![scan_stream(
-        Cursor::new(bytes.clone()),
-        len,
+    scan_decompressed_pickle(
+        bytes,
         identity,
         media,
-        None,
         budget,
-    )];
-    results.extend(parser_differential_bytes(
-        &bytes, identity, media, None, budget,
-    ));
-    Ok(results)
+        "gzip-compressed pickle stream",
+        is_joblib_path(path),
+    )
 }
 
 fn looks_like_zlib(head: &[u8]) -> bool {
@@ -384,35 +578,44 @@ fn scan_stream<R: Read + Seek>(
     let subject = pickle_subject(identity, media, member);
     match analyze_reader(reader, len, Some(budget)) {
         Ok(analysis) => finding_from_analysis(analysis, identity, media, &label, subject, started),
-        Err(error) => {
-            let offset = pickle_error_offset(&error);
-            let mut builder = FindingBuilder::new(
-                "LF-PICKLE-MALFORMED",
-                CheckType::PickleStructure,
-                ScanStatus::Fail,
-            )
-            .class(FindingClass::Structural)
-            .confidence(Confidence::High)
-            .digest(identity)
-            .media_type(media)
-            .subject(subject.clone())
-            .detail(format!("Malformed or unsafe {label}: {error}"))
-            .match_note(format!("bounded pickle opcode parsing failed for {label}"))
-            .started(started);
-            builder = match offset {
-                Some(offset) => builder.evidence(byte_range_evidence(
-                    subject,
-                    offset,
-                    1,
-                    "Parsing failed at this byte offset in the opcode stream",
-                )),
-                None => builder.evidence_unavailable(
-                    "the parser rejected the stream before a specific byte offset could be attributed",
-                ),
-            };
-            builder.finish()
-        }
+        Err(error) => malformed_pickle_finding(identity, media, &label, subject, error, started),
     }
+}
+
+fn malformed_pickle_finding(
+    identity: &str,
+    media: &str,
+    label: &str,
+    subject: EvidenceSubject,
+    error: anyhow::Error,
+    started: Instant,
+) -> LayerScanResult {
+    let offset = pickle_error_offset(&error);
+    let mut builder = FindingBuilder::new(
+        "LF-PICKLE-MALFORMED",
+        CheckType::PickleStructure,
+        ScanStatus::Fail,
+    )
+    .class(FindingClass::Structural)
+    .confidence(Confidence::High)
+    .digest(identity)
+    .media_type(media)
+    .subject(subject.clone())
+    .detail(format!("Malformed or unsafe {label}: {error}"))
+    .match_note(format!("bounded pickle opcode parsing failed for {label}"))
+    .started(started);
+    builder = match offset {
+        Some(offset) => builder.evidence(byte_range_evidence(
+            subject,
+            offset,
+            1,
+            "Parsing failed at this byte offset in the opcode stream",
+        )),
+        None => builder.evidence_unavailable(
+            "the parser rejected the stream before a specific byte offset could be attributed",
+        ),
+    };
+    builder.finish()
 }
 
 /// Best-effort extraction of the byte offset embedded in a parser error
@@ -738,7 +941,7 @@ pub(crate) fn analyze_reader<R: Read + Seek>(
     len: u64,
     budget: Option<&crate::budget::ScanBudget>,
 ) -> Result<PickleAnalysis> {
-    analyze_reader_inner(reader, len, budget, None)
+    analyze_reader_inner(reader, len, budget, None, false)
 }
 
 /// Core decode loop shared by every caller of `analyze_reader`. `transcript`,
@@ -752,6 +955,7 @@ fn analyze_reader_inner<R: Read + Seek>(
     len: u64,
     budget: Option<&crate::budget::ScanBudget>,
     mut transcript: Option<&mut Vec<parser_differential::TranscriptEntry>>,
+    joblib_framing: bool,
 ) -> Result<PickleAnalysis> {
     if len == 0 {
         bail!("empty pickle stream");
@@ -849,7 +1053,9 @@ fn analyze_reader_inner<R: Read + Seek>(
             b'a' => {
                 state.pop();
             }
-            b'e' => state.pop_to_mark(Some(StackValue::Other))?,
+            // APPENDS mutates the list below MARK; it does not push a new
+            // stack value after consuming the marked items.
+            b'e' => state.pop_to_mark(None)?,
             b'l' | b't' | b'd' | 0x91 => state.pop_to_mark(Some(StackValue::Other))?,
             0x85 => {
                 state.pop();
@@ -870,7 +1076,9 @@ fn analyze_reader_inner<R: Read + Seek>(
                 state.pop();
                 state.pop();
             }
-            b'u' | 0x90 => state.pop_to_mark(Some(StackValue::Other))?,
+            // SETITEMS/ADDITEMS mutate the container below MARK and leave
+            // that existing container on the stack.
+            b'u' | 0x90 => state.pop_to_mark(None)?,
             b'g' => {
                 let index = parse_decimal_index(&read_line_string(&mut reader, &mut pos, len)?)?;
                 state.push_memo(index)?;
@@ -1017,10 +1225,29 @@ fn analyze_reader_inner<R: Read + Seek>(
             b'.' => {
                 saw_stop = true;
             }
-            other => bail!(
-                "unknown pickle opcode 0x{other:02x} at offset {}",
-                pos.saturating_sub(1)
-            ),
+            other => {
+                if joblib_framing
+                    && matches!(
+                        state.stack.last(),
+                        Some(StackValue::Constructed(name))
+                            if name == "joblib.numpy_pickle.NumpyArrayWrapper"
+                    )
+                {
+                    if let Some(frame_offset) =
+                        find_next_plausible_pickle_frame(&mut reader, pos, len)?
+                    {
+                        state.analysis.completeness = AnalysisCompleteness::Partial;
+                        state.pop();
+                        state.push(StackValue::Other)?;
+                        pos = frame_offset;
+                        continue;
+                    }
+                }
+                bail!(
+                    "unknown pickle opcode 0x{other:02x} at offset {}",
+                    pos.saturating_sub(1)
+                )
+            }
         }
         if let Some(transcript) = transcript.as_deref_mut() {
             if transcript.len() >= MAX_PRIMARY_TRANSCRIPT_OPCODES {
@@ -1047,6 +1274,49 @@ fn analyze_reader_inner<R: Read + Seek>(
         bail!("pickle stream ended without STOP opcode");
     }
     Ok(state.analysis)
+}
+
+/// Locate the next protocol-4/5 FRAME boundary after a joblib raw-array
+/// region. A candidate is accepted only when its declared frame length fits
+/// entirely within the remaining bounded stream; a random `0x95` byte inside
+/// array data is overwhelmingly likely to fail that 64-bit length check.
+/// Resynchronized scans are still explicitly marked partial.
+fn find_next_plausible_pickle_frame<R: Read + Seek>(
+    reader: &mut R,
+    start: u64,
+    len: u64,
+) -> Result<Option<u64>> {
+    let mut candidate = start;
+    let mut candidate_count = 0usize;
+    let mut marker = [0u8; 1];
+    let mut declared = [0u8; 8];
+    while candidate.saturating_add(9) <= len {
+        reader.seek(SeekFrom::Start(candidate))?;
+        reader.read_exact(&mut marker)?;
+        if marker[0] == 0x95 {
+            candidate_count = candidate_count.saturating_add(1);
+            if candidate_count > MAX_JOBLIB_FRAME_CANDIDATES {
+                return Ok(None);
+            }
+            reader.read_exact(&mut declared)?;
+            let frame_len = u64::from_le_bytes(declared);
+            if frame_len > 0
+                && frame_len <= MAX_DIFFERENTIAL_BYTES
+                && frame_len <= len.saturating_sub(candidate + 9)
+            {
+                let capacity = usize::try_from(frame_len)
+                    .context("joblib pickle frame length does not fit usize")?;
+                let mut payload = vec![0u8; capacity];
+                reader.read_exact(&mut payload)?;
+                if parser_differential::structurally_valid_opcode_region(&payload) {
+                    reader.seek(SeekFrom::Start(candidate))?;
+                    return Ok(Some(candidate));
+                }
+            }
+        }
+        candidate = candidate.saturating_add(1);
+    }
+    Ok(None)
 }
 
 /// Message substrings that indicate the primary parser fully understood the
@@ -1100,7 +1370,13 @@ pub(crate) fn primary_reader_outcome(
 ) -> parser_differential::ReaderOutcome {
     let mut transcript = Vec::new();
     let cursor = Cursor::new(bytes);
-    match analyze_reader_inner(cursor, bytes.len() as u64, budget, Some(&mut transcript)) {
+    match analyze_reader_inner(
+        cursor,
+        bytes.len() as u64,
+        budget,
+        Some(&mut transcript),
+        false,
+    ) {
         Ok(_) => parser_differential::ReaderOutcome::Accepted(transcript),
         Err(error) => classify_primary_error(&error, transcript.last().map(|entry| entry.offset)),
     }
@@ -1394,10 +1670,14 @@ fn is_explicit_danger(value: &str) -> bool {
         || value.contains(".__setstate__")
         || value
             .split('.')
-            // __builtin__ is Python 2's ordinary builtins module name, not
-            // a user-defined dunder method. Its explicitly dangerous members
-            // are covered above by the exact-danger list.
-            .any(|part| part != "__builtin__" && part.starts_with("__") && part.ends_with("__"))
+            // These are ordinary Python module names, not user-defined dunder
+            // methods. Their explicitly dangerous members remain covered by
+            // the exact-danger list above.
+            .any(|part| {
+                !matches!(part, "__builtin__" | "__main__" | "__mp_main__")
+                    && part.starts_with("__")
+                    && part.ends_with("__")
+            })
 }
 
 fn read_u8<R: Read>(reader: &mut R, pos: &mut u64, len: u64) -> Result<u8> {
@@ -1520,6 +1800,57 @@ fn unquote_protocol0(mut value: String) -> String {
 mod tests {
     use super::*;
 
+    fn zlib_bytes(bytes: &[u8]) -> Vec<u8> {
+        use flate2::write::ZlibEncoder;
+        use flate2::Compression;
+        use std::io::Write;
+
+        let mut encoder = ZlibEncoder::new(Vec::new(), Compression::default());
+        encoder.write_all(bytes).expect("compress pickle fixture");
+        encoder.finish().expect("finish pickle fixture")
+    }
+
+    fn scan_zlib_bytes(
+        bytes: &[u8],
+        budget: &crate::budget::ScanBudget,
+    ) -> Result<Vec<LayerScanResult>> {
+        scan_named_zlib_bytes(bytes, ".pkl", budget)
+    }
+
+    fn scan_named_zlib_bytes(
+        bytes: &[u8],
+        suffix: &str,
+        budget: &crate::budget::ScanBudget,
+    ) -> Result<Vec<LayerScanResult>> {
+        use std::io::Write;
+
+        let mut file = tempfile::Builder::new().suffix(suffix).tempfile()?;
+        file.write_all(bytes)?;
+        scan(
+            file.path(),
+            file.as_file(),
+            file.as_file().metadata()?.len(),
+            "sha256:zlib-test",
+            "application/x-python-pickle",
+            budget,
+        )
+    }
+
+    fn framed_joblib_stream(after_array: &[u8]) -> Vec<u8> {
+        let module = b"joblib.numpy_pickle";
+        let class = b"NumpyArrayWrapper";
+        let mut bytes = vec![0x80, 0x05, 0x8c, module.len() as u8];
+        bytes.extend_from_slice(module);
+        bytes.extend_from_slice(&[0x8c, class.len() as u8]);
+        bytes.extend_from_slice(class);
+        bytes.extend_from_slice(&[0x93, b')', 0x81, b'}', b'b']);
+        bytes.extend_from_slice(&[0x0e; 32]);
+        bytes.push(0x95);
+        bytes.extend_from_slice(&(after_array.len() as u64).to_le_bytes());
+        bytes.extend_from_slice(after_array);
+        bytes
+    }
+
     fn global(module: &str, name: &str) -> Vec<u8> {
         format!("c{module}\n{name}\n.").into_bytes()
     }
@@ -1541,6 +1872,100 @@ mod tests {
             .dangerous
             .iter()
             .any(|value| value.contains("os.system")));
+        Ok(())
+    }
+
+    #[test]
+    fn raw_zlib_joblib_is_opcode_analyzed() -> Result<()> {
+        let budget =
+            crate::budget::ScanBudget::new(crate::budget::ScanBudgetProfile::Default.limits())?;
+        let results = scan_zlib_bytes(&zlib_bytes(b"\x80\x02N."), &budget)?;
+        assert!(!results.iter().any(|finding| {
+            matches!(
+                crate::policy::rule_id(finding).as_str(),
+                "LF-PICKLE-MALFORMED" | "LF-PICKLE-OPAQUE-COMPRESSED"
+            )
+        }));
+        Ok(())
+    }
+
+    #[test]
+    fn raw_zlib_joblib_preserves_dangerous_global_block() -> Result<()> {
+        let budget =
+            crate::budget::ScanBudget::new(crate::budget::ScanBudgetProfile::Default.limits())?;
+        let results = scan_zlib_bytes(&zlib_bytes(b"cos\nsystem\n)R."), &budget)?;
+        assert!(results.iter().any(|finding| {
+            crate::policy::rule_id(finding) == "LF-PICKLE-DANGEROUS-GLOBAL"
+                && finding.status == ScanStatus::Fail
+        }));
+        Ok(())
+    }
+
+    #[test]
+    fn raw_zlib_joblib_resynchronizes_after_array_regions() -> Result<()> {
+        let budget =
+            crate::budget::ScanBudget::new(crate::budget::ScanBudgetProfile::Default.limits())?;
+        let stream = framed_joblib_stream(b"N.");
+        let results = scan_named_zlib_bytes(&zlib_bytes(&stream), ".joblib", &budget)?;
+        assert!(results.iter().any(|finding| {
+            crate::policy::rule_id(finding) == "LF-PICKLE-OPAQUE-COMPRESSED"
+                && finding.status == ScanStatus::Warn
+        }));
+        assert!(!results
+            .iter()
+            .any(|finding| crate::policy::rule_id(finding) == "LF-PICKLE-MALFORMED"));
+        Ok(())
+    }
+
+    #[test]
+    fn raw_zlib_joblib_scans_dangerous_globals_after_array_regions() -> Result<()> {
+        let budget =
+            crate::budget::ScanBudget::new(crate::budget::ScanBudgetProfile::Default.limits())?;
+        let stream = framed_joblib_stream(b"cos\nsystem\n)R.");
+        let results = scan_named_zlib_bytes(&zlib_bytes(&stream), ".joblib", &budget)?;
+        assert!(results.iter().any(|finding| {
+            crate::policy::rule_id(finding) == "LF-PICKLE-DANGEROUS-GLOBAL"
+                && finding.status == ScanStatus::Fail
+        }));
+        assert!(results.iter().any(|finding| {
+            crate::policy::rule_id(finding) == "LF-PICKLE-OPAQUE-COMPRESSED"
+                && finding.status == ScanStatus::Warn
+        }));
+        Ok(())
+    }
+
+    #[test]
+    fn corrupt_raw_zlib_joblib_is_opaque_not_malformed() -> Result<()> {
+        let budget =
+            crate::budget::ScanBudget::new(crate::budget::ScanBudgetProfile::Default.limits())?;
+        let results = scan_zlib_bytes(&[0x78, 0x9c, 0x00], &budget)?;
+        assert!(results.iter().any(|finding| {
+            crate::policy::rule_id(finding) == "LF-PICKLE-OPAQUE-COMPRESSED"
+                && finding.status == ScanStatus::Warn
+        }));
+        assert!(!results
+            .iter()
+            .any(|finding| crate::policy::rule_id(finding) == "LF-PICKLE-MALFORMED"));
+        Ok(())
+    }
+
+    #[test]
+    fn raw_zlib_joblib_over_budget_is_opaque_not_malformed() -> Result<()> {
+        let mut limits = crate::budget::ScanBudgetProfile::Constrained.limits();
+        limits.decompressed_bytes = 128;
+        let budget = crate::budget::ScanBudget::new(limits)?;
+        let results = scan_zlib_bytes(&zlib_bytes(&vec![b'N'; 1024]), &budget)?;
+        assert!(results.iter().any(|finding| {
+            crate::policy::rule_id(finding) == "LF-PICKLE-OPAQUE-COMPRESSED"
+                && finding.status == ScanStatus::Warn
+                && finding
+                    .detail
+                    .as_deref()
+                    .is_some_and(|detail| detail.contains("decompressed-bytes budget"))
+        }));
+        assert!(!results
+            .iter()
+            .any(|finding| crate::policy::rule_id(finding) == "LF-PICKLE-MALFORMED"));
         Ok(())
     }
 
@@ -1630,6 +2055,21 @@ mod tests {
     }
 
     #[test]
+    fn main_module_custom_class_is_unknown_not_explicit_execution() -> Result<()> {
+        let analysis = analyze_bytes(&global("__main__", "Policy"))?;
+        assert!(analysis.dangerous.is_empty());
+        assert!(analysis.unknown_globals.contains("__main__.Policy"));
+        Ok(())
+    }
+
+    #[test]
+    fn explicit_dunder_callable_remains_dangerous() -> Result<()> {
+        let analysis = analyze_bytes(&global("acme.model", "__reduce__"))?;
+        assert!(analysis.dangerous.contains("acme.model.__reduce__"));
+        Ok(())
+    }
+
+    #[test]
     fn persistent_id_persid_emits_rule() {
         let bytes = b"Pexternal_ref\n.";
         let subject = EvidenceSubject::identity("sha256:abcd", "application/octet-stream");
@@ -1715,6 +2155,9 @@ mod tests {
             ("_codecs", "encode"),
             ("argparse", "Namespace"),
             ("signal", "Signals"),
+            ("torch", "FloatStorage"),
+            ("torch.nn.modules.activation", "ReLU"),
+            ("torch.nn.modules.linear", "Linear"),
         ] {
             let bytes = format!("c{module}\n{name}\n)R.");
             let analysis = analyze_bytes(bytes.as_bytes())?;

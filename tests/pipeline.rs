@@ -28,11 +28,40 @@ fn pipeline_json_reports_clean_artifact_and_risk_shape() {
     );
     let value: Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(value["decision"], "PASS");
+    assert_eq!(value["coverage"]["complete"], true);
+    assert_eq!(value["coverage"]["files_discovered"], 1);
+    assert_eq!(value["coverage"]["files_scanned"], 1);
+    assert!(value.get("merkle_identity").is_none());
     assert!(value["findings"]
         .as_array()
         .unwrap()
         .iter()
         .all(|finding| finding["risk"].is_object()));
+    let _ = fs::remove_file(path);
+}
+
+#[test]
+fn pipeline_unknown_artifact_reports_incomplete_coverage() {
+    let path = std::env::temp_dir().join(format!(
+        "layerfault-pipeline-unknown-{}.blob",
+        std::process::id()
+    ));
+    fs::write(&path, b"opaque artifact bytes").unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_layerfault"))
+        .args(["pipeline", path.to_str().unwrap(), "--json"])
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(1));
+    let value: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(value["coverage"]["complete"], false);
+    assert_eq!(value["coverage"]["files_discovered"], 1);
+    assert_eq!(value["coverage"]["files_scanned"], 0);
+    assert_eq!(value["coverage"]["omitted"], 1);
+    assert!(value["coverage"]["reasons"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|reason| reason.as_str().unwrap().contains("no structural parser")));
     let _ = fs::remove_file(path);
 }
 
@@ -50,6 +79,11 @@ fn pipeline_preserves_blocking_exit_for_unsafe_serialization() {
     assert_eq!(output.status.code(), Some(3));
     let value: Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(value["decision"], "BLOCK");
+    assert_eq!(value["coverage"]["complete"], true);
+    assert!(value["coverage"]["files_scanned"].as_u64().unwrap() >= 1);
+    assert!(value["merkle_identity"]
+        .as_str()
+        .is_some_and(|identity| identity.starts_with("lfpkg:v2:sha256:")));
     assert!(value["findings"]
         .as_array()
         .unwrap()

@@ -434,6 +434,10 @@ mod tests {
                     .iter()
                     .any(|value| value.contains("LF-PICKLE-OPAQUE-COMPRESSED"))
         }));
+        assert!(
+            !report.coverage.complete,
+            "opaque serialization content must remain visible as incomplete coverage"
+        );
         assert!(report
             .files
             .iter()

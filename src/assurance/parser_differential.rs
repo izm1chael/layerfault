@@ -545,6 +545,37 @@ fn consume_opcode_argument(
     }
 }
 
+/// Validate that a bounded byte region consists entirely of documented
+/// protocol 0-5 opcodes and their complete stream-level arguments.
+///
+/// This deliberately performs no value-stack or memo interpretation. It is
+/// used by the joblib reader only to distinguish real declared FRAME payloads
+/// from coincidental `0x95` bytes inside raw NumPy array data.
+pub(crate) fn structurally_valid_opcode_region(bytes: &[u8]) -> bool {
+    if bytes.is_empty() {
+        return false;
+    }
+    let mut position = 0usize;
+    let mut opcodes = 0usize;
+    while position < bytes.len() {
+        if opcodes >= MAX_SKELETON_OPCODES {
+            return false;
+        }
+        opcodes += 1;
+        let start = position as u64;
+        let op = bytes[position];
+        position += 1;
+        position = match consume_opcode_argument(bytes, position, start, op) {
+            Ok(next) => next,
+            Err(_) => return false,
+        };
+        if op == b'.' && position != bytes.len() {
+            return false;
+        }
+    }
+    true
+}
+
 /// Independently authored structural reader used only as a disagreement
 /// detector. It deliberately does not resolve stack semantics or declare a
 /// pickle safe; it only walks the byte stream and reports what it finds.
