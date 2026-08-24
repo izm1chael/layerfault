@@ -20,6 +20,7 @@ const MAX_ZIP_MEMBERS: usize = 16_384;
 const MAX_MEMBER_BYTES: u64 = 64 * 1024 * 1024;
 const MAX_TOTAL_DECOMPRESSED_BYTES: u64 = 2 * 1024 * 1024 * 1024;
 const MAX_MEMBER_PATH_BYTES: usize = 4096;
+const STORAGE_STREAM_BUFFER_BYTES: usize = 1024 * 1024;
 
 /// Inspect a PyTorch ZIP container, TorchScript model, or torch.package archive.
 pub fn scan(
@@ -89,7 +90,7 @@ pub fn scan(
     let mut member_names = Vec::new();
     let mut pickle_entries = Vec::new();
     let mut code_entries = Vec::new();
-    let mut storage_entries = BTreeSet::new();
+    let mut storage_entries = Vec::new();
 
     // Classification features
     let mut is_torchscript = false;
@@ -220,7 +221,7 @@ pub fn scan(
         }
 
         if raw_name.contains("data/") || raw_name.starts_with("archive/data/") {
-            storage_entries.insert(raw_name.clone());
+            storage_entries.push((raw_name.clone(), entry_size, i));
         }
 
         if raw_name.to_ascii_lowercase().ends_with(".pkl") {
@@ -372,6 +373,64 @@ pub fn scan(
         }
     }
 
+    // Tensor storage is raw numeric data, so it has no executable syntax to
+    // interpret. Still stream every bounded member to validate decompression
+    // and ZIP CRCs without materialising large shards in memory or on disk.
+    let mut storage_bytes_validated = 0u64;
+    for (name, declared_size, idx) in storage_entries {
+        let mut zip_entry = match archive.by_index(idx) {
+            Ok(entry) => entry,
+            Err(err) => {
+                let subject = EvidenceSubject::member(&name);
+                results.push(
+                    FindingBuilder::new(
+                        "LF-PYTORCH-CORRUPT-ENTRY",
+                        CheckType::LayerPolicy,
+                        ScanStatus::Fail,
+                    )
+                    .class(FindingClass::Structural)
+                    .confidence(Confidence::High)
+                    .digest(identity)
+                    .media_type(media)
+                    .subject(subject.clone())
+                    .detail(format!(
+                        "Unable to reopen PyTorch storage entry '{name}': {err}"
+                    ))
+                    .evidence(file_member(subject, serde_json::json!({ "name": name })))
+                    .finish(),
+                );
+                continue;
+            }
+        };
+        match stream_storage_entry(&mut zip_entry, declared_size) {
+            Ok(validated) => {
+                storage_bytes_validated = storage_bytes_validated.saturating_add(validated)
+            }
+            Err(err) => {
+                let subject = EvidenceSubject::member(&name);
+                results.push(
+                    FindingBuilder::new(
+                        "LF-PYTORCH-CORRUPT-ENTRY",
+                        CheckType::LayerPolicy,
+                        ScanStatus::Fail,
+                    )
+                    .class(FindingClass::Structural)
+                    .confidence(Confidence::High)
+                    .digest(identity)
+                    .media_type(media)
+                    .subject(subject.clone())
+                    .detail(format!("PyTorch tensor storage '{name}' failed bounded streaming validation: {err}"))
+                    .evidence(structural_invariant(
+                        subject,
+                        "PyTorch tensor storage streaming validation failed",
+                        serde_json::json!({ "name": name, "declared_bytes": declared_size, "error": err }),
+                    ))
+                    .finish(),
+                );
+            }
+        }
+    }
+
     // Emit capability / classification finding if no blocking failures were recorded
     let role_finding_id = if is_torchpackage {
         "LF-TORCHPACKAGE-STRUCTURAL"
@@ -390,8 +449,9 @@ pub fn scan(
             .media_type(media)
             .subject(subject.clone())
             .detail(format!(
-            "PyTorch container analyzed statically with zero execution: {} members inspected ({})",
+            "PyTorch container analyzed statically with zero execution: {} members inspected; {} tensor-storage bytes streamed and CRC-validated ({})",
             member_names.len(),
+            storage_bytes_validated,
             if is_torchpackage {
                 "torch.package layout"
             } else if is_torchscript {
@@ -412,9 +472,35 @@ fn bounded_total_decompressed(current: u64, next: u64) -> Option<u64> {
         .filter(|sum| *sum <= MAX_TOTAL_DECOMPRESSED_BYTES)
 }
 
+fn stream_storage_entry(reader: &mut impl Read, declared_size: u64) -> Result<u64, String> {
+    let mut total = 0u64;
+    let mut buffer = [0u8; STORAGE_STREAM_BUFFER_BYTES];
+    loop {
+        let read = reader.read(&mut buffer).map_err(|err| err.to_string())?;
+        if read == 0 {
+            break;
+        }
+        total = total
+            .checked_add(read as u64)
+            .ok_or_else(|| "storage byte count overflow".to_owned())?;
+        if total > declared_size {
+            return Err(format!(
+                "read {total} bytes, exceeding declared size {declared_size}"
+            ));
+        }
+    }
+    if total != declared_size {
+        return Err(format!(
+            "read {total} bytes, expected declared size {declared_size}"
+        ));
+    }
+    Ok(total)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::Cursor;
 
     #[test]
     fn ordinary_large_checkpoint_fits_the_cumulative_bound() {
@@ -428,5 +514,14 @@ mod tests {
     fn cumulative_bound_rejects_overflow_and_excess() {
         assert!(bounded_total_decompressed(MAX_TOTAL_DECOMPRESSED_BYTES, 1).is_none());
         assert!(bounded_total_decompressed(u64::MAX, 1).is_none());
+    }
+
+    #[test]
+    fn streamed_storage_validation_requires_the_declared_byte_count() {
+        let mut complete = Cursor::new(vec![7u8; 1024]);
+        assert_eq!(stream_storage_entry(&mut complete, 1024), Ok(1024));
+
+        let mut truncated = Cursor::new(vec![7u8; 1023]);
+        assert!(stream_storage_entry(&mut truncated, 1024).is_err());
     }
 }

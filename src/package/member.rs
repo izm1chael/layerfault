@@ -100,9 +100,52 @@ pub(super) fn scan_package_file(
     let mut out = Vec::new();
     let subject = member_subject(rel, digest, Some(size));
     let file_prefix = prefix(file, 512)?;
+    let format = ArtifactFormat::detect(path, &file_prefix[..file_prefix.len().min(8)]);
     let archive_detection =
         crate::archive::detect_archive_format_confirmed(path, &file_prefix, file);
     if archive_detection.format != crate::archive::ArchiveFormat::Unknown {
+        // A PyTorch ZIP is a model container, not a generic application ZIP.
+        // Its tensor-storage members can legitimately exceed the generic
+        // archive-member cap, so route it to the bounded PyTorch inspector
+        // which validates those members by streaming instead of dropping them.
+        if archive_detection.format == crate::archive::ArchiveFormat::Zip
+            && matches!(
+                format,
+                ArtifactFormat::PyTorchZip
+                    | ArtifactFormat::TorchScript
+                    | ArtifactFormat::TorchPackage
+            )
+        {
+            match artifact::inspect_opened_file_with_sha256_budget(
+                path,
+                file,
+                format,
+                artifact::ArtifactScanMode::Full,
+                digest,
+                budget,
+            ) {
+                Ok(report) => out.extend(report.results),
+                Err(error) => out.push(
+                    finding(
+                        digest,
+                        CheckType::PackageSecurity,
+                        ScanStatus::Fail,
+                        FindingClass::Structural,
+                        Confidence::High,
+                        "LF-PACKAGE-ARTIFACT",
+                        format!("Artifact '{rel}' failed PyTorch ZIP validation safely: {error}"),
+                    )
+                    .subject(subject.clone())
+                    .evidence(crate::finding_evidence::structural_invariant(
+                        subject.clone(),
+                        "PyTorch ZIP parser rejected the member",
+                        serde_json::json!({ "format": format!("{format:?}"), "parser_error": error.to_string() }),
+                    ))
+                    .finish(),
+                ),
+            }
+            return Ok(out);
+        }
         let archive_limits = crate::archive::ArchiveLimits::default();
         match crate::archive::inspect_opened(path, file, rel, &archive_limits, 0, budget) {
             Ok(archive_report) => {
@@ -122,20 +165,18 @@ pub(super) fn scan_package_file(
                 // bytes, so a member never silently vanishes. Gated to plain
                 // `Zip` specifically — `.whl`/`.tar`/`.tar.gz` archives are
                 // unambiguous and keep exactly their existing behavior.
-                if archive_detection.format == crate::archive::ArchiveFormat::Zip {
-                    let format =
-                        ArtifactFormat::detect(path, &file_prefix[..file_prefix.len().min(8)]);
-                    if format != ArtifactFormat::Unknown {
-                        if let Ok(report) = artifact::inspect_opened_file_with_sha256_budget(
-                            path,
-                            file,
-                            format,
-                            artifact::ArtifactScanMode::Full,
-                            digest,
-                            budget,
-                        ) {
-                            out.extend(report.results);
-                        }
+                if archive_detection.format == crate::archive::ArchiveFormat::Zip
+                    && format != ArtifactFormat::Unknown
+                {
+                    if let Ok(report) = artifact::inspect_opened_file_with_sha256_budget(
+                        path,
+                        file,
+                        format,
+                        artifact::ArtifactScanMode::Full,
+                        digest,
+                        budget,
+                    ) {
+                        out.extend(report.results);
                     }
                 }
                 return Ok(out);
@@ -165,7 +206,6 @@ pub(super) fn scan_package_file(
         }
     }
 
-    let format = ArtifactFormat::detect(path, &file_prefix[..file_prefix.len().min(8)]);
     if format != ArtifactFormat::Unknown {
         match artifact::inspect_opened_file_with_sha256_budget(
             path,

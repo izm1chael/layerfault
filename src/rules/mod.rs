@@ -123,13 +123,13 @@ mod tests {
 
     #[test]
     fn ruleset_digest_stable_across_split() {
-        // Captured before the family-grouped catalogue split. Only the four
-        // identity fields (rule_id, rule_version, detector_family,
-        // evidence_requirement) participate in the digest; prose edits are
-        // inert, any structural identity change flips this hash.
+        // Only the four identity fields (rule_id, rule_version,
+        // detector_family, evidence_requirement) participate in the digest;
+        // prose edits are inert. Update this fixture only for a reviewed
+        // contract identity change such as the pickle rule v2 calibration.
         assert_eq!(
             ruleset_sha256(),
-            "sha256:59a36276cca863cf906fd17d83a067cad6401c0b943cff02cdf0f31a50e6e4f6"
+            "sha256:431d603228829198b3683f034e151f98684ed370b4f2e7cc38520adb6c0c6a27"
         );
     }
 }
