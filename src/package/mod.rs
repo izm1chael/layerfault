@@ -154,6 +154,26 @@ mod tests {
     }
 
     #[test]
+    fn python_model_eval_method_is_not_dynamic_code_evaluation() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        fs::write(dir.path().join("modeling.py"), "model.eval()\n").expect("write");
+        let report = inspect(dir.path()).expect("inspect");
+        assert!(finding_for(&report.findings, "LF-CODE-EVAL").is_none());
+    }
+
+    #[test]
+    fn json_eval_label_is_not_a_shell_invocation() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        fs::write(
+            dir.path().join("evaluation.json"),
+            r#"{"title":"base-eval exact-dataset success"}"#,
+        )
+        .expect("write");
+        let report = inspect(dir.path()).expect("inspect");
+        assert!(finding_for(&report.findings, "LF-SHELL-EVAL").is_none());
+    }
+
+    #[test]
     fn primitive_spanning_a_chunk_boundary_reports_one_correct_line() {
         let dir = tempfile::tempdir().expect("tempdir");
         let root = dir.path();

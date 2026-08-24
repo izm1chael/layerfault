@@ -61,6 +61,7 @@ const SAFE_VALUE_CONSTRUCTORS: &[&str] = &[
     "torch.nn.modules.pooling.MaxPool2d",
     "torch.nn.modules.upsampling.Upsample",
     "transformers.training_args.TrainingArguments",
+    "transformers.training_args.OptimizerNames",
     "transformers.trainer_utils.IntervalStrategy",
     "transformers.trainer_utils.SchedulerType",
 ];
@@ -1759,6 +1760,7 @@ mod tests {
             ("torch.nn.modules.pooling", "MaxPool2d"),
             ("torch.nn.modules.upsampling", "Upsample"),
             ("transformers.training_args", "TrainingArguments"),
+            ("transformers.training_args", "OptimizerNames"),
             ("transformers.trainer_utils", "IntervalStrategy"),
             ("transformers.trainer_utils", "SchedulerType"),
         ] {

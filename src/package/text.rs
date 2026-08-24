@@ -104,6 +104,15 @@ pub(super) fn scan_text_streaming(
     // targeted JSON/HF metadata extraction, but do not promote vocabulary
     // entries to custom-code findings.
     let vocabulary_data = is_tokenizer_vocabulary_path(rel);
+    let parsed_python = rel.to_ascii_lowercase().ends_with(".py");
+    let parsed_shell = matches!(
+        rel.rsplit('.')
+            .next()
+            .unwrap_or("")
+            .to_ascii_lowercase()
+            .as_str(),
+        "sh" | "bash" | "zsh" | "ksh"
+    );
     let dangerous = [
         ("os.system(", "LF-CODE-OS-SYSTEM"),
         ("subprocess.popen", "LF-CODE-SUBPROCESS"),
@@ -168,6 +177,18 @@ pub(super) fn scan_text_streaming(
         let lower = String::from_utf8_lossy(&window).to_ascii_lowercase();
         if !documentation && !vocabulary_data {
             for (needle, rule) in dangerous {
+                // Python source is also analysed as an AST. Broad text needles
+                // cannot distinguish eval(...) from model.eval() and therefore
+                // must not overrule the semantic result.
+                if parsed_python && matches!(rule, "LF-CODE-EVAL" | "LF-CODE-EXEC") {
+                    continue;
+                }
+                // Shell execution is meaningful only in shell source. A text
+                // label such as base-eval exact-dataset in JSON is not an eval
+                // invocation; real shell scripts have a structured tokenizer.
+                if rule.starts_with("LF-SHELL-") && !parsed_shell {
+                    continue;
+                }
                 for (offset, _) in lower.match_indices(needle) {
                     // `lower` is a lossy decode, so its byte offsets can differ
                     // from the raw window's on invalid UTF-8. Clamp instead of
