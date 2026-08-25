@@ -19,6 +19,10 @@ use std::time::Instant;
 
 const MAX_PICKLE_MEMBERS: usize = 256;
 const MAX_JOBLIB_FRAME_CANDIDATES: usize = 4_096;
+/// Caps how many `JoblibOpaqueRegion` diagnostic entries are retained per
+/// stream, bounding memory for pathological inputs with many arrays; this
+/// only limits diagnostic detail, not the completeness verdict itself.
+const MAX_JOBLIB_OPAQUE_REGIONS_TRACKED: usize = 64;
 const MAX_PICKLE_MEMBER_BYTES: u64 = 64 * 1024 * 1024;
 const MAX_TOTAL_PICKLE_BYTES: u64 = 256 * 1024 * 1024;
 const MAX_DIFFERENTIAL_BYTES: u64 = 32 * 1024 * 1024;
@@ -148,6 +152,21 @@ pub struct PickleAnalysis {
     pub opcode_count: usize,
     /// Bounded, ordered positions for the entries above.
     pub sites: Vec<OpcodeSite>,
+    /// Joblib raw-array regions that could not be exactly sized and were
+    /// instead resynchronized by heuristic FRAME search. Diagnostic detail
+    /// for `LF-PICKLE-OPAQUE-COMPRESSED`, not itself a security signal.
+    pub joblib_opaque_regions: Vec<JoblibOpaqueRegion>,
+}
+
+/// One raw-array region a Joblib pickle stream's exact-computation path
+/// (`resolve_joblib_raw_array_region`)
+/// declined, naming the byte offset and the construct/reason so the
+/// resulting finding can point at exactly where and why coverage narrowed,
+/// instead of a generic "could not be parsed completely".
+#[derive(Debug, Clone)]
+pub struct JoblibOpaqueRegion {
+    pub byte_offset: u64,
+    pub detail: String,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -168,6 +187,7 @@ impl Default for PickleAnalysis {
             dangerous: BTreeSet::new(),
             opcode_count: 0,
             sites: Vec::new(),
+            joblib_opaque_regions: Vec::new(),
         }
     }
 }
@@ -185,7 +205,71 @@ enum StackValue {
     Global(String),
     Constructed(String),
     Mark,
+    Int(i64),
+    Bool(bool),
+    /// A small tuple whose elements are all simple scalars (no nesting).
+    /// Only built for short tuples (protocol TUPLE1/2/3 or a small
+    /// MARK-delimited TUPLE); used to recover Joblib NumPy array metadata
+    /// (shape dims, dtype constructor args) without generally tracking
+    /// arbitrary pickle container contents.
+    SmallTuple(Vec<ScalarValue>),
+    /// The result of a resolved `numpy.dtype(descr, ...)` REDUCE, carrying
+    /// its descriptor string. Represented distinctly from `Constructed` (and
+    /// not just discarded like other REDUCE args) specifically so the
+    /// descriptor survives pickle memoization: Joblib memoizes a shared
+    /// dtype object once and reuses it via GET across every array of that
+    /// dtype, and since MEMOIZE/GET simply clone whichever `StackValue` was
+    /// stored, cloning this variant carries the descriptor along for free.
+    NumpyDtype(String),
     Other,
+}
+
+#[derive(Debug, Clone)]
+enum ScalarValue {
+    Str(String),
+    Int(i64),
+    /// The boolean's truth value isn't needed by any current caller — only
+    /// that a tuple slot held a bool, so the tuple as a whole still
+    /// qualifies as a `SmallTuple` (see `small_tuple_or_other`) instead of
+    /// collapsing to `Other`.
+    Bool,
+}
+
+impl ScalarValue {
+    fn from_stack_value(value: &StackValue) -> Option<ScalarValue> {
+        match value {
+            StackValue::Str(s) => Some(ScalarValue::Str(s.clone())),
+            StackValue::Int(n) => Some(ScalarValue::Int(*n)),
+            StackValue::Bool(_) => Some(ScalarValue::Bool),
+            _ => None,
+        }
+    }
+
+    fn as_int(&self) -> Option<i64> {
+        match self {
+            ScalarValue::Int(n) => Some(*n),
+            _ => None,
+        }
+    }
+
+    fn as_str(&self) -> Option<&str> {
+        match self {
+            ScalarValue::Str(s) => Some(s),
+            _ => None,
+        }
+    }
+}
+
+/// Metadata recovered from a Joblib `NumpyArrayWrapper`'s pickled state
+/// dict, sufficient to compute the exact byte extent of its raw array
+/// region (which is written directly to the stream outside pickle opcodes,
+/// see `resolve_joblib_raw_array_region`).
+#[derive(Debug, Clone, Default)]
+struct JoblibArrayMeta {
+    shape: Option<Vec<i64>>,
+    descr: Option<String>,
+    allow_mmap: Option<bool>,
+    alignment_bytes: Option<i64>,
 }
 
 pub fn scan(
@@ -384,6 +468,7 @@ fn scan_joblib_stream(
     ) {
         Ok(analysis) => {
             let partial = analysis.completeness == AnalysisCompleteness::Partial;
+            let opaque_regions = analysis.joblib_opaque_regions.clone();
             let mut results = vec![finding_from_analysis(
                 analysis,
                 identity,
@@ -393,7 +478,11 @@ fn scan_joblib_stream(
                 started,
             )];
             if partial {
-                results.push(opaque_joblib_regions_finding(identity, media));
+                results.push(opaque_joblib_regions_finding(
+                    identity,
+                    media,
+                    &opaque_regions,
+                ));
             }
             results
         }
@@ -408,7 +497,35 @@ fn scan_joblib_stream(
     }
 }
 
-fn opaque_joblib_regions_finding(identity: &str, media: &str) -> LayerScanResult {
+fn opaque_joblib_regions_finding(
+    identity: &str,
+    media: &str,
+    regions: &[JoblibOpaqueRegion],
+) -> LayerScanResult {
+    let detail = match regions {
+        [] => {
+            // Defensive fallback: completeness was marked Partial by some
+            // path that didn't record a region (shouldn't happen for the
+            // joblib array-region resync path, which always records one).
+            "Joblib opcode segments were analyzed, but embedded NumPy array regions are data-framed outside the pickle opcode stream".to_owned()
+        }
+        [one] => one.detail.clone(),
+        many => format!(
+            "{} joblib raw NumPy array regions could not be exactly sized and were resynchronized via heuristic FRAME search: {}",
+            many.len(),
+            many.iter()
+                .map(|region| format!("byte offset {}", region.byte_offset))
+                .collect::<Vec<_>>()
+                .join(", ")
+        ),
+    };
+    let match_note = regions
+        .first()
+        .map(|region| region.detail.clone())
+        .unwrap_or_else(|| {
+            "joblib NumPy array data regions required bounded frame resynchronization".to_owned()
+        });
+
     FindingBuilder::new(
         "LF-PICKLE-OPAQUE-COMPRESSED",
         CheckType::PickleStructure,
@@ -419,10 +536,8 @@ fn opaque_joblib_regions_finding(identity: &str, media: &str) -> LayerScanResult
     .digest(identity)
     .media_type(media)
     .subject(EvidenceSubject::identity(identity, media).with_sha256(Some(identity.to_owned())))
-    .detail(
-        "Joblib opcode segments were analyzed, but embedded NumPy array regions are data-framed outside the pickle opcode stream",
-    )
-    .match_note("joblib NumPy array data regions required bounded frame resynchronization")
+    .detail(detail)
+    .match_note(match_note)
     .evidence_unavailable(
         "the opaque regions are raw array data rather than pickle opcodes; surrounding opcode segments were still analyzed",
     )
@@ -980,6 +1095,32 @@ fn analyze_reader_inner<R: Read + Seek>(
         // dangerous/unknown entry it produces can be attributed to this exact
         // position rather than wherever the cursor ends up after its operands.
         state.current_offset = pos;
+        if joblib_framing
+            && matches!(
+                state.stack.last(),
+                Some(StackValue::Constructed(name))
+                    if name == "joblib.numpy_pickle.NumpyArrayWrapper"
+            )
+        {
+            // A joblib `NumpyArrayWrapper` is immediately followed by raw
+            // array bytes written outside the pickle opcode stream, not by
+            // another opcode. Those bytes commonly start with `\x93NUMPY`,
+            // whose first byte is indistinguishable from the STACK_GLOBAL
+            // opcode; checked structurally here, before ordinary opcode
+            // dispatch would misinterpret it.
+            let meta = state.last_array_meta.take();
+            let region_end = match meta {
+                Some(meta) => resolve_joblib_raw_array_region(&meta, &mut reader, pos, len)?,
+                None => None,
+            };
+            if let Some(region_end) = region_end {
+                state.pop();
+                state.push(StackValue::Other)?;
+                reader.seek(SeekFrom::Start(region_end))?;
+                pos = region_end;
+                continue;
+            }
+        }
         let opcode = read_u8(&mut reader, &mut pos, len)?;
         state.current_opcode = opcode_mnemonic(opcode);
         match opcode {
@@ -988,26 +1129,29 @@ fn analyze_reader_inner<R: Read + Seek>(
                 state.push(StackValue::Other)?;
             }
             b'J' => {
-                skip_fixed(&mut reader, &mut pos, len, 4)?;
-                state.push(StackValue::Other)?;
+                let value = read_i32(&mut reader, &mut pos, len)?;
+                state.push(StackValue::Int(i64::from(value)))?;
             }
             b'K' => {
-                skip_fixed(&mut reader, &mut pos, len, 1)?;
-                state.push(StackValue::Other)?;
+                let value = read_u8(&mut reader, &mut pos, len)?;
+                state.push(StackValue::Int(i64::from(value)))?;
             }
             b'M' => {
-                skip_fixed(&mut reader, &mut pos, len, 2)?;
-                state.push(StackValue::Other)?;
+                let mut bytes = [0u8; 2];
+                require_remaining(pos, len, bytes.len() as u64)?;
+                reader.read_exact(&mut bytes)?;
+                pos += bytes.len() as u64;
+                state.push(StackValue::Int(i64::from(u16::from_le_bytes(bytes))))?;
             }
             0x8a => {
                 let n = u64::from(read_u8(&mut reader, &mut pos, len)?);
-                skip_argument(&mut reader, &mut pos, len, n)?;
-                state.push(StackValue::Other)?;
+                let value = read_small_signed_long(&mut reader, &mut pos, len, n)?;
+                state.push(value.map(StackValue::Int).unwrap_or(StackValue::Other))?;
             }
             0x8b => {
                 let n = u64::from(read_u32(&mut reader, &mut pos, len)?);
-                skip_argument(&mut reader, &mut pos, len, n)?;
-                state.push(StackValue::Other)?;
+                let value = read_small_signed_long(&mut reader, &mut pos, len, n)?;
+                state.push(value.map(StackValue::Int).unwrap_or(StackValue::Other))?;
             }
             b'S' | b'V' => {
                 let value = read_line_string(&mut reader, &mut pos, len)?;
@@ -1037,9 +1181,9 @@ fn analyze_reader_inner<R: Read + Seek>(
                 skip_fixed(&mut reader, &mut pos, len, 8)?;
                 state.push(StackValue::Other)?;
             }
-            b'N' | 0x88 | 0x89 | b']' | b')' | b'}' | 0x8f | 0x97 => {
-                state.push(StackValue::Other)?
-            }
+            b'N' | b']' | b')' | b'}' | 0x8f | 0x97 => state.push(StackValue::Other)?,
+            0x88 => state.push(StackValue::Bool(true))?,
+            0x89 => state.push(StackValue::Bool(false))?,
             0x98 => {}
             b'(' => state.push(StackValue::Mark)?,
             b'0' => {
@@ -1056,29 +1200,44 @@ fn analyze_reader_inner<R: Read + Seek>(
             // APPENDS mutates the list below MARK; it does not push a new
             // stack value after consuming the marked items.
             b'e' => state.pop_to_mark(None)?,
-            b'l' | b't' | b'd' | 0x91 => state.pop_to_mark(Some(StackValue::Other))?,
+            b'l' | b'd' | 0x91 => state.pop_to_mark(Some(StackValue::Other))?,
+            b't' => {
+                let items = state.take_since_mark()?;
+                state.push(small_tuple_or_other(items))?;
+            }
             0x85 => {
-                state.pop();
-                state.push(StackValue::Other)?;
+                let a = state.pop();
+                state.push(small_tuple_or_other(vec![a]))?;
             }
             0x86 => {
-                state.pop();
-                state.pop();
-                state.push(StackValue::Other)?;
+                let b = state.pop();
+                let a = state.pop();
+                state.push(small_tuple_or_other(vec![a, b]))?;
             }
             0x87 => {
-                state.pop();
-                state.pop();
-                state.pop();
-                state.push(StackValue::Other)?;
+                let c = state.pop();
+                let b = state.pop();
+                let a = state.pop();
+                state.push(small_tuple_or_other(vec![a, b, c]))?;
             }
             b's' => {
-                state.pop();
-                state.pop();
+                let value = state.pop();
+                let key = state.pop();
+                state.record_dict_entry(&key, &value);
             }
-            // SETITEMS/ADDITEMS mutate the container below MARK and leave
-            // that existing container on the stack.
-            b'u' | 0x90 => state.pop_to_mark(None)?,
+            // SETITEMS mutates the dict below MARK with key/value pairs and
+            // leaves that existing dict on the stack.
+            b'u' => {
+                let items = state.take_since_mark()?;
+                for pair in items.chunks(2) {
+                    if let [key, value] = pair {
+                        state.record_dict_entry(key, value);
+                    }
+                }
+            }
+            // ADDITEMS mutates the set below MARK; it has no key/value
+            // semantic, unlike SETITEMS.
+            0x90 => state.pop_to_mark(None)?,
             b'g' => {
                 let index = parse_decimal_index(&read_line_string(&mut reader, &mut pos, len)?)?;
                 state.push_memo(index)?;
@@ -1147,12 +1306,28 @@ fn analyze_reader_inner<R: Read + Seek>(
                 state.push(StackValue::Global(global))?;
             }
             b'R' => {
-                state.pop(); // args tuple
+                let args = state.pop(); // args tuple
                 let callable = state.pop();
                 let name = callable_name(&callable);
                 if let Some(name) = name.as_deref() {
                     state.record_constructor(Some(name), "REDUCE");
-                    state.push(StackValue::Constructed(name.to_owned()))?;
+                    // `numpy.dtype(descr, ...)` supplies the descriptor a
+                    // Joblib NumpyArrayWrapper's raw array region needs to
+                    // compute its exact byte extent; represented distinctly
+                    // (see `StackValue::NumpyDtype`) so the descriptor
+                    // survives memoized reuse of the dtype object.
+                    let dtype_descr = (name == "numpy.dtype" || name.ends_with(".dtype"))
+                        .then(|| match &args {
+                            StackValue::SmallTuple(items) => {
+                                items.first().and_then(ScalarValue::as_str)
+                            }
+                            _ => None,
+                        })
+                        .flatten();
+                    match dtype_descr {
+                        Some(descr) => state.push(StackValue::NumpyDtype(descr.to_owned()))?,
+                        None => state.push(StackValue::Constructed(name.to_owned()))?,
+                    }
                 } else {
                     state.record_unresolved("REDUCE", "callable could not be resolved statically");
                     state.push(StackValue::Other)?;
@@ -1163,6 +1338,9 @@ fn analyze_reader_inner<R: Read + Seek>(
                 let instance = state.pop();
                 if let Some(name) = callable_name(&instance) {
                     state.record_constructor(Some(&name), "BUILD");
+                    if joblib_framing && name == "joblib.numpy_pickle.NumpyArrayWrapper" {
+                        state.last_array_meta = state.pending_array_meta.take();
+                    }
                     state.push(StackValue::Constructed(name.to_owned()))?;
                 } else {
                     state.push(instance)?;
@@ -1184,6 +1362,11 @@ fn analyze_reader_inner<R: Read + Seek>(
                 let class = state.pop();
                 let name = callable_name(&class);
                 state.record_constructor(name.as_deref(), "NEWOBJ");
+                if joblib_framing
+                    && name.as_deref() == Some("joblib.numpy_pickle.NumpyArrayWrapper")
+                {
+                    state.pending_array_meta = Some(JoblibArrayMeta::default());
+                }
                 state.push(
                     name.map(StackValue::Constructed)
                         .unwrap_or(StackValue::Other),
@@ -1237,6 +1420,17 @@ fn analyze_reader_inner<R: Read + Seek>(
                         find_next_plausible_pickle_frame(&mut reader, pos, len)?
                     {
                         state.analysis.completeness = AnalysisCompleteness::Partial;
+                        if state.analysis.joblib_opaque_regions.len()
+                            < MAX_JOBLIB_OPAQUE_REGIONS_TRACKED
+                        {
+                            state.analysis.joblib_opaque_regions.push(JoblibOpaqueRegion {
+                                byte_offset: state.current_offset,
+                                detail: format!(
+                                    "joblib.numpy_pickle.NumpyArrayWrapper raw array region at byte offset {} could not be exactly sized (dtype/shape/allow_mmap metadata was not fully recoverable from the pickle opcode stream); resynchronized via heuristic FRAME search to byte offset {frame_offset}",
+                                    state.current_offset
+                                ),
+                            });
+                        }
                         state.pop();
                         state.push(StackValue::Other)?;
                         pos = frame_offset;
@@ -1274,6 +1468,74 @@ fn analyze_reader_inner<R: Read + Seek>(
         bail!("pickle stream ended without STOP opcode");
     }
     Ok(state.analysis)
+}
+
+/// Resolve a joblib raw array from trusted wrapper metadata and framing.
+fn resolve_joblib_raw_array_region<R: Read + Seek>(
+    meta: &JoblibArrayMeta,
+    reader: &mut R,
+    start: u64,
+    len: u64,
+) -> Result<Option<u64>> {
+    let (Some(shape), Some(descr)) = (meta.shape.as_ref(), meta.descr.as_deref()) else {
+        return Ok(None);
+    };
+    let Some(item_size) = crate::formats::npy::simple_dtype_item_size(descr) else {
+        return Ok(None);
+    };
+
+    let mut total_elements: u64 = 1;
+    for &dim in shape {
+        let Ok(dim) = u64::try_from(dim) else {
+            return Ok(None);
+        };
+        total_elements = match total_elements.checked_mul(dim) {
+            Some(value) => value,
+            None => return Ok(None),
+        };
+    }
+    let payload_bytes = match total_elements.checked_mul(item_size) {
+        Some(value) => value,
+        None => return Ok(None),
+    };
+
+    let data_start = match meta.alignment_bytes {
+        Some(alignment) if (1..=255).contains(&alignment) => {
+            let alignment = alignment as u64;
+            let Some(pos_after_marker) = start.checked_add(1) else {
+                return Ok(None);
+            };
+            // Joblib emits a full padding cycle when the marker ends aligned.
+            let expected_padding = alignment - (pos_after_marker % alignment);
+
+            if start >= len {
+                return Ok(None);
+            }
+            let mut marker = [0u8; 1];
+            reader.seek(SeekFrom::Start(start))?;
+            reader.read_exact(&mut marker)?;
+            if u64::from(marker[0]) != expected_padding {
+                reader.seek(SeekFrom::Start(start))?;
+                return Ok(None);
+            }
+            match pos_after_marker.checked_add(expected_padding) {
+                Some(value) => value,
+                None => return Ok(None),
+            }
+        }
+        // Present-but-implausible or absent alignment metadata: no padding
+        // marker was written, so the raw data starts immediately.
+        _ => start,
+    };
+
+    let region_end = match data_start.checked_add(payload_bytes) {
+        Some(value) if value <= len => value,
+        _ => {
+            reader.seek(SeekFrom::Start(start))?;
+            return Ok(None);
+        }
+    };
+    Ok(Some(region_end))
 }
 
 /// Locate the next protocol-4/5 FRAME boundary after a joblib raw-array
@@ -1492,6 +1754,13 @@ struct ParserState {
     /// produces can be attributed to an exact position.
     current_offset: u64,
     current_opcode: &'static str,
+    /// Accumulates a Joblib `NumpyArrayWrapper`'s state-dict fields while its
+    /// constructor (NEWOBJ..BUILD) is being interpreted. `None` outside that
+    /// window.
+    pending_array_meta: Option<JoblibArrayMeta>,
+    /// The most recently finalized `NumpyArrayWrapper` metadata, set when its
+    /// BUILD opcode completes and consumed by the raw-array-region resolver.
+    last_array_meta: Option<JoblibArrayMeta>,
 }
 
 impl ParserState {
@@ -1509,6 +1778,48 @@ impl ParserState {
         match self.pop() {
             StackValue::Str(value) => Some(value),
             _ => None,
+        }
+    }
+    /// Record a `dict[key] = value` assignment (from SETITEM/SETITEMS) into
+    /// `pending_array_meta`, when one is active and the key is a whitelisted
+    /// Joblib NumPy array-wrapper field. A no-op the rest of the time, so
+    /// this never grows into general pickle dict tracking.
+    fn record_dict_entry(&mut self, key: &StackValue, value: &StackValue) {
+        let Some(meta) = self.pending_array_meta.as_mut() else {
+            return;
+        };
+        let StackValue::Str(key) = key else {
+            return;
+        };
+        match key.as_str() {
+            "shape" => {
+                if let StackValue::SmallTuple(items) = value {
+                    let mut dims = Vec::with_capacity(items.len());
+                    for item in items {
+                        match item.as_int() {
+                            Some(n) => dims.push(n),
+                            None => return,
+                        }
+                    }
+                    meta.shape = Some(dims);
+                }
+            }
+            "allow_mmap" => {
+                if let StackValue::Bool(b) = value {
+                    meta.allow_mmap = Some(*b);
+                }
+            }
+            "numpy_array_alignment_bytes" => {
+                if let StackValue::Int(n) = value {
+                    meta.alignment_bytes = Some(*n);
+                }
+            }
+            "dtype" => {
+                if let StackValue::NumpyDtype(descr) = value {
+                    meta.descr = Some(descr.clone());
+                }
+            }
+            _ => {}
         }
     }
     fn take_since_mark(&mut self) -> Result<Vec<StackValue>> {
@@ -1680,6 +1991,23 @@ fn is_explicit_danger(value: &str) -> bool {
             })
 }
 
+/// Build a `StackValue::SmallTuple` from popped tuple elements when every
+/// element is a simple scalar and the tuple is short; otherwise `Other`,
+/// matching prior behavior for tuples this module doesn't need to inspect.
+fn small_tuple_or_other(items: Vec<StackValue>) -> StackValue {
+    if items.len() > 8 {
+        return StackValue::Other;
+    }
+    let mut scalars = Vec::with_capacity(items.len());
+    for item in &items {
+        match ScalarValue::from_stack_value(item) {
+            Some(scalar) => scalars.push(scalar),
+            None => return StackValue::Other,
+        }
+    }
+    StackValue::SmallTuple(scalars)
+}
+
 fn read_u8<R: Read>(reader: &mut R, pos: &mut u64, len: u64) -> Result<u8> {
     require_remaining(*pos, len, 1)?;
     let mut byte = [0u8; 1];
@@ -1700,6 +2028,43 @@ fn read_u64<R: Read>(reader: &mut R, pos: &mut u64, len: u64) -> Result<u64> {
     reader.read_exact(&mut bytes)?;
     *pos += 8;
     Ok(u64::from_le_bytes(bytes))
+}
+fn read_i32<R: Read>(reader: &mut R, pos: &mut u64, len: u64) -> Result<i32> {
+    require_remaining(*pos, len, 4)?;
+    let mut bytes = [0u8; 4];
+    reader.read_exact(&mut bytes)?;
+    *pos += 4;
+    Ok(i32::from_le_bytes(bytes))
+}
+/// Read a pickle LONG1/LONG4 little-endian two's-complement integer of `n`
+/// bytes, returning `None` (without discarding the safety cap on `n`) when
+/// it doesn't fit an `i64` — such values are never plausible array metadata
+/// (shape dims, alignment bytes), so callers fall back to `StackValue::Other`.
+fn read_small_signed_long<R: Read + Seek>(
+    reader: &mut R,
+    pos: &mut u64,
+    len: u64,
+    n: u64,
+) -> Result<Option<i64>> {
+    if n == 0 {
+        return Ok(Some(0));
+    }
+    if n > 8 {
+        skip_argument(reader, pos, len, n)?;
+        return Ok(None);
+    }
+    require_remaining(*pos, len, n)?;
+    let count = n as usize;
+    let mut bytes = [0u8; 8];
+    reader.read_exact(&mut bytes[..count])?;
+    *pos += n;
+    let negative = bytes[count - 1] & 0x80 != 0;
+    if negative {
+        for byte in bytes.iter_mut().skip(count) {
+            *byte = 0xff;
+        }
+    }
+    Ok(Some(i64::from_le_bytes(bytes)))
 }
 fn skip_fixed<R: Read + Seek>(reader: &mut R, pos: &mut u64, len: u64, count: u64) -> Result<()> {
     skip_argument(reader, pos, len, count)
@@ -1855,6 +2220,89 @@ mod tests {
         format!("c{module}\n{name}\n.").into_bytes()
     }
 
+    fn short_binunicode(s: &str) -> Vec<u8> {
+        assert!(s.len() <= 255);
+        let mut out = vec![0x8c, s.len() as u8];
+        out.extend_from_slice(s.as_bytes());
+        out
+    }
+
+    /// Builds the prefix (through BUILD) plus the computed padding/payload
+    /// lengths for [`real_joblib_array_stream`], so callers that need to
+    /// locate or corrupt the padding-marker byte (at `prefix.len()`) don't
+    /// have to reimplement the layout.
+    fn real_joblib_array_stream_parts(descr: &str, dim: u8, alignment: u8) -> (Vec<u8>, u64, u64) {
+        let module = "joblib.numpy_pickle";
+        let class = "NumpyArrayWrapper";
+
+        let mut prefix = vec![0x80, 0x05]; // PROTO 5
+        prefix.extend(short_binunicode(module));
+        prefix.extend(short_binunicode(class));
+        prefix.push(0x93); // STACK_GLOBAL
+        prefix.push(b')'); // EMPTY_TUPLE
+        prefix.push(0x81); // NEWOBJ
+        prefix.push(b'}'); // EMPTY_DICT
+        prefix.push(b'('); // MARK
+
+        prefix.extend(short_binunicode("shape"));
+        prefix.push(b'K'); // BININT1
+        prefix.push(dim);
+        prefix.push(0x85); // TUPLE1
+
+        prefix.extend(short_binunicode("dtype"));
+        prefix.extend(short_binunicode("numpy"));
+        prefix.extend(short_binunicode("dtype"));
+        prefix.push(0x93); // STACK_GLOBAL -> Global("numpy.dtype")
+        prefix.extend(short_binunicode(descr));
+        prefix.push(0x89); // NEWFALSE
+        prefix.push(0x88); // NEWTRUE
+        prefix.push(0x87); // TUPLE3
+        prefix.push(b'R'); // REDUCE -> NumpyDtype(descr)
+
+        prefix.extend(short_binunicode("allow_mmap"));
+        prefix.push(0x88); // NEWTRUE
+
+        prefix.extend(short_binunicode("numpy_array_alignment_bytes"));
+        prefix.push(b'K'); // BININT1
+        prefix.push(alignment);
+
+        prefix.push(b'u'); // SETITEMS
+        prefix.push(b'b'); // BUILD
+
+        let alignment = u64::from(alignment);
+        let pos_after_marker = prefix.len() as u64 + 1;
+        let padding_length = alignment - (pos_after_marker % alignment);
+
+        let item_size = crate::formats::npy::simple_dtype_item_size(descr).expect("test descr");
+        let payload_bytes = u64::from(dim) * item_size;
+
+        (prefix, padding_length, payload_bytes)
+    }
+
+    /// A joblib pickle stream matching the real on-disk layout: a
+    /// `NumpyArrayWrapper` constructed via NEWOBJ/BUILD with a state dict
+    /// (`shape`, `dtype`, `allow_mmap`, `numpy_array_alignment_bytes`),
+    /// immediately followed by the raw array region joblib actually writes
+    /// for `allow_mmap=True` arrays: a single padding-length marker byte,
+    /// that many `0xff` bytes, then the contiguous raw payload — no `.npy`
+    /// magic header. `shape` must be a single dimension fitting `BININT1`
+    /// (0..=255).
+    fn real_joblib_array_stream(
+        descr: &str,
+        dim: u8,
+        alignment: u8,
+        after_array: &[u8],
+    ) -> Vec<u8> {
+        let (prefix, padding_length, payload_bytes) =
+            real_joblib_array_stream_parts(descr, dim, alignment);
+        let mut out = prefix;
+        out.push(padding_length as u8);
+        out.extend(std::iter::repeat_n(0xffu8, padding_length as usize));
+        out.extend(std::iter::repeat_n(0u8, payload_bytes as usize));
+        out.extend_from_slice(after_array);
+        out
+    }
+
     #[test]
     fn allowlisted_ordered_dict_passes() -> Result<()> {
         let analysis = analyze_bytes(&global("collections", "OrderedDict"))?;
@@ -1918,6 +2366,28 @@ mod tests {
     }
 
     #[test]
+    fn joblib_opaque_finding_names_the_byte_offset_and_construct() -> Result<()> {
+        let budget =
+            crate::budget::ScanBudget::new(crate::budget::ScanBudgetProfile::Default.limits())?;
+        let stream = framed_joblib_stream(b"N.");
+        let results = scan_named_zlib_bytes(&zlib_bytes(&stream), ".joblib", &budget)?;
+        let opaque = results
+            .iter()
+            .find(|finding| crate::policy::rule_id(finding) == "LF-PICKLE-OPAQUE-COMPRESSED")
+            .expect("opaque finding");
+        let detail = opaque.detail.as_deref().unwrap_or_default();
+        assert!(
+            detail.contains("byte offset"),
+            "diagnostic detail should name a byte offset, not just say parsing was incomplete: {detail:?}"
+        );
+        assert!(
+            detail.contains("NumpyArrayWrapper"),
+            "diagnostic detail should name the joblib construct that triggered the fallback: {detail:?}"
+        );
+        Ok(())
+    }
+
+    #[test]
     fn raw_zlib_joblib_scans_dangerous_globals_after_array_regions() -> Result<()> {
         let budget =
             crate::budget::ScanBudget::new(crate::budget::ScanBudgetProfile::Default.limits())?;
@@ -1931,6 +2401,86 @@ mod tests {
             crate::policy::rule_id(finding) == "LF-PICKLE-OPAQUE-COMPRESSED"
                 && finding.status == ScanStatus::Warn
         }));
+        Ok(())
+    }
+
+    #[test]
+    fn raw_zlib_joblib_real_padded_array_region_completes() -> Result<()> {
+        let budget =
+            crate::budget::ScanBudget::new(crate::budget::ScanBudgetProfile::Default.limits())?;
+        let stream = real_joblib_array_stream("f4", 6, 16, b"N.");
+        let results = scan_named_zlib_bytes(&zlib_bytes(&stream), ".joblib", &budget)?;
+        // The array region was fully accounted for by exact padding/shape/
+        // dtype validation, not heuristic resynchronization, so no
+        // coverage-gap WARN should be raised for it.
+        assert!(!results
+            .iter()
+            .any(|finding| crate::policy::rule_id(finding) == "LF-PICKLE-OPAQUE-COMPRESSED"));
+        assert!(!results
+            .iter()
+            .any(|finding| crate::policy::rule_id(finding) == "LF-PICKLE-MALFORMED"));
+        Ok(())
+    }
+
+    #[test]
+    fn raw_zlib_joblib_accepts_full_cycle_alignment_padding() -> Result<()> {
+        let budget =
+            crate::budget::ScanBudget::new(crate::budget::ScanBudgetProfile::Default.limits())?;
+        let stream = real_joblib_array_stream("f4", 6, 1, b"N.");
+        let results = scan_named_zlib_bytes(&zlib_bytes(&stream), ".joblib", &budget)?;
+        assert!(!results.iter().any(|finding| {
+            let rule_id = crate::policy::rule_id(finding);
+            rule_id == "LF-PICKLE-OPAQUE-COMPRESSED" || rule_id == "LF-PICKLE-MALFORMED"
+        }));
+        Ok(())
+    }
+
+    #[test]
+    fn raw_zlib_joblib_detects_dangerous_global_after_real_padded_array_region() -> Result<()> {
+        let budget =
+            crate::budget::ScanBudget::new(crate::budget::ScanBudgetProfile::Default.limits())?;
+        let stream = real_joblib_array_stream("i8", 4, 16, b"cos\nsystem\n)R.");
+        let results = scan_named_zlib_bytes(&zlib_bytes(&stream), ".joblib", &budget)?;
+        assert!(results.iter().any(|finding| {
+            crate::policy::rule_id(finding) == "LF-PICKLE-DANGEROUS-GLOBAL"
+                && finding.status == ScanStatus::Fail
+        }));
+        assert!(!results
+            .iter()
+            .any(|finding| crate::policy::rule_id(finding) == "LF-PICKLE-OPAQUE-COMPRESSED"));
+        Ok(())
+    }
+
+    #[test]
+    fn raw_zlib_joblib_corrupted_padding_marker_falls_back_to_incomplete_not_malformed(
+    ) -> Result<()> {
+        let budget =
+            crate::budget::ScanBudget::new(crate::budget::ScanBudgetProfile::Default.limits())?;
+        // Real metadata (shape/dtype/allow_mmap/alignment) is present, but
+        // the on-disk marker byte doesn't match what that metadata implies
+        // — the exact-computation path must reject it rather than trust a
+        // mismatched byte, and fall back to heuristic resynchronization
+        // (still a coverage-gap WARN, never silently PASS or a hard
+        // failure). A framed continuation gives it a plausible resync
+        // target, isolating "declined an unverifiable region" from "there
+        // was nothing to resync to".
+        let (prefix, padding_length, payload_bytes) = real_joblib_array_stream_parts("f4", 6, 16);
+        let mut stream = prefix;
+        stream.push(0xff); // wrong marker: real padding_length is `padding_length`, not 0xff
+        stream.extend(std::iter::repeat_n(0xffu8, padding_length as usize));
+        stream.extend(std::iter::repeat_n(0u8, payload_bytes as usize));
+        stream.push(0x95);
+        stream.extend_from_slice(&(2u64).to_le_bytes());
+        stream.extend_from_slice(b"N.");
+
+        let results = scan_named_zlib_bytes(&zlib_bytes(&stream), ".joblib", &budget)?;
+        assert!(results.iter().any(|finding| {
+            crate::policy::rule_id(finding) == "LF-PICKLE-OPAQUE-COMPRESSED"
+                && finding.status == ScanStatus::Warn
+        }));
+        assert!(!results
+            .iter()
+            .any(|finding| crate::policy::rule_id(finding) == "LF-PICKLE-MALFORMED"));
         Ok(())
     }
 

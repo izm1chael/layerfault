@@ -584,6 +584,11 @@ fn analyze_descr(raw: &str) -> DtypeAnalysis {
     }
 }
 
+/// Return the item size for a simple NumPy dtype descriptor.
+pub(crate) fn simple_dtype_item_size(s: &str) -> Option<u64> {
+    parse_simple_dtype(s)
+}
+
 fn parse_simple_dtype(s: &str) -> Option<u64> {
     let trimmed = s.trim_start_matches(['<', '>', '|', '=', '\\']);
     if trimmed.is_empty() {
