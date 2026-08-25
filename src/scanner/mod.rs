@@ -106,6 +106,7 @@ pub enum CheckType {
     TfliteStructure,
     KerasStructure,
     NpyStructure,
+    FastTextStructure,
     PackageSecurity,
     RuntimeAdvisory,
     ExecutionBinding,

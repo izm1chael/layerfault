@@ -63,6 +63,7 @@ pub(super) fn check_type_label(check_type: &CheckType) -> &'static str {
         CheckType::ScanError => "ScanError",
         CheckType::PickleStructure => "PickleStructure",
         CheckType::NpyStructure => "NpyStructure",
+        CheckType::FastTextStructure => "FastTextStructure",
     }
 }
 

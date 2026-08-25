@@ -158,6 +158,11 @@ pub fn probe_magic(prefix: &[u8]) -> Vec<ArtifactFormat> {
     if prefix.starts_with(b"\x89HDF\r\n\x1a\n") {
         candidates.push(ArtifactFormat::KerasHdf5);
     }
+    // fastText's `FASTTEXT_FILEFORMAT_MAGIC_INT32 = 793712314`, written as a
+    // native (little-endian) int32 at the very start of `.bin` model files.
+    if prefix.starts_with(&[0xba, 0x16, 0x4f, 0x2f]) {
+        candidates.push(ArtifactFormat::FastText);
+    }
 
     candidates
 }

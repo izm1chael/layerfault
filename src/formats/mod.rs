@@ -3,6 +3,7 @@ pub mod coreml;
 pub mod differential;
 pub mod executorch;
 pub mod extent;
+pub mod fasttext;
 pub mod gguf;
 pub mod identification;
 pub mod keras;
@@ -52,6 +53,7 @@ pub enum ArtifactFormat {
     Npy,
     Npz,
     Torch7,
+    FastText,
     Unknown,
 }
 
@@ -83,6 +85,7 @@ impl ArtifactFormat {
             Self::Npy => "npy",
             Self::Npz => "npz",
             Self::Torch7 => "torch7",
+            Self::FastText => "fasttext-bin",
             Self::Unknown => "unknown",
         }
     }

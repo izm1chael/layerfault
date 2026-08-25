@@ -129,7 +129,7 @@ mod tests {
         // contract identity change such as the pickle rule v2 calibration.
         assert_eq!(
             ruleset_sha256(),
-            "sha256:6d5918c2121fc33f141a9b424e48199ada2047493b3c47e0ba833f0255fd114c"
+            "sha256:6272ba50bc9d7df5342a5f4e752744bb8f2b78219411e3aeee954c2ad7c4c7b8"
         );
     }
 }

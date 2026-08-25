@@ -197,7 +197,8 @@ pub fn snapshot_artifact(path: &Path) -> Result<ModelSnapshot> {
         | ArtifactFormat::KerasHdf5
         | ArtifactFormat::Npy
         | ArtifactFormat::Npz
-        | ArtifactFormat::Torch7 => {
+        | ArtifactFormat::Torch7
+        | ArtifactFormat::FastText => {
             components.insert("artifact".to_owned(), sha.clone());
         }
         ArtifactFormat::Unknown => {

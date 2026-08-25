@@ -737,6 +737,61 @@
       }
     },
     {
+      "id": "positive-block-fasttext-malformed",
+      "category": "positive_block",
+      "description": "fastText .bin file declares a dense matrix larger than the remaining file bytes",
+      "command": {
+        "kind": "inspect",
+        "path": "tests/detector_quality/fixtures/positive_block/fasttext_malformed/model.bin"
+      },
+      "expected": {
+        "overall": "BLOCK",
+        "exit_code": 3,
+        "must_include_rules": [
+          "LF-FASTTEXT-STRUCT"
+        ],
+        "must_not_include_rules": []
+      }
+    },
+    {
+      "id": "negative-benign-fasttext-clean",
+      "category": "negative_benign",
+      "description": "Valid minimal fastText .bin model with a small dense input/output matrix pair",
+      "command": {
+        "kind": "inspect",
+        "path": "tests/detector_quality/fixtures/negative_benign/fasttext_clean/model.bin"
+      },
+      "expected": {
+        "overall": "PASS",
+        "exit_code": 0,
+        "must_include_rules": [
+          "LF-FASTTEXT-STRUCT"
+        ],
+        "must_not_include_rules": [
+          "LF-FASTTEXT-LIMIT"
+        ]
+      }
+    },
+    {
+      "id": "coverage-incomplete-fasttext-dictionary-scale-limit",
+      "category": "coverage_incomplete",
+      "description": "fastText .bin dictionary declares an entry count beyond this parser's bounded safety cap",
+      "command": {
+        "kind": "inspect",
+        "path": "tests/detector_quality/fixtures/coverage_incomplete/fasttext_dictionary_scale_limit/model.bin"
+      },
+      "expected": {
+        "overall": "WARN",
+        "exit_code": 1,
+        "must_include_rules": [
+          "LF-FASTTEXT-LIMIT"
+        ],
+        "must_not_include_rules": [
+          "LF-FASTTEXT-STRUCT"
+        ]
+      }
+    },
+    {
       "id": "negative-benign-torch7-clean",
       "category": "negative_benign",
       "description": "Torch7 stream containing only a plain table of strings/numbers, no function entries",

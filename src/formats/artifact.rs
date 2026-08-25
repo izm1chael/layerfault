@@ -1,6 +1,6 @@
 use super::{
-    coreml, executorch, gguf, keras, mlx, npy, onnx, openvino, pickle, pytorch, safetensors,
-    tensorflow, tensorrt, tflite, torch7, ArtifactFormat, ArtifactIdentification,
+    coreml, executorch, fasttext, gguf, keras, mlx, npy, onnx, openvino, pickle, pytorch,
+    safetensors, tensorflow, tensorrt, tflite, torch7, ArtifactFormat, ArtifactIdentification,
 };
 use crate::finding_evidence::{structural_invariant, EvidenceSubject, FindingBuilder};
 use crate::safeio::open_readonly_nofollow;
@@ -237,6 +237,7 @@ fn inspect_opened(
         ArtifactFormat::Npy => "application/x-numpy-npy",
         ArtifactFormat::Npz => "application/x-numpy-npz",
         ArtifactFormat::Torch7 => "application/x-torch7",
+        ArtifactFormat::FastText => "application/x-fasttext-bin",
         ArtifactFormat::Unknown => "application/octet-stream",
     };
     let session = crate::scanner::ScanSession::new(path, &file)?;
@@ -429,6 +430,9 @@ fn inspect_opened(
             }),
             ArtifactFormat::Npy => {
                 results.extend(npy::scan(path, &file, size, &identity, media, budget)?);
+            }
+            ArtifactFormat::FastText => {
+                results.extend(fasttext::scan(&file, size, &identity, media)?);
             }
             ArtifactFormat::Npz => {
                 match crate::archive::inspect_opened(

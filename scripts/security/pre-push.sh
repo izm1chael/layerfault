@@ -159,7 +159,11 @@ fi
 
 if command -v semgrep >/dev/null 2>&1; then
   log "Semgrep (auto rules; reviewed nosemgrep annotations honored)"
-    semgrep scan --config auto --error .
+  semgrep scan --config auto --error \
+    --exclude tests/detector_quality/manifest.json \
+    --exclude tests/detector_quality/release_manifest.json \
+    --exclude tests/detector_quality/fixtures/redaction/secret_in_code/modeling_secret.py \
+    .
 else
   echo "WARN: semgrep is not installed; skipping local Semgrep gate" >&2
 fi

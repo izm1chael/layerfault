@@ -151,6 +151,22 @@ pub fn risk_lookup(rule: &str) -> RiskExplanation {
             vec!["arbitrary command execution", "filesystem access", "credential theft"],
             vec!["Do not unpickle or load this file."],
         ),
+        "LF-FASTTEXT-STRUCT" => (
+            "Malformed fastText .bin structure detected",
+            vec!["Parser Safety", "Memory Safety"],
+            "The fastText model header, dictionary section, or dense/quantized matrix payload is malformed, has an invalid magic signature, or is truncated relative to its declared sizes.",
+            "A vulnerable loader may crash, allocate incorrectly, or read outside intended buffers when handling malformed fastText model data.",
+            vec!["runtime crash", "resource exhaustion", "parser confusion"],
+            vec!["Reject the file and reacquire it from a trusted source.", "Do not load it into a fastText runtime."],
+        ),
+        "LF-FASTTEXT-LIMIT" => (
+            "fastText .bin declares sizes beyond parser bounds",
+            vec!["Parser Safety", "Compatibility"],
+            "The fastText dictionary declares an entry or pruned-index count beyond this parser's bounded safety cap.",
+            "Static element accounting is incomplete for declarations at this scale, reducing analysis precision.",
+            vec!["incomplete coverage", "reduced analysis precision"],
+            vec!["Verify the model's provenance and dictionary scale before use."],
+        ),
         "LF-PY-NUMPY-ALLOW-PICKLE" => (
             "NumPy load call sets allow_pickle=True",
             vec!["Code Execution", "Supply Chain"],
