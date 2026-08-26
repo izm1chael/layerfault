@@ -243,7 +243,7 @@
         limitations: "Evidence comes solely from bounded static opcode disassembly; Layerfault never deserialized the stream. A resolved reference does not prove any loader reaches it.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
-        severity: crate::scanner::Severity::Unspecified,
+        severity: crate::scanner::Severity::Critical,
     },
     RuleMetadata {
         rule_id: "LF-PICKLE-MALFORMED",

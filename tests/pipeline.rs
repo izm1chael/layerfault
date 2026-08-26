@@ -103,6 +103,27 @@ fn pipeline_preserves_blocking_exit_for_unsafe_serialization() {
 }
 
 #[test]
+fn pipeline_assigns_critical_severity_to_dangerous_pickle_global() {
+    let fixture = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/detector_quality/fixtures/positive_block/malicious_pickle_eval/model.pkl");
+    let output = Command::new(env!("CARGO_BIN_EXE_layerfault"))
+        .args(["pipeline", fixture.to_str().unwrap(), "--json"])
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(3));
+
+    let value: Value = serde_json::from_slice(&output.stdout).unwrap();
+    let finding = value["findings"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|finding| finding["rule_id"] == "LF-PICKLE-DANGEROUS-GLOBAL")
+        .expect("dangerous pickle finding");
+    assert_eq!(finding["status"], "Fail");
+    assert_eq!(finding["severity"], "CRITICAL");
+}
+
+#[test]
 fn finding_json_omits_severity_deserializes_to_unspecified() {
     // Legacy pipeline JSON captured before severity existed must still load,
     // and must never have a severity inferred from status.

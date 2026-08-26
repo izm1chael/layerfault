@@ -112,7 +112,7 @@ pub fn enriched_finding_ref(finding: &LayerScanResult) -> EnrichedFinding<'_> {
         matches: &finding.matches,
         duration_ms: finding.duration_ms,
         risk: crate::explain::risk_lookup(&rule_id),
-        severity: finding.severity,
+        severity: crate::scanner::resolved_severity(finding),
         finding_id: finding.finding_id.as_deref(),
         subject: finding.subject.as_ref(),
         evidence_state: finding.evidence_state.as_ref(),

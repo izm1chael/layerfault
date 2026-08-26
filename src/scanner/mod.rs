@@ -109,6 +109,25 @@ pub enum Severity {
     Critical,
 }
 
+/// Resolve a finding's severity from the canonical rule catalogue when the
+/// constructor did not provide a more specific value.
+pub fn resolved_severity(finding: &LayerScanResult) -> Severity {
+    if finding.severity != Severity::Unspecified {
+        return finding.severity;
+    }
+    let rule_id = crate::policy::rule_id(finding);
+    crate::rules::lookup(&rule_id)
+        .map(|rule| rule.severity)
+        .unwrap_or(Severity::Unspecified)
+}
+
+/// Apply catalogue severity before a finding collection leaves a scan boundary.
+pub fn finalize_severities(findings: &mut [LayerScanResult]) {
+    for finding in findings {
+        finding.severity = resolved_severity(finding);
+    }
+}
+
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "PascalCase")]
 pub enum FindingClass {
@@ -172,3 +191,31 @@ pub use config::ConfigScanner;
 pub use heuristics::HeuristicsScanner;
 pub use integrity::IntegrityScanner;
 pub use metadata::MetadataScanner;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn direct_finding(rule_id: &str, status: ScanStatus) -> LayerScanResult {
+        LayerScanResult {
+            rule_id: Some(rule_id.to_owned()),
+            status,
+            ..LayerScanResult::default()
+        }
+    }
+
+    #[test]
+    fn finalization_uses_catalogue_severity_without_inferring_from_status() {
+        let mut findings = vec![
+            direct_finding("LF-PICKLE-DANGEROUS-GLOBAL", ScanStatus::Fail),
+            direct_finding("LF-PICKLE-UNKNOWN-GLOBAL", ScanStatus::Warn),
+            direct_finding("LF-PICKLE-SAFE-GLOBALS", ScanStatus::Pass),
+        ];
+
+        finalize_severities(&mut findings);
+
+        assert_eq!(findings[0].severity, Severity::Critical);
+        assert_eq!(findings[1].severity, Severity::Unspecified);
+        assert_eq!(findings[2].severity, Severity::Unspecified);
+    }
+}

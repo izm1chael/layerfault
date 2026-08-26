@@ -765,6 +765,7 @@ pub fn inspect_with_scheduler(
     }
 
     sort_findings_canonically(&mut findings);
+    crate::scanner::finalize_severities(&mut findings);
 
     let correlations = crate::correlate::correlate(&findings);
 

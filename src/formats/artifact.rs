@@ -572,6 +572,7 @@ fn inspect_opened(
             crate::finding_evidence::ensure_finding_identity(result, &rule);
         }
     }
+    crate::scanner::finalize_severities(&mut results);
     let report = ArtifactReport {
         path: path.display().to_string(),
         name: path
