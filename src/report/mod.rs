@@ -3,7 +3,7 @@ use crate::finding_evidence::{
     EvidenceLocation, EvidenceState, EvidenceSubject, FindingCorrelation, FindingEvidence,
 };
 use crate::json_stream::{stream_seq, write_stdout_json};
-use crate::scanner::{CheckType, Confidence, FindingClass, LayerScanResult, ScanStatus};
+use crate::scanner::{CheckType, Confidence, FindingClass, LayerScanResult, ScanStatus, Severity};
 use anyhow::Result;
 use colored::Colorize;
 use comfy_table::{presets::UTF8_FULL, Table};

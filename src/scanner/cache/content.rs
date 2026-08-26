@@ -556,6 +556,7 @@ mod tests {
             evidence_state: Some(EvidenceState::Available),
             evidence_reason: None,
             finding_id: None,
+            severity: crate::scanner::Severity::Unspecified,
         }
     }
 

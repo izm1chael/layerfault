@@ -9,6 +9,7 @@
         limitations: "This finding preserves incomplete evidence and does not establish malicious intent.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-ADAPTER-UNEXPECTED-MODULE",
@@ -21,6 +22,7 @@
         limitations: "This finding records bounded static evidence and does not establish malicious intent.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-ADAPTER-BASE-MISMATCH",
@@ -33,6 +35,7 @@
         limitations: "Numerical anomalies in adapter tensors are statistical signals, not evidence of a specific behavioural change.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-ADAPTER-BASE-UNVERIFIED",
@@ -45,6 +48,7 @@
         limitations: "Numerical anomalies in adapter tensors are statistical signals, not evidence of a specific behavioural change.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-ADAPTER-MODULES-TO-SAVE",
@@ -57,6 +61,7 @@
         limitations: "Numerical anomalies in adapter tensors are statistical signals, not evidence of a specific behavioural change.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-ADAPTER-NORM-OUTLIER",
@@ -69,6 +74,7 @@
         limitations: "Numerical anomalies in adapter tensors are statistical signals, not evidence of a specific behavioural change.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-ADAPTER-RANK-ANOMALY",
@@ -81,6 +87,7 @@
         limitations: "Numerical anomalies in adapter tensors are statistical signals, not evidence of a specific behavioural change.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-ADAPTER-SCALING-ANOMALY",
@@ -93,6 +100,7 @@
         limitations: "Numerical anomalies in adapter tensors are statistical signals, not evidence of a specific behavioural change.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-ADAPTER-SPECTRAL-CONCENTRATION",
@@ -105,6 +113,7 @@
         limitations: "Numerical anomalies in adapter tensors are statistical signals, not evidence of a specific behavioural change.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-ADAPTER-WEIGHT-ANOMALY",
@@ -117,6 +126,7 @@
         limitations: "Numerical anomalies in adapter tensors are statistical signals, not evidence of a specific behavioural change.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-ARCHIVE-BOMB",
@@ -129,6 +139,7 @@
         limitations: "Layerfault reports the observed technical condition. Establishing intent or impact requires review beyond static analysis.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-ARCHIVE-DUPLICATE",
@@ -141,6 +152,7 @@
         limitations: "Layerfault reports the observed technical condition. Establishing intent or impact requires review beyond static analysis.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-ARCHIVE-ENCRYPTED",
@@ -153,6 +165,7 @@
         limitations: "Layerfault reports the observed technical condition. Establishing intent or impact requires review beyond static analysis.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-ARCHIVE-FORMAT-MISMATCH",
@@ -165,6 +178,7 @@
         limitations: "Layerfault reports the observed technical condition. Establishing intent or impact requires review beyond static analysis.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-ARCHIVE-LIMIT",
@@ -177,6 +191,7 @@
         limitations: "This records what Layerfault did not examine. Unexamined content is neither clean nor harmful; it is unreviewed.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-ARCHIVE-LINK",
@@ -189,6 +204,7 @@
         limitations: "Layerfault reports the observed technical condition. Establishing intent or impact requires review beyond static analysis.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-ARCHIVE-MALFORMED",
@@ -201,6 +217,7 @@
         limitations: "Layerfault reports the observed technical condition. Establishing intent or impact requires review beyond static analysis.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-ARCHIVE-NESTED",
@@ -213,6 +230,7 @@
         limitations: "Layerfault reports the observed technical condition. Establishing intent or impact requires review beyond static analysis.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-ARCHIVE-SECURITY-MEMBER",
@@ -225,6 +243,7 @@
         limitations: "Layerfault reports the observed technical condition. Establishing intent or impact requires review beyond static analysis.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-ARCHIVE-TRAVERSAL",
@@ -237,6 +256,7 @@
         limitations: "Layerfault reports the observed technical condition. Establishing intent or impact requires review beyond static analysis.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-CORR-CUSTOM-LOADER-NATIVE",
@@ -249,6 +269,7 @@
         limitations: "Layerfault correlated a Python loader call site with native library capabilities. It did not execute the model code or verify that the native function path is invoked automatically.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-FORMAT-APPENDED-ARCHIVE",
@@ -261,6 +282,7 @@
         limitations: "Layerfault measured the unmodeled trailing bytes after the primary format logical end. Static detection does not prove that a particular runtime will parse or execute the trailing bytes.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-FORMAT-APPENDED-SERIALIZATION",
@@ -273,6 +295,7 @@
         limitations: "Layerfault measured the unmodeled trailing bytes after the primary format logical end. Static detection does not prove that a particular runtime will parse or execute the trailing bytes.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-FORMAT-CLAIM-MISMATCH",
@@ -285,6 +308,7 @@
         limitations: "Layerfault observed the contradiction between filename and header magic. It does not establish whether the mismatch was intentional evasion or a renaming error.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-FORMAT-CONTENT-SMUGGLING",
@@ -297,6 +321,7 @@
         limitations: "Layerfault observed the contradiction between filename and header magic. It does not establish whether the mismatch was intentional evasion or a renaming error.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-FORMAT-POLYGLOT",
@@ -309,6 +334,7 @@
         limitations: "Polyglot detection establishes structural validity for multiple parsers. Layerfault did not execute the secondary payload.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-FORMAT-TRAILING-DATA",
@@ -321,6 +347,7 @@
         limitations: "Layerfault measured the unmodeled trailing bytes after the primary format logical end. Static detection does not prove that a particular runtime will parse or execute the trailing bytes.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-FORMAT-UNKNOWN",
@@ -333,6 +360,7 @@
         limitations: "This records what Layerfault did not examine. Unexamined content is neither clean nor harmful; it is unreviewed.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-GGUF-STRUCT-VALID",
@@ -345,6 +373,7 @@
         limitations: "Layerfault reports the observed technical condition. Establishing intent or impact requires review beyond static analysis.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-GGUF-TEXT-LIMIT",
@@ -357,6 +386,7 @@
         limitations: "This records what Layerfault did not examine. Unexamined content is neither clean nor harmful; it is unreviewed.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-KERAS-ARCHIVE",
@@ -369,6 +399,7 @@
         limitations: "Layerfault reports the observed technical condition. Establishing intent or impact requires review beyond static analysis.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-KERAS-CUSTOM-OBJECT",
@@ -381,6 +412,7 @@
         limitations: "An unrecognised operation or type is not inherently harmful; it means Layerfault cannot confirm it resolves to reviewed, data-only handling.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-KERAS-HDF5-LIMIT",
@@ -393,6 +425,7 @@
         limitations: "This records what Layerfault did not examine. Unexamined content is neither clean nor harmful; it is unreviewed.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-KERAS-STRUCT-VALID",
@@ -405,6 +438,7 @@
         limitations: "Layerfault reports the observed technical condition. Establishing intent or impact requires review beyond static analysis.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-NATIVE-DYNAMIC-LOAD",
@@ -417,6 +451,7 @@
         limitations: "Static detection of RPATH or dynamic loader symbols is capability evidence. It does not prove that unverified libraries are loaded at runtime or that the path is exploitable.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-NATIVE-EXEC-CAPABILITY",
@@ -429,6 +464,7 @@
         limitations: "Static detection of process or network symbol imports is capability evidence, not proof of malicious intent. Layerfault did not execute the native binary.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-NATIVE-NETWORK-CAPABILITY",
@@ -441,6 +477,7 @@
         limitations: "Static detection of process or network symbol imports is capability evidence, not proof of malicious intent. Layerfault did not execute the native binary.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-NATIVE-RPATH",
@@ -453,6 +490,7 @@
         limitations: "Static detection of RPATH or dynamic loader symbols is capability evidence. It does not prove that unverified libraries are loaded at runtime or that the path is exploitable.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-NATIVE-WX-SECTION",
@@ -465,6 +503,7 @@
         limitations: "Layerfault identified writable and executable memory flags statically. It did not execute the binary, and WX permissions may be caused by legacy linker settings.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-ONNX-CUSTOM-OP",
@@ -477,6 +516,7 @@
         limitations: "An unrecognised operation or type is not inherently harmful; it means Layerfault cannot confirm it resolves to reviewed, data-only handling.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-ONNX-EXTERNAL-DATA",
@@ -489,6 +529,7 @@
         limitations: "Layerfault reports the observed technical condition. Establishing intent or impact requires review beyond static analysis.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-ONNX-EXTERNAL-HARDLINK",
@@ -501,6 +542,7 @@
         limitations: "Layerfault reports the observed technical condition. Establishing intent or impact requires review beyond static analysis.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-ONNX-EXTERNAL-INTEGRITY",
@@ -513,6 +555,7 @@
         limitations: "Layerfault reports the observed technical condition. Establishing intent or impact requires review beyond static analysis.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-ONNX-EXTERNAL-RANGE",
@@ -525,6 +568,7 @@
         limitations: "Layerfault reports the observed technical condition. Establishing intent or impact requires review beyond static analysis.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-ONNX-STRUCT",
@@ -537,6 +581,7 @@
         limitations: "Layerfault reports the observed technical condition. Establishing intent or impact requires review beyond static analysis.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-ONNX-STRUCT-VALID",
@@ -549,6 +594,7 @@
         limitations: "Layerfault reports the observed technical condition. Establishing intent or impact requires review beyond static analysis.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-SAFE-DTYPE",
@@ -561,6 +607,7 @@
         limitations: "An unrecognised operation or type is not inherently harmful; it means Layerfault cannot confirm it resolves to reviewed, data-only handling.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-SAFE-INDEX",
@@ -573,6 +620,7 @@
         limitations: "Layerfault reports the observed technical condition. Establishing intent or impact requires review beyond static analysis.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-SAFE-INDEX-INVALID",
@@ -585,6 +633,7 @@
         limitations: "Layerfault reports the observed technical condition. Establishing intent or impact requires review beyond static analysis.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-SAFE-STRUCT",
@@ -597,6 +646,7 @@
         limitations: "Layerfault reports the observed technical condition. Establishing intent or impact requires review beyond static analysis.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-NPY-STRUCT",
@@ -609,6 +659,7 @@
         limitations: "Static analysis checks header bounds and expected byte lengths without executing NumPy.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-NPY-DTYPE-UNSUPPORTED",
@@ -621,6 +672,7 @@
         limitations: "Layerfault reports compatibility bounds for unknown complex descriptors rather than guessing element size.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-NPY-OBJECT-DTYPE",
@@ -633,6 +685,7 @@
         limitations: "Static analysis identifies object dtype presence without executing deserialization.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-NPY-PICKLE",
@@ -645,6 +698,7 @@
         limitations: "Layerfault disassembles the opcode stream without unpickling or executing code.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-FASTTEXT-STRUCT",
@@ -657,6 +711,7 @@
         limitations: "Static analysis checks declared header, dictionary and matrix bounds against the actual file length without executing fastText.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-FASTTEXT-LIMIT",
@@ -669,6 +724,7 @@
         limitations: "Layerfault reports the bound it stopped at rather than guessing dictionary contents beyond the safety cap.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-CORR-NUMPY-ALLOW-PICKLE",
@@ -681,6 +737,7 @@
         limitations: "Static analysis correlates resolved loader parameters and package member dtypes.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-SAFE-STRUCT-VALID",
@@ -693,6 +750,7 @@
         limitations: "Layerfault reports the observed technical condition. Establishing intent or impact requires review beyond static analysis.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-TF-CHECKPOINT-LIMIT",
@@ -705,6 +763,7 @@
         limitations: "This records what Layerfault did not examine. Unexamined content is neither clean nor harmful; it is unreviewed.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-TF-CHECKPOINT-STRUCT",
@@ -717,6 +776,7 @@
         limitations: "A violated invariant shows the file is unsafe to parse. It does not establish that the malformation is deliberate or that a specific runtime is exploitable.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-TF-EXECUTION-OP",
@@ -729,6 +789,7 @@
         limitations: "Detection is a bounded byte-substring search over the serialized graph, not a protobuf parse. Layerfault cannot attribute the marker to a specific node, confirm the operation is reachable, or rule out an incidental match.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-TF-FILESYSTEM-WRITE",
@@ -741,6 +802,7 @@
         limitations: "Detection is a bounded byte-substring search over the serialized graph, not a protobuf parse. Layerfault cannot attribute the marker to a specific node, confirm the operation is reachable, or rule out an incidental match.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-TF-SCAN-LIMIT",
@@ -753,6 +815,7 @@
         limitations: "This records what Layerfault did not examine. Unexamined content is neither clean nor harmful; it is unreviewed.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-TF-STRUCT",
@@ -765,6 +828,7 @@
         limitations: "Layerfault reports the observed technical condition. Establishing intent or impact requires review beyond static analysis.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-TF-STRUCT-VALID",
@@ -777,6 +841,7 @@
         limitations: "Layerfault reports the observed technical condition. Establishing intent or impact requires review beyond static analysis.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-TFLITE-ASSOCIATED-FILE",
@@ -789,6 +854,7 @@
         limitations: "Layerfault reports the observed technical condition. Establishing intent or impact requires review beyond static analysis.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-TFLITE-STRUCT",
@@ -801,6 +867,7 @@
         limitations: "Layerfault reports the observed technical condition. Establishing intent or impact requires review beyond static analysis.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-TFLITE-STRUCT-VALID",
@@ -813,6 +880,7 @@
         limitations: "Layerfault reports the observed technical condition. Establishing intent or impact requires review beyond static analysis.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-WHEEL-RECORD-MISMATCH",
@@ -825,6 +893,7 @@
         limitations: "Layerfault reports the observed technical condition. Establishing intent or impact requires review beyond static analysis.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "T12-001",
@@ -837,6 +906,7 @@
         limitations: "Layerfault parsed the executable's headers only. It did not disassemble, emulate or otherwise characterise the code, and embedded executables can have legitimate uses.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "T12-002",
@@ -849,6 +919,7 @@
         limitations: "Layerfault parsed the executable's headers only. It did not disassemble, emulate or otherwise characterise the code, and embedded executables can have legitimate uses.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "T12-003",
@@ -861,6 +932,7 @@
         limitations: "Layerfault parsed the executable's headers only. It did not disassemble, emulate or otherwise characterise the code, and embedded executables can have legitimate uses.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "T12-004",
@@ -873,6 +945,7 @@
         limitations: "Layerfault parsed the executable's headers only. It did not disassemble, emulate or otherwise characterise the code, and embedded executables can have legitimate uses.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "T12-CLEAR",
@@ -885,6 +958,7 @@
         limitations: "Pattern matching over text cannot distinguish an attack payload from documentation, test data or discussion of the same technique. Review the excerpt in context.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "T15-STRUCT",
@@ -897,4 +971,5 @@
         limitations: "Layerfault reports the observed technical condition. Establishing intent or impact requires review beyond static analysis.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },

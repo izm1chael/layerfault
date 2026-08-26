@@ -37,6 +37,11 @@ fn pipeline_json_reports_clean_artifact_and_risk_shape() {
         .unwrap()
         .iter()
         .all(|finding| finding["risk"].is_object()));
+    assert!(value["findings"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .all(|finding| finding["severity"].is_string()));
     let _ = fs::remove_file(path);
 }
 
@@ -89,5 +94,41 @@ fn pipeline_preserves_blocking_exit_for_unsafe_serialization() {
         .unwrap()
         .iter()
         .any(|finding| finding["rule_id"] == "LF-PICKLE-MALFORMED"));
+    assert!(value["findings"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .all(|finding| finding["severity"].is_string()));
     let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn finding_json_omits_severity_deserializes_to_unspecified() {
+    // Legacy pipeline JSON captured before severity existed must still load,
+    // and must never have a severity inferred from status.
+    let legacy = serde_json::json!({
+        "layer_digest": "sha256:deadbeef",
+        "media_type": "application/octet-stream",
+        "check_type": "ScanError",
+        "status": "Fail",
+        "finding_class": "Informational",
+        "confidence": "Medium",
+        "detail": null,
+        "matches": [],
+        "duration_ms": 0
+    });
+    let finding: layerfault::scanner::LayerScanResult = serde_json::from_value(legacy).unwrap();
+    assert_eq!(finding.severity, layerfault::scanner::Severity::Unspecified);
+}
+
+#[test]
+fn finding_severity_round_trips_through_json() {
+    let finding = layerfault::scanner::LayerScanResult {
+        severity: layerfault::scanner::Severity::Critical,
+        ..Default::default()
+    };
+    let value = serde_json::to_value(&finding).unwrap();
+    assert_eq!(value["severity"], "CRITICAL");
+    let back: layerfault::scanner::LayerScanResult = serde_json::from_value(value).unwrap();
+    assert_eq!(back.severity, layerfault::scanner::Severity::Critical);
 }

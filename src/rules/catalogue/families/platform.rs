@@ -9,6 +9,7 @@
         limitations: "Identity mismatch establishes drift from the approved context but does not determine why the change occurred.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-ADMISSION-RECEIPT-RUNTIME-CONFIG-MISMATCH",
@@ -21,6 +22,7 @@
         limitations: "Identity mismatch establishes drift from the approved context but does not determine why the change occurred.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-ADMISSION-RECEIPT-AGENT-MISMATCH",
@@ -33,6 +35,7 @@
         limitations: "Identity mismatch establishes drift from the approved context but does not determine why the change occurred.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-ADMISSION-RECEIPT-CAPABILITY-MISMATCH",
@@ -45,6 +48,7 @@
         limitations: "Identity mismatch establishes drift from the approved context but does not determine why the change occurred.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-ADMISSION-RECEIPT-MCP-MISMATCH",
@@ -57,6 +61,7 @@
         limitations: "Identity mismatch establishes drift from the approved context but does not determine why the change occurred.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-TRUST-SECURITY-DRIFT",
@@ -69,6 +74,7 @@
         limitations: "This finding records bounded static evidence and does not establish malicious intent.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-TRUST-EVIDENCE-STALE",
@@ -81,6 +87,7 @@
         limitations: "This finding records bounded static evidence and does not establish malicious intent.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-HF-LFS-DIGEST-MISMATCH",
@@ -93,6 +100,7 @@
         limitations: "Layerfault verifies content against the Hub's declared LFS metadata. It does not establish how or why the remote metadata or downloaded bytes differed.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-HF-LFS-INTEGRITY",
@@ -105,6 +113,7 @@
         limitations: "Remote LFS verification establishes byte identity against the Hub revision metadata; it does not attest to the safety or functionality of tensor weights or code.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-HF-LFS-METADATA-INVALID",
@@ -117,6 +126,7 @@
         limitations: "Layerfault verifies content against the Hub's declared LFS metadata. It does not establish how or why the remote metadata or downloaded bytes differed.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-HF-LFS-SIZE-MISMATCH",
@@ -129,6 +139,7 @@
         limitations: "Layerfault verifies content against the Hub's declared LFS metadata. It does not establish how or why the remote metadata or downloaded bytes differed.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-HF-REMOTE-HASH-UNAVAILABLE",
@@ -141,6 +152,7 @@
         limitations: "Remote LFS verification establishes byte identity against the Hub revision metadata; it does not attest to the safety or functionality of tensor weights or code.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-INTEGRITY-DIGEST-MISMATCH",
@@ -153,6 +165,7 @@
         limitations: "Layerfault reports only the values it measured. It does not establish how or why the artifact differs from its declaration.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-INTEGRITY-SIZE-MISMATCH",
@@ -165,6 +178,7 @@
         limitations: "Layerfault reports only the values it measured. It does not establish how or why the artifact differs from its declaration.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-INTEGRITY-VERIFIED",
@@ -177,6 +191,7 @@
         limitations: "Layerfault reports the observed technical condition. Establishing intent or impact requires review beyond static analysis.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-BINDING-PACKAGE-MUTATED",
@@ -189,6 +204,7 @@
         limitations: "Detects mutations occurring between admission inspection and safe copy streaming; does not prevent host OS root kernel modifications.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-BINDING-REVALIDATION-FAILED",
@@ -201,6 +217,7 @@
         limitations: "Revalidation verifies staged member hashes and package fingerprint; it relies on filesystem read-only permissions.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-BINDING-SYMLINK-REFUSED",
@@ -213,6 +230,7 @@
         limitations: "Package staging strictly refuses symlinks to guarantee immutable byte binding.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-BINDING-UNBOUND-RESOURCE",
@@ -225,6 +243,7 @@
         limitations: "Enforced via network isolation and local-only environment variables inside the strong sandbox.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-RUNTIME-ADVISORY-CLEAR",
@@ -237,6 +256,7 @@
         limitations: "Layerfault reports the observed technical condition. Establishing intent or impact requires review beyond static analysis.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-RUNTIME-ADVISORY-MATCH",
@@ -249,6 +269,7 @@
         limitations: "Layerfault reports the observed technical condition. Establishing intent or impact requires review beyond static analysis.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-RUNTIME-ADVISORY-STALE",
@@ -261,6 +282,7 @@
         limitations: "Layerfault reports the observed technical condition. Establishing intent or impact requires review beyond static analysis.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-RUNTIME-VERSION-UNKNOWN",
@@ -273,6 +295,7 @@
         limitations: "Version comparison against an advisory range does not establish that the vulnerable code path is reachable in your configuration.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-SCAN-ERROR",
@@ -285,6 +308,7 @@
         limitations: "This reports a failure to inspect, not a property of the artifact. The artifact may be benign.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-UNCLASSIFIED",
@@ -297,6 +321,7 @@
         limitations: "Layerfault reports the observed technical condition. Establishing intent or impact requires review beyond static analysis.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-INTEL-IDENTITY-REVOKED",
@@ -309,6 +334,7 @@
         limitations: "The finding establishes that the signed intelligence record applies to the observed identity; it does not determine the underlying incident cause.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-INTEL-ADAPTER-INDICATOR",
@@ -321,6 +347,7 @@
         limitations: "The finding is scoped to the exact adapter digest represented by the intelligence record.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-INTEL-BUILDER-INDICATOR",
@@ -333,6 +360,7 @@
         limitations: "The finding evaluates the builder identity represented in provenance; it does not independently inspect the builder environment.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-INTEL-PACK-EXPIRED",
@@ -345,6 +373,7 @@
         limitations: "This finding describes intelligence trust/freshness state; it does not by itself prove a model is malicious.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-INTEL-PACK-STALE",
@@ -357,6 +386,7 @@
         limitations: "This finding describes intelligence trust/freshness state; it does not by itself prove a model is malicious.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-INTEL-PACK-ROLLBACK",
@@ -369,6 +399,7 @@
         limitations: "This finding describes intelligence trust/freshness state; it does not by itself prove a model is malicious.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-INTEL-PACK-SIGNATURE",
@@ -381,6 +412,7 @@
         limitations: "This finding describes intelligence trust/freshness state; it does not by itself prove a model is malicious.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-ADMISSION-RECEIPT-ARTIFACT-MISMATCH",
@@ -393,6 +425,7 @@
         limitations: "This finding records bounded technical evidence and does not by itself establish malicious intent.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-ADMISSION-RECEIPT-INTELLIGENCE-MISMATCH",
@@ -405,6 +438,7 @@
         limitations: "This finding records bounded technical evidence and does not by itself establish malicious intent.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-ADMISSION-RECEIPT-RULESET-MISMATCH",
@@ -417,6 +451,7 @@
         limitations: "This finding records bounded technical evidence and does not by itself establish malicious intent.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-ADMISSION-RECEIPT-RUNTIME-MISMATCH",
@@ -429,6 +464,7 @@
         limitations: "This finding records bounded technical evidence and does not by itself establish malicious intent.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-ASSURANCE-PICKLE-DIFFERENTIAL",
@@ -441,6 +477,7 @@
         limitations: "This finding records bounded technical evidence and does not by itself establish malicious intent.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-ASSURANCE-PICKLE-UNRESOLVED-EXECUTION",
@@ -453,6 +490,7 @@
         limitations: "This finding records bounded technical evidence and does not by itself establish malicious intent.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-PASSPORT-INCOMPLETE",
@@ -465,6 +503,7 @@
         limitations: "Incomplete coverage means unobserved conditions remain unknown; it must not be interpreted as a clean result.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-PICKLE-PERSISTENT-ID",
@@ -477,4 +516,5 @@
         limitations: "This finding records bounded technical evidence and does not by itself establish malicious intent.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },

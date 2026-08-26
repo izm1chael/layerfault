@@ -51,6 +51,7 @@ pub struct FindingBuilder {
     status: ScanStatus,
     finding_class: FindingClass,
     confidence: Confidence,
+    severity: crate::scanner::Severity,
     layer_digest: String,
     media_type: String,
     detail: Option<String>,
@@ -65,12 +66,16 @@ pub struct FindingBuilder {
 
 impl FindingBuilder {
     pub fn new(rule_id: &str, check_type: CheckType, status: ScanStatus) -> Self {
+        let severity = crate::rules::lookup(rule_id)
+            .map(|rule| rule.severity)
+            .unwrap_or(crate::scanner::Severity::Unspecified);
         Self {
             rule_id: rule_id.to_owned(),
             check_type,
             status,
             finding_class: FindingClass::Informational,
             confidence: Confidence::Medium,
+            severity,
             layer_digest: String::new(),
             media_type: String::new(),
             detail: None,
@@ -93,6 +98,16 @@ impl FindingBuilder {
     #[must_use]
     pub fn confidence(mut self, confidence: Confidence) -> Self {
         self.confidence = confidence;
+        self
+    }
+
+    /// Override the catalogue-default severity for this specific instance.
+    /// Use only when the specific indicator this call reports genuinely
+    /// diverges from the rule's catalogue severity; do not use this to
+    /// derive severity from `status`.
+    #[must_use]
+    pub fn severity(mut self, severity: crate::scanner::Severity) -> Self {
+        self.severity = severity;
         self
     }
 
@@ -266,6 +281,7 @@ impl FindingBuilder {
             evidence_state: Some(evidence_state),
             evidence_reason,
             finding_id: Some(finding_id),
+            severity: self.severity,
         }
     }
 }

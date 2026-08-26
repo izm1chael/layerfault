@@ -56,6 +56,10 @@ pub struct LayerScanResult {
     /// Deterministic identity for correlation, diffing and disclosure tracking.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub finding_id: Option<String>,
+    /// Evidence-based severity of the specific indicator reported. Never derived
+    /// from `status`: absent evidence for a severity claim must stay `Unspecified`.
+    #[serde(default)]
+    pub severity: Severity,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -74,6 +78,35 @@ pub enum Confidence {
     #[default]
     Medium,
     High,
+}
+
+/// Evidence-based severity of a specific indicator. Distinct from `Confidence`
+/// (how sure the detector is), `FindingClass` (what kind of fact this is), and
+/// `ScanStatus`/admission class (the policy decision) — none of those may be
+/// used to infer this field. `Unspecified` is a legitimate, preserved value for
+/// findings where severity is genuinely not established, not a placeholder to
+/// eliminate.
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    Default,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    serde::Serialize,
+    serde::Deserialize,
+)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum Severity {
+    #[default]
+    Unspecified,
+    Info,
+    Low,
+    Medium,
+    High,
+    Critical,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]

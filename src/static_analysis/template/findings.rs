@@ -28,6 +28,7 @@ pub fn build_layer_scan_result(
         evidence_state: None,
         evidence_reason: None,
         finding_id: None,
+        severity: crate::scanner::Severity::Unspecified,
     };
 
     let subject = EvidenceSubject::identity(layer_digest, media_type)

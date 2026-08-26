@@ -71,6 +71,7 @@ pub struct EnrichedFinding<'a> {
     pub matches: &'a [String],
     pub duration_ms: u64,
     pub risk: crate::explain::RiskExplanation,
+    pub severity: Severity,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub finding_id: Option<&'a str>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -111,6 +112,7 @@ pub fn enriched_finding_ref(finding: &LayerScanResult) -> EnrichedFinding<'_> {
         matches: &finding.matches,
         duration_ms: finding.duration_ms,
         risk: crate::explain::risk_lookup(&rule_id),
+        severity: finding.severity,
         finding_id: finding.finding_id.as_deref(),
         subject: finding.subject.as_ref(),
         evidence_state: finding.evidence_state.as_ref(),

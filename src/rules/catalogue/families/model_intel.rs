@@ -9,6 +9,7 @@
         limitations: "This finding records bounded static evidence and does not establish malicious intent.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-COMPOSITION-DUPLICATE-ADAPTER",
@@ -21,6 +22,7 @@
         limitations: "This finding records bounded static evidence and does not establish malicious intent.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-SHELL-EVAL",
@@ -33,6 +35,7 @@
         limitations: "This is a textual substring match, not a shell parse: it cannot tell whether the match sits inside a comment, string literal or unreachable branch. The shell semantic frontend provides higher-fidelity analysis where supported.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-SHELL-EXEC",
@@ -45,6 +48,7 @@
         limitations: "This is a textual substring match, not a shell parse: it cannot tell whether the match sits inside a comment, string literal or unreachable branch. The shell semantic frontend provides higher-fidelity analysis where supported.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-SHELL-DOT-SOURCE",
@@ -57,6 +61,7 @@
         limitations: "This is a textual substring match, not a shell parse: it cannot tell whether the match sits inside a comment, string literal or unreachable branch. The shell semantic frontend provides higher-fidelity analysis where supported.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-SHELL-CURL-PIPE",
@@ -69,6 +74,7 @@
         limitations: "This is a textual substring match, not a shell parse: it cannot tell whether the match sits inside a comment, string literal or unreachable branch. The shell semantic frontend provides higher-fidelity analysis where supported.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-PS-INVOKE-EXPRESSION",
@@ -81,6 +87,7 @@
         limitations: "This is a textual substring match, not a PowerShell parse: it cannot tell whether the match sits inside a comment, string literal or unreachable branch. The PowerShell semantic frontend provides higher-fidelity analysis where supported.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-PS-ENCODED-COMMAND",
@@ -93,6 +100,7 @@
         limitations: "This is a textual substring match, not a PowerShell parse: it cannot tell whether the match sits inside a comment, string literal or unreachable branch. The PowerShell semantic frontend provides higher-fidelity analysis where supported.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-PS-DOWNLOAD",
@@ -105,6 +113,7 @@
         limitations: "This is a textual substring match, not a PowerShell parse: it cannot tell whether the match sits inside a comment, string literal or unreachable branch. The PowerShell semantic frontend provides higher-fidelity analysis where supported.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-JS-CHILD-PROCESS",
@@ -117,6 +126,7 @@
         limitations: "This is a textual substring match, not a JavaScript parse: it cannot tell whether the match sits inside a comment, string literal or unreachable branch. The JavaScript semantic frontend provides higher-fidelity analysis where supported.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-JS-REQUIRE-CHILD-PROCESS",
@@ -129,6 +139,7 @@
         limitations: "This is a textual substring match, not a JavaScript parse: it cannot tell whether the match sits inside a comment, string literal or unreachable branch. The JavaScript semantic frontend provides higher-fidelity analysis where supported.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-HEUR-CLEAR",
@@ -141,6 +152,7 @@
         limitations: "Layerfault reports the observed technical condition. Establishing intent or impact requires review beyond static analysis.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-HEUR-DECODED-MATCH",
@@ -153,6 +165,7 @@
         limitations: "Pattern matching over text cannot distinguish an attack payload from documentation, test data or discussion of the same technique. Review the excerpt in context.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-BACKDOOR-BEHAVIOUR-DIVERGENCE",
@@ -165,6 +178,7 @@
         limitations: "This is empirical anomalous/backdoor-like evidence, not proof of malicious intent or a complete absence/presence claim.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-BACKDOOR-HUNT-INCOMPLETE",
@@ -177,6 +191,7 @@
         limitations: "Incomplete coverage means unobserved conditions remain unknown; it must not be interpreted as a clean result.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-BACKDOOR-STATIC-DELTA-CONCENTRATION",
@@ -189,6 +204,7 @@
         limitations: "This is empirical anomalous/backdoor-like evidence, not proof of malicious intent or a complete absence/presence claim.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-BACKDOOR-STATIC-DELTA-NOTABLE",
@@ -201,6 +217,7 @@
         limitations: "This is a weaker, diffuse-shaped indicator, not proof of malicious intent — ordinary fine-tuning and continued pretraining can produce a similar diffuse pattern.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-BACKDOOR-STATIC-EMBEDDING-OUTLIER",
@@ -213,6 +230,7 @@
         limitations: "This is empirical anomalous/backdoor-like evidence, not proof of malicious intent or a complete absence/presence claim.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-BACKDOOR-STATIC-NONFINITE",
@@ -225,6 +243,7 @@
         limitations: "This is empirical anomalous/backdoor-like evidence, not proof of malicious intent or a complete absence/presence claim.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-BACKDOOR-TRIGGER-REPRODUCIBLE",
@@ -237,6 +256,7 @@
         limitations: "This is empirical anomalous/backdoor-like evidence, not proof of malicious intent or a complete absence/presence claim.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-CORR-BACKDOOR-MULTI-SIGNAL",
@@ -249,6 +269,7 @@
         limitations: "This is empirical anomalous/backdoor-like evidence, not proof of malicious intent or a complete absence/presence claim.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-FORENSIC-COVERAGE-INCOMPLETE",
@@ -261,6 +282,7 @@
         limitations: "Incomplete coverage means unobserved conditions remain unknown; it must not be interpreted as a clean result.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-FORENSIC-TENSOR-EMBEDDED-OBJECT",
@@ -273,6 +295,7 @@
         limitations: "This finding records bounded technical evidence and does not by itself establish malicious intent.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-FORENSIC-UNCLAIMED-ARCHIVE",
@@ -285,6 +308,7 @@
         limitations: "This finding records bounded technical evidence and does not by itself establish malicious intent.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-FORENSIC-UNCLAIMED-EXECUTABLE",
@@ -297,6 +321,7 @@
         limitations: "This finding records bounded technical evidence and does not by itself establish malicious intent.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-IDENTITY-CLAIM-INCONSISTENT",
@@ -309,6 +334,7 @@
         limitations: "This finding records bounded technical evidence and does not by itself establish malicious intent.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-IDENTITY-INCOMPLETE",
@@ -321,6 +347,7 @@
         limitations: "Incomplete coverage means unobserved conditions remain unknown; it must not be interpreted as a clean result.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-IDENTITY-STRUCTURAL-DIVERGENCE",
@@ -333,6 +360,7 @@
         limitations: "This finding records bounded technical evidence and does not by itself establish malicious intent.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-RUNTIME-COMPAT-CONDITIONAL",
@@ -345,6 +373,7 @@
         limitations: "This finding records bounded technical evidence and does not by itself establish malicious intent.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-RUNTIME-COMPAT-INCOMPATIBLE",
@@ -357,6 +386,7 @@
         limitations: "This finding records bounded technical evidence and does not by itself establish malicious intent.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-RUNTIME-COMPAT-UNKNOWN",
@@ -369,4 +399,5 @@
         limitations: "This finding records bounded technical evidence and does not by itself establish malicious intent.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },

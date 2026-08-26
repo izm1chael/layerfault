@@ -9,6 +9,7 @@
         limitations: "This finding records bounded static evidence and does not establish malicious intent.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-AGENT-DANGEROUS-CAPABILITY-CHAIN",
@@ -21,6 +22,7 @@
         limitations: "This finding records a graph-reachability claim from bounded static evidence, not proof that data has actually flowed from source to sink. An indeterminate result means insufficient evidence to decide, not that no path exists — it must not be read as a clean pass. A path already blocked by a known isolation barrier is not reported here at all.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-TOOL-HIGH-IMPACT-UNCONFIRMED",
@@ -33,6 +35,7 @@
         limitations: "This finding records bounded static evidence and does not establish malicious intent.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-MCP-AUTH-ABSENT",
@@ -45,6 +48,7 @@
         limitations: "Static configuration cannot prove an upstream proxy or external identity layer is absent; verify deployment posture before concluding exposure.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-MCP-TLS-ABSENT",
@@ -57,6 +61,7 @@
         limitations: "This finding records bounded static evidence and does not establish malicious intent.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-MCP-DISCOVERY-INCOMPLETE",
@@ -69,6 +74,7 @@
         limitations: "This finding records bounded static evidence and does not establish malicious intent.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-MCP-CREDENTIAL-IN-URL",
@@ -81,6 +87,7 @@
         limitations: "This finding records bounded static evidence from the configured endpoint string and does not establish that the credential is still valid.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-MCP-CREDENTIAL-ENV-EXPOSURE",
@@ -93,6 +100,7 @@
         limitations: "This is a heuristic over the value's shape, not secret detection; it does not attempt to validate whether the value is a real, currently active credential. Only the variable name is ever recorded, never the value.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-MCP-ORIGIN-UNRESTRICTED",
@@ -105,6 +113,7 @@
         limitations: "This is a static, config-only check based on a literal local address in the configuration; it does not perform DNS resolution and cannot detect a hostname that only resolves to a local address at connection time.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-MCP-AUTH-METADATA-MISSING",
@@ -117,6 +126,7 @@
         limitations: "Layerfault does not fetch a live `.well-known/oauth-protected-resource` document; this finding reflects only what the static configuration itself declares.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-MCP-TOKEN-AUDIENCE-UNBOUND",
@@ -129,6 +139,7 @@
         limitations: "This finding reflects the static configuration's declared fields only and does not verify token behaviour at runtime.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-MCP-SCOPE-OVERBROAD",
@@ -141,6 +152,7 @@
         limitations: "This is a pattern match over a small set of known broad-scope tokens; a scope string that is broad in effect but does not match one of these patterns will not be flagged.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-MCP-TOKEN-PASSTHROUGH-RISK",
@@ -153,6 +165,7 @@
         limitations: "Name equality across servers is a coincidence-tolerant heuristic, not proof that the same credential value is reused; only variable names are compared, never values.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-MCP-CONTRADICTORY-ANNOTATION",
@@ -165,6 +178,7 @@
         limitations: "The inferred capability side of this comparison is itself lexical/structural inference (see LF-AGENT-DANGEROUS-CAPABILITY-CHAIN's own limitations) and can be wrong in either direction; this finding reports a discrepancy worth reviewing, not a proven falsehood.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-MCP-SUPPLY-CHAIN-AUTO-DOWNLOAD",
@@ -177,6 +191,7 @@
         limitations: "This is a static reading of the command line only; Layerfault does not query the package registry and cannot determine whether the pinned version, if present, is itself trustworthy.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-MCP-SUPPLY-CHAIN-AUTO-CONFIRM",
@@ -189,6 +204,7 @@
         limitations: "The flag's presence is read directly from static configuration; this does not evaluate whether the flag was necessary for the launcher to function non-interactively in its deployment context.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-AGENT-CAPABILITY-EXPANSION",
@@ -201,6 +217,7 @@
         limitations: "This compares two already-computed capability graphs; it does not itself determine which prior observation is the correct baseline to compare against, and a server or tool being removed and re-added under a different identity will appear as an addition, not a modification.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-BEHAV-EMPTY-RESPONSE",
@@ -213,6 +230,7 @@
         limitations: "This records an incomplete or unusable probe response; it does not establish why the response was empty or attribute intent to the model.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-BEHAV-CANARY-ACCESS",
@@ -225,6 +243,7 @@
         limitations: "Observations come from a bounded sandboxed probe with a fixed seed and configuration. Absence of an observation is not absence of the behaviour, and a single observation is not proof of consistent behaviour.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-BEHAV-DANGEROUS-EXEC",
@@ -237,6 +256,7 @@
         limitations: "Observations come from a bounded sandboxed probe with a fixed seed and configuration. Absence of an observation is not absence of the behaviour, and a single observation is not proof of consistent behaviour.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-BEHAV-FILESYSTEM-MUTATION",
@@ -249,6 +269,7 @@
         limitations: "Observations come from a bounded sandboxed probe with a fixed seed and configuration. Absence of an observation is not absence of the behaviour, and a single observation is not proof of consistent behaviour.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-BEHAV-FILESYSTEM-WRITE-ATTEMPT",
@@ -261,6 +282,7 @@
         limitations: "Observations come from a bounded sandboxed probe with a fixed seed and configuration. Absence of an observation is not absence of the behaviour, and a single observation is not proof of consistent behaviour.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-BEHAV-NETWORK-ATTEMPT",
@@ -273,6 +295,7 @@
         limitations: "Observations come from a bounded sandboxed probe with a fixed seed and configuration. Absence of an observation is not absence of the behaviour, and a single observation is not proof of consistent behaviour.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-BEHAV-PERSONA-PERSISTENCE",
@@ -285,6 +308,7 @@
         limitations: "Observations come from a bounded sandboxed probe with a fixed seed and configuration. Absence of an observation is not absence of the behaviour, and a single observation is not proof of consistent behaviour.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-BEHAV-PRIVILEGE-BOUNDARY",
@@ -297,6 +321,7 @@
         limitations: "Observations come from a bounded sandboxed probe with a fixed seed and configuration. Absence of an observation is not absence of the behaviour, and a single observation is not proof of consistent behaviour.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-BEHAV-RUNTIME-FAILURE",
@@ -309,6 +334,7 @@
         limitations: "Observations come from a bounded sandboxed probe with a fixed seed and configuration. Absence of an observation is not absence of the behaviour, and a single observation is not proof of consistent behaviour.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-BEHAV-SECRET-DISCLOSURE",
@@ -321,6 +347,7 @@
         limitations: "Observations come from a bounded sandboxed probe with a fixed seed and configuration. Absence of an observation is not absence of the behaviour, and a single observation is not proof of consistent behaviour.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-BEHAV-SECURE-CODE-REGRESSION",
@@ -333,6 +360,7 @@
         limitations: "Observations come from a bounded sandboxed probe with a fixed seed and configuration. Absence of an observation is not absence of the behaviour, and a single observation is not proof of consistent behaviour.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-BEHAV-SENSITIVE-PATH-ACCESS",
@@ -345,6 +373,7 @@
         limitations: "Observations come from a bounded sandboxed probe with a fixed seed and configuration. Absence of an observation is not absence of the behaviour, and a single observation is not proof of consistent behaviour.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-BEHAV-TARGETED-CONTENT",
@@ -357,6 +386,7 @@
         limitations: "Observations come from a bounded sandboxed probe with a fixed seed and configuration. Absence of an observation is not absence of the behaviour, and a single observation is not proof of consistent behaviour.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-BEHAV-TOOL-EXFIL",
@@ -369,6 +399,7 @@
         limitations: "Observations come from a bounded sandboxed probe with a fixed seed and configuration. Absence of an observation is not absence of the behaviour, and a single observation is not proof of consistent behaviour.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-BEHAV-TRACE-TRUNCATED",
@@ -381,6 +412,7 @@
         limitations: "Observations come from a bounded sandboxed probe with a fixed seed and configuration. Absence of an observation is not absence of the behaviour, and a single observation is not proof of consistent behaviour.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-BEHAV-UNEXPECTED-EXEC",
@@ -393,6 +425,7 @@
         limitations: "Observations come from a bounded sandboxed probe with a fixed seed and configuration. Absence of an observation is not absence of the behaviour, and a single observation is not proof of consistent behaviour.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-LAYERPOLICY",
@@ -405,6 +438,7 @@
         limitations: "This is a policy decision about findings, not an independent technical observation. The underlying evidence belongs to the referenced findings.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-BUDGET-EVIDENCE",
@@ -417,6 +451,7 @@
         limitations: "This reports incomplete observation caused by a resource limit; it does not establish malicious intent.",
         evidence_requirement: EvidenceRequirement::StructuredOnly,
         requirement_reason: "The exhaustion record is structured budget evidence rather than a source excerpt.",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-TEMPLATE-CHANGED",
@@ -429,6 +464,7 @@
         limitations: "Layerfault reports that the compared artifacts differ. It does not establish that the difference is unauthorised or harmful.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-TEMPLATE-DYNAMIC-INCLUDE",
@@ -441,6 +477,7 @@
         limitations: "Layerfault never renders templates. Whether this expression is exploitable depends on the runtime rendering context, which static analysis cannot determine.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-TEMPLATE-INTROSPECTION",
@@ -453,6 +490,7 @@
         limitations: "Layerfault never renders templates. Whether this expression is exploitable depends on the runtime rendering context, which static analysis cannot determine.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-TEMPLATE-SSTI",
@@ -465,6 +503,7 @@
         limitations: "Layerfault never renders templates. Whether this expression is exploitable depends on the runtime rendering context, which static analysis cannot determine.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-EXECUTORCH-TRUNCATED",
@@ -477,6 +516,7 @@
         limitations: "The extended-header size check only covers files using its 32+ byte form; see LF-EXECUTORCH-SEGMENT-SIZE-UNKNOWN for the short-header case, and files with no extended header at all get only the minimum-size check.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-EXECUTORCH-SEGMENT-SIZE-UNKNOWN",
@@ -489,6 +529,7 @@
         limitations: "This finding intentionally carries no claim about the artifact's integrity, only that this specific check's coverage is incomplete for this header form.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-EXECUTORCH-INVALID-MAGIC",
@@ -501,6 +542,7 @@
         limitations: "Pure-Rust header verification.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-EXECUTORCH-BOUNDS",
@@ -513,6 +555,7 @@
         limitations: "Bounded offset checks.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-EXECUTORCH-STRUCTURAL",
@@ -525,6 +568,7 @@
         limitations: "Capability-limited structural parser.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-RUNTIME-POSTURE-NETWORK-EXPOSED",
@@ -537,6 +581,7 @@
         limitations: "Posture is based only on safely observable local process/configuration facts; unknown facts remain unknown.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-RUNTIME-POSTURE-AUTH-ABSENT",
@@ -549,6 +594,7 @@
         limitations: "Posture is based only on safely observable local process/configuration facts; unknown facts remain unknown.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-RUNTIME-POSTURE-TLS-ABSENT",
@@ -561,6 +607,7 @@
         limitations: "Posture is based only on safely observable local process/configuration facts; unknown facts remain unknown.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-RUNTIME-POSTURE-PYTHON-OPTIMIZED",
@@ -573,6 +620,7 @@
         limitations: "Posture is based only on safely observable local process/configuration facts; unknown facts remain unknown.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-RUNTIME-POSTURE-CUSTOM-CODE-EXTENSION",
@@ -585,6 +633,7 @@
         limitations: "Posture is based only on safely observable local process/configuration facts; the extension module's own content is not inspected here.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-RUNTIME-POSTURE-PICKLE-WEIGHT-LOADING",
@@ -597,6 +646,7 @@
         limitations: "Posture is based only on safely observable local process/configuration facts; it does not itself scan the weight file this runtime would load.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-RUNTIME-POSTURE-CORS-WILDCARD",
@@ -609,6 +659,7 @@
         limitations: "Posture is based only on safely observable local process/configuration facts; unknown facts remain unknown.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-RUNTIME-POSTURE-CUSTOM-CHAT-TEMPLATE",
@@ -621,6 +672,7 @@
         limitations: "This is a presence signal only; the template's actual content is not analysed here (see the tokenizer/chat-template security programme item).",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-RUNTIME-POSTURE-REVISION-UNPINNED",
@@ -633,6 +685,7 @@
         limitations: "Posture is based only on safely observable local process/configuration facts; it does not verify that a pinned revision, where present, is itself trustworthy.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-RUNTIME-POSTURE-LOCAL-MEDIA-ACCESS",
@@ -645,6 +698,7 @@
         limitations: "Posture is based only on safely observable local process/configuration facts; unknown facts remain unknown.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-RUNTIME-POSTURE-CROSS-TENANT-STATE-EXPOSURE",
@@ -657,6 +711,7 @@
         limitations: "Posture is based only on safely observable local process/configuration facts; unknown facts remain unknown.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-RUNTIME-POSTURE-INCOMPLETE",
@@ -669,6 +724,7 @@
         limitations: "Posture is based only on safely observable local process/configuration facts; unknown facts remain unknown.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-RUNTIME-EXPLOIT-PRECONDITIONS-MET",
@@ -681,6 +737,7 @@
         limitations: "The result is bounded to typed facts Layerfault can safely observe; unknown facts are not treated as false.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-RUNTIME-EXPLOIT-PRECONDITIONS-POSSIBLE",
@@ -693,6 +750,7 @@
         limitations: "The result is bounded to typed facts Layerfault can safely observe; unknown facts are not treated as false.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-RUNTIME-EXPLOIT-INCOMPLETE",
@@ -705,6 +763,7 @@
         limitations: "The result is bounded to typed facts Layerfault can safely observe; unknown facts are not treated as false.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-CONFIG-ACTIVATION-IMPORT",
@@ -717,6 +776,7 @@
         limitations: "This finding records bounded technical evidence and does not by itself establish malicious intent.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-CONFIG-CUSTOM-CLASS",
@@ -729,6 +789,7 @@
         limitations: "This finding records bounded technical evidence and does not by itself establish malicious intent.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-CONFIG-DYNAMIC-IMPORT",
@@ -741,6 +802,7 @@
         limitations: "This finding records bounded technical evidence and does not by itself establish malicious intent.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-CONFIG-EXECUTION-EDGE-INCOMPLETE",
@@ -753,6 +815,7 @@
         limitations: "Incomplete coverage means unobserved conditions remain unknown; it must not be interpreted as a clean result.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-PREFLIGHT-INCOMPLETE",
@@ -765,6 +828,7 @@
         limitations: "Incomplete coverage means unobserved conditions remain unknown; it must not be interpreted as a clean result.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-PREFLIGHT-INTEGRITY-UNAVAILABLE",
@@ -777,6 +841,7 @@
         limitations: "This finding records bounded technical evidence and does not by itself establish malicious intent.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-PREFLIGHT-REVISION-RESOLVED",
@@ -789,6 +854,7 @@
         limitations: "This finding records bounded technical evidence and does not by itself establish malicious intent.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-PREFLIGHT-UNPINNED-REVISION",
@@ -801,4 +867,5 @@
         limitations: "This finding records bounded technical evidence and does not by itself establish malicious intent.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },

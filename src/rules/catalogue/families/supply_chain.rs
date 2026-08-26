@@ -9,6 +9,7 @@
         limitations: "Corpus statistics describe a distribution, not a specific harmful record, and legitimate corpora can exhibit the same shapes.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-DATASET-CREDENTIAL-LIKE",
@@ -21,6 +22,7 @@
         limitations: "Corpus statistics describe a distribution, not a specific harmful record, and legitimate corpora can exhibit the same shapes.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-DATASET-DUPLICATE-CONCENTRATION",
@@ -33,6 +35,7 @@
         limitations: "Corpus statistics describe a distribution, not a specific harmful record, and legitimate corpora can exhibit the same shapes.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-DATASET-NEAR-DUPLICATE-CONCENTRATION",
@@ -45,6 +48,7 @@
         limitations: "This is a bounded sorted-window heuristic, not exhaustive pairwise comparison: near-duplicate pairs whose fingerprints happen to sort far apart are not caught. Legitimate corpora with templated content can exhibit the same shape.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-DATASET-RARE-TRIGGER-CORRELATION",
@@ -57,6 +61,7 @@
         limitations: "Corpus statistics describe a distribution, not a specific harmful record, and legitimate corpora can exhibit the same shapes.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-DATASET-UNSAFE-CODE-PATTERN",
@@ -69,6 +74,7 @@
         limitations: "Corpus statistics describe a distribution, not a specific harmful record, and legitimate corpora can exhibit the same shapes.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-DATASET-URL-CONCENTRATION",
@@ -81,6 +87,7 @@
         limitations: "Corpus statistics describe a distribution, not a specific harmful record, and legitimate corpora can exhibit the same shapes.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-DATASET-ZERO-WIDTH",
@@ -93,6 +100,7 @@
         limitations: "Corpus statistics describe a distribution, not a specific harmful record, and legitimate corpora can exhibit the same shapes.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-DEP-ALT-INDEX",
@@ -105,6 +113,7 @@
         limitations: "A non-default index or channel is not inherently unsafe; many organizations run legitimate private mirrors. This does not establish that the alternate source is compromised.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-DEP-ANALYSIS-INCOMPLETE",
@@ -117,6 +126,7 @@
         limitations: "This is a parser-failure or budget-limit fact. It does not characterize the manifest's actual dependency risk, which remains unexamined.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-DEP-BUILD-BACKEND",
@@ -129,6 +139,7 @@
         limitations: "A non-default build backend is not inherently unsafe; this records that install-time code exists and names it, without evaluating its behaviour.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-DEP-DIRECT-URL",
@@ -141,6 +152,7 @@
         limitations: "Layerfault records the declared source shape. It does not contact the index, VCS host, or filesystem path, and does not establish that the referenced content is unsafe.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-DEP-FLOATING",
@@ -153,6 +165,7 @@
         limitations: "Absence of a pin is a manifest-level fact. It does not establish that the currently resolvable version is compromised, nor predict what a future resolution will select.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-DEP-INCLUDE-MISSING",
@@ -165,6 +178,7 @@
         limitations: "This describes a gap in Layerfault's view of the manifest tree, not a property of the (unresolved) included file's content.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-DEP-INSECURE-TRANSPORT",
@@ -177,6 +191,7 @@
         limitations: "Layerfault observes the declared transport scheme only. It does not confirm whether a network-position attack actually occurred for this specific install.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-DEP-INSTALL-HOOK",
@@ -189,6 +204,7 @@
         limitations: "Static detection of a custom Command subclass and a capability inside its body does not establish that pip actually invokes this exact hook for a given install command, that the capability executes unconditionally, or that the base class was correctly resolved without import analysis.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-DEP-NPM-INSTALL-HOOK",
@@ -201,6 +217,7 @@
         limitations: "Static detection of the declared hook command and a best-effort extracted script filename does not establish that npm actually invokes this exact script for a given install command, or that a referenced script exists at that exact path within the package.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-DEP-LOCAL-PATH",
@@ -213,6 +230,7 @@
         limitations: "Layerfault records the declared source shape. It does not contact the index, VCS host, or filesystem path, and does not establish that the referenced content is unsafe.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-DEP-PATH-ESCAPE",
@@ -225,6 +243,7 @@
         limitations: "Layerfault detects the declared path shape only; it does not open or verify content at the escaped location.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-DEP-RUNTIME-INSTALL",
@@ -237,6 +256,7 @@
         limitations: "Layerfault records the literal invocation it found; it does not execute the hook and cannot confirm the install command runs in every configuration or actually succeeds.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-DEP-VCS",
@@ -249,6 +269,7 @@
         limitations: "Layerfault records the declared source shape. It does not contact the index, VCS host, or filesystem path, and does not establish that the referenced content is unsafe.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-DEP-VCS-MUTABLE-REF",
@@ -261,6 +282,7 @@
         limitations: "Layerfault does not contact the VCS host and cannot determine what the reference currently resolves to, whether it has changed historically, or whether the hosting repository enforces branch protection.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-DERIVE-SCHEMA-CROSS-FORMAT",
@@ -273,6 +295,7 @@
         limitations: "Layerfault reports that the compared artifacts differ. It does not establish that the difference is unauthorised or harmful.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-DERIVE-SCHEMA-MISMATCH",
@@ -285,6 +308,7 @@
         limitations: "Layerfault reports that the compared artifacts differ. It does not establish that the difference is unauthorised or harmful.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-DIFF-EMPTY-RESPONSE",
@@ -297,6 +321,7 @@
         limitations: "This records an incomplete or unusable probe response; it does not establish why the response was empty or attribute intent to either model.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-DIFF-INCOMPLETE",
@@ -309,6 +334,7 @@
         limitations: "This finding describes a limitation of this specific comparison run, not a property of either compared artifact. It must not be treated as evidence of a security regression by itself.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-DIFF-LOCALIZED-DIVERGENCE",
@@ -321,6 +347,7 @@
         limitations: "Layerfault reports that the compared artifacts differ. It does not establish that the difference is unauthorised or harmful.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-DIFF-SAFETY-BOUNDARY-FLIP",
@@ -333,6 +360,7 @@
         limitations: "Layerfault reports that the compared artifacts differ. It does not establish that the difference is unauthorised or harmful.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-DIFF-SECURITY-REGRESSION",
@@ -345,6 +373,7 @@
         limitations: "Layerfault reports that the compared artifacts differ. It does not establish that the difference is unauthorised or harmful.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-DIFF-SUSPICIOUS-TRIGGER",
@@ -357,6 +386,7 @@
         limitations: "Layerfault reports that the compared artifacts differ. It does not establish that the difference is unauthorised or harmful.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-DRIFT-EXECUTABLE-ADDED",
@@ -369,6 +399,7 @@
         limitations: "Layerfault reports that the compared artifacts differ. It does not establish that the difference is unauthorised or harmful.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-DRIFT-TEMPLATE-CHANGED",
@@ -381,6 +412,7 @@
         limitations: "Layerfault reports that the compared artifacts differ. It does not establish that the difference is unauthorised or harmful.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-DRIFT-TOKENIZER-CHANGED",
@@ -393,6 +425,7 @@
         limitations: "Layerfault reports that the compared artifacts differ. It does not establish that the difference is unauthorised or harmful.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-DRIFT-WEIGHTS-CHANGED",
@@ -405,6 +438,7 @@
         limitations: "Layerfault reports that the compared artifacts differ. It does not establish that the difference is unauthorised or harmful.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-LINEAGE-ARCH-MISMATCH",
@@ -417,6 +451,7 @@
         limitations: "Layerfault reports that the compared artifacts differ. It does not establish that the difference is unauthorised or harmful.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-LINEAGE-CHAIN-BROKEN",
@@ -429,6 +464,7 @@
         limitations: "Layerfault reports that the compared artifacts differ. It does not establish that the difference is unauthorised or harmful.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-LINEAGE-CHAIN-CYCLE",
@@ -441,6 +477,7 @@
         limitations: "Layerfault reports that the compared artifacts differ. It does not establish that the difference is unauthorised or harmful.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-LINEAGE-CHAIN-SIGNATURE",
@@ -453,6 +490,7 @@
         limitations: "Layerfault reports that the compared artifacts differ. It does not establish that the difference is unauthorised or harmful.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-LINEAGE-CHAIN-UNTRUSTED-SIGNER",
@@ -465,6 +503,7 @@
         limitations: "Layerfault reports that the compared artifacts differ. It does not establish that the difference is unauthorised or harmful.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-LINEAGE-CLAIM-NO-EVIDENCE",
@@ -477,6 +516,7 @@
         limitations: "Layerfault reports that the compared artifacts differ. It does not establish that the difference is unauthorised or harmful.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-LINEAGE-CLAIM-IDENTITY-MISMATCH",
@@ -489,6 +529,7 @@
         limitations: "This finding is about claim/artifact binding only; it does not itself assess whether the claimed relationship, correctly bound, would hold.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-LINEAGE-CLAIM-STRUCTURAL-CONTRADICTION",
@@ -501,6 +542,7 @@
         limitations: "This is a structural (architecture/format-level) comparison; it does not itself re-run behavioural or tensor-level analysis.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-LINEAGE-CLAIM-TOKENIZER-CONTRADICTION",
@@ -513,6 +555,7 @@
         limitations: "This compares tokenizer identity values only; it does not itself assess what changed within the tokenizer.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-LINEAGE-CLAIM-TRANSFORMATION-CONTRADICTED",
@@ -525,6 +568,7 @@
         limitations: "This checks byte-identity only; a claim describing a transformation that happens to be a no-op in this specific instance (e.g. quantizing to the same precision) is a legitimate edge case this rule cannot distinguish from a false claim.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-LINEAGE-CLAIM-TRANSFORMATION-UNVERIFIED",
@@ -537,6 +581,7 @@
         limitations: "This checks evidence presence, not evidence quality; supplied evidence is still only as trustworthy as its own verification (see the transformation chain signature/trust checks).",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-LINEAGE-MANIFEST-CLAIM",
@@ -549,6 +594,7 @@
         limitations: "Layerfault reports that the compared artifacts differ. It does not establish that the difference is unauthorised or harmful.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-LINEAGE-MANIFEST-ENDPOINT",
@@ -561,6 +607,7 @@
         limitations: "Layerfault reports that the compared artifacts differ. It does not establish that the difference is unauthorised or harmful.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-LINEAGE-QUANTIZATION-CROSS-FORMAT",
@@ -573,6 +620,7 @@
         limitations: "Layerfault reports that the compared artifacts differ. It does not establish that the difference is unauthorised or harmful.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-LINEAGE-QUANTIZATION-METADATA-INCOMPARABLE",
@@ -585,6 +633,7 @@
         limitations: "Layerfault reports that the compared artifacts differ. It does not establish that the difference is unauthorised or harmful.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-LINEAGE-QUANTIZATION-TEMPLATE",
@@ -597,6 +646,7 @@
         limitations: "Layerfault reports that the compared artifacts differ. It does not establish that the difference is unauthorised or harmful.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-LINEAGE-QUANTIZATION-TOKENIZER",
@@ -609,6 +659,7 @@
         limitations: "Layerfault reports that the compared artifacts differ. It does not establish that the difference is unauthorised or harmful.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-LINEAGE-REPACKAGE-CONTENT",
@@ -621,6 +672,7 @@
         limitations: "Layerfault reports that the compared artifacts differ. It does not establish that the difference is unauthorised or harmful.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-PACKAGE-ARTIFACT",
@@ -633,6 +685,7 @@
         limitations: "Layerfault reports the observed technical condition. Establishing intent or impact requires review beyond static analysis.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-PACKAGE-CODE",
@@ -645,6 +698,7 @@
         limitations: "Layerfault reports the observed technical condition. Establishing intent or impact requires review beyond static analysis.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-PACKAGE-FILE",
@@ -657,6 +711,7 @@
         limitations: "Layerfault reports the observed technical condition. Establishing intent or impact requires review beyond static analysis.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-PACKAGE-JSON-INVALID",
@@ -669,6 +724,7 @@
         limitations: "Layerfault reports the observed technical condition. Establishing intent or impact requires review beyond static analysis.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-PACKAGE-RACE",
@@ -681,6 +737,7 @@
         limitations: "Layerfault reports only the values it measured. It does not establish how or why the artifact differs from its declaration.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-PACKAGE-MEMBER-ERROR",
@@ -693,6 +750,7 @@
         limitations: "Layerfault reports the technical error encountered during static analysis.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-PACKAGE-MEMBER-PANIC",
@@ -705,6 +763,7 @@
         limitations: "Layerfault safely isolated the panic to preserve overall package analysis.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-PACKAGE-SYMLINK",
@@ -717,6 +776,7 @@
         limitations: "Layerfault records the declared target without following it. It has not established what the target actually resolves to.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-PACKAGE-TEXT-LIMIT",
@@ -729,6 +789,7 @@
         limitations: "This records what Layerfault did not examine. Unexamined content is neither clean nor harmful; it is unreviewed.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-PROV-BINDING",
@@ -741,6 +802,7 @@
         limitations: "Trust state reflects the configured trust store and policy. It is a statement about verification, not about the artifact's contents.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-PROV-INACTIVE",
@@ -753,6 +815,7 @@
         limitations: "Trust state reflects the configured trust store and policy. It is a statement about verification, not about the artifact's contents.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-PROV-LEGACY",
@@ -765,6 +828,7 @@
         limitations: "Trust state reflects the configured trust store and policy. It is a statement about verification, not about the artifact's contents.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-PROV-LOCAL",
@@ -777,6 +841,7 @@
         limitations: "Trust state reflects the configured trust store and policy. It is a statement about verification, not about the artifact's contents.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-PROV-LOCAL-VERIFIED",
@@ -789,6 +854,7 @@
         limitations: "Trust state reflects the configured trust store and policy. It is a statement about verification, not about the artifact's contents.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-PROV-MULTI",
@@ -801,6 +867,7 @@
         limitations: "Trust state reflects the configured trust store and policy. It is a statement about verification, not about the artifact's contents.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-PROV-NAMESPACE",
@@ -813,6 +880,7 @@
         limitations: "Trust state reflects the configured trust store and policy. It is a statement about verification, not about the artifact's contents.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-PROV-REVOKED",
@@ -825,6 +893,7 @@
         limitations: "Trust state reflects the configured trust store and policy. It is a statement about verification, not about the artifact's contents.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-PROV-SIGNATURE",
@@ -837,6 +906,7 @@
         limitations: "Trust state reflects the configured trust store and policy. It is a statement about verification, not about the artifact's contents.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-PROV-SIGSTORE",
@@ -849,6 +919,7 @@
         limitations: "Trust state reflects the configured trust store and policy. It is a statement about verification, not about the artifact's contents.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-PROV-SIGSTORE-INVALID",
@@ -861,6 +932,7 @@
         limitations: "Trust state reflects the configured trust store and policy. It is a statement about verification, not about the artifact's contents.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-PROV-TRUSTED",
@@ -873,6 +945,7 @@
         limitations: "Trust state reflects the configured trust store and policy. It is a statement about verification, not about the artifact's contents.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-PROV-UNSIGNED",
@@ -885,6 +958,7 @@
         limitations: "Trust state reflects the configured trust store and policy. It is a statement about verification, not about the artifact's contents.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-PROV-UNTRUSTED",
@@ -897,6 +971,7 @@
         limitations: "Trust state reflects the configured trust store and policy. It is a statement about verification, not about the artifact's contents.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-TOKENIZER-CHANGED",
@@ -909,6 +984,7 @@
         limitations: "Layerfault reports that the compared artifacts differ. It does not establish that the difference is unauthorised or harmful.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "T13-001",
@@ -921,6 +997,7 @@
         limitations: "Pattern matching over text cannot distinguish an attack payload from documentation, test data or discussion of the same technique. Review the excerpt in context.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "T13-002",
@@ -933,6 +1010,7 @@
         limitations: "Pattern matching over text cannot distinguish an attack payload from documentation, test data or discussion of the same technique. Review the excerpt in context.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-INVENTORY-APPROVAL-STALE",
@@ -945,6 +1023,7 @@
         limitations: "This finding records bounded technical evidence and does not by itself establish malicious intent.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-INVENTORY-MODIFIED",
@@ -957,6 +1036,7 @@
         limitations: "This finding records bounded technical evidence and does not by itself establish malicious intent.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-INVENTORY-NEW-UNAPPROVED",
@@ -969,6 +1049,7 @@
         limitations: "This finding records bounded technical evidence and does not by itself establish malicious intent.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-INVENTORY-PREVIOUSLY-BLOCKED",
@@ -981,6 +1062,7 @@
         limitations: "This finding records bounded technical evidence and does not by itself establish malicious intent.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-LINEAGE-IDENTITY-CONTRADICTION",
@@ -993,6 +1075,7 @@
         limitations: "This finding records bounded technical evidence and does not by itself establish malicious intent.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-LINEAGE-TRANSFORMATION-UNVERIFIED",
@@ -1005,6 +1088,7 @@
         limitations: "This finding records bounded technical evidence and does not by itself establish malicious intent.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-LINEAGE-UNEXPLAINED-COMPONENT",
@@ -1017,4 +1101,5 @@
         limitations: "This finding records bounded technical evidence and does not by itself establish malicious intent.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },

@@ -9,6 +9,7 @@
         limitations: "The presence of a custom-code mapping does not establish that the referenced code is malicious, nor that any particular loader will execute it.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-CODE-CTYPES",
@@ -21,6 +22,7 @@
         limitations: "Static presence of this primitive does not prove that the code path is reachable, that it executes during model loading, or that its use is malicious. Layerfault did not execute the code.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-CODE-EVAL",
@@ -33,6 +35,7 @@
         limitations: "Layerfault reports the observed technical condition. Establishing intent or impact requires review beyond static analysis.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-CODE-EXEC",
@@ -45,6 +48,7 @@
         limitations: "Layerfault reports the observed technical condition. Establishing intent or impact requires review beyond static analysis.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-CODE-IMPORT-SIDE-EFFECT",
@@ -57,6 +61,7 @@
         limitations: "Static presence of this primitive does not prove that the code path is reachable, that it executes during model loading, or that its use is malicious. Layerfault did not execute the code.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-CODE-NETWORK",
@@ -69,6 +74,7 @@
         limitations: "Static presence of this primitive does not prove that the code path is reachable, that it executes during model loading, or that its use is malicious. Layerfault did not execute the code.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-CODE-OS-SYSTEM",
@@ -81,6 +87,7 @@
         limitations: "Layerfault reports the observed technical condition. Establishing intent or impact requires review beyond static analysis.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-CODE-REMOTE-TRUST",
@@ -93,6 +100,7 @@
         limitations: "The presence of a custom-code mapping does not establish that the referenced code is malicious, nor that any particular loader will execute it.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-CODE-SUBPROCESS",
@@ -105,6 +113,7 @@
         limitations: "Layerfault reports the observed technical condition. Establishing intent or impact requires review beyond static analysis.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-CORR-HF-LOADER-CREDENTIALS",
@@ -117,6 +126,7 @@
         limitations: "Layerfault reports the observed technical condition. Establishing intent or impact requires review beyond static analysis.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-CORR-HF-LOADER-DYNAMIC-CODE",
@@ -129,6 +139,7 @@
         limitations: "Layerfault reports the observed technical condition. Establishing intent or impact requires review beyond static analysis.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-CORR-HF-LOADER-FILESYSTEM",
@@ -141,6 +152,7 @@
         limitations: "Layerfault reports the observed technical condition. Establishing intent or impact requires review beyond static analysis.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-CORR-HF-LOADER-INSTALL",
@@ -153,6 +165,7 @@
         limitations: "Layerfault reports the observed technical condition. Establishing intent or impact requires review beyond static analysis.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-CORR-HF-LOADER-NATIVE-LOAD",
@@ -165,6 +178,7 @@
         limitations: "Layerfault reports the observed technical condition. Establishing intent or impact requires review beyond static analysis.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-CORR-HF-LOADER-NETWORK",
@@ -177,6 +191,7 @@
         limitations: "Layerfault reports the observed technical condition. Establishing intent or impact requires review beyond static analysis.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-CORR-HF-LOADER-PROCESS",
@@ -189,6 +204,7 @@
         limitations: "Layerfault reports the observed technical condition. Establishing intent or impact requires review beyond static analysis.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-CORR-RUNTIME-INSTALL",
@@ -201,6 +217,7 @@
         limitations: "Layerfault reports the observed technical condition. Establishing intent or impact requires review beyond static analysis.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-CORR-NPM-INSTALL-HOOK-CAPABILITY",
@@ -213,6 +230,7 @@
         limitations: "Layerfault reports the observed technical condition. Establishing intent or impact requires review beyond static analysis.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-PICKLE-DANGEROUS-GLOBAL",
@@ -225,6 +243,7 @@
         limitations: "Evidence comes solely from bounded static opcode disassembly; Layerfault never deserialized the stream. A resolved reference does not prove any loader reaches it.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-PICKLE-MALFORMED",
@@ -237,6 +256,7 @@
         limitations: "Layerfault stopped at the first unsafe condition rather than attempting recovery, so the remainder of the stream is uncharacterised.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-PICKLE-PARSER-DISAGREEMENT",
@@ -249,6 +269,7 @@
         limitations: "This finding does not determine which reader is correct, only that they disagree. It is bounded static structural comparison and does not establish malicious intent.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-PICKLE-PARSER-ASSURANCE-INCOMPLETE",
@@ -261,6 +282,7 @@
         limitations: "This finding intentionally carries no claim about the artifact. It reports only that Layerfault's differential assurance pass did not complete for this stream.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-PICKLE-OPAQUE-COMPRESSED",
@@ -273,6 +295,7 @@
         limitations: "Incomplete coverage is the finding: Layerfault establishes what it could not review, not that the opaque content is harmful. Any supported opcode regions are still analyzed and can independently produce a BLOCK.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-PICKLE-OPAQUE-CONTAINER",
@@ -285,6 +308,7 @@
         limitations: "Opacity is the finding: Layerfault establishes that it could not review the content, not that the content is harmful.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-TORCH7-DANGEROUS-FUNCTION",
@@ -297,6 +321,7 @@
         limitations: "Evidence comes solely from bounded static tag-stream disassembly; Layerfault never executed or decoded the Lua bytecode itself. A resolved function entry does not prove any loader reaches it.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-TORCH7-MALFORMED",
@@ -309,6 +334,7 @@
         limitations: "Layerfault stopped at the first unsafe condition rather than attempting recovery, so the remainder of the stream is uncharacterised. Torch7's `long` field width is platform-dependent in the original format; a genuine file using an unassumed width can also surface as this finding.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-TORCH7-STRUCT-VALID",
@@ -321,6 +347,7 @@
         limitations: "Structural validity does not establish that referenced Torch class instances are semantically sound, only that the tag stream parses within Layerfault's bounded reader.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-TORCH7-OPAQUE-COMPRESSED",
@@ -333,6 +360,7 @@
         limitations: "Opacity is the finding: Layerfault establishes that it could not review the content, not that the content is harmful.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-PICKLE-SAFE-GLOBALS",
@@ -345,6 +373,7 @@
         limitations: "Layerfault reports the observed technical condition. Establishing intent or impact requires review beyond static analysis.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-PICKLE-UNKNOWN-GLOBAL",
@@ -357,6 +386,7 @@
         limitations: "Evidence comes solely from bounded static opcode disassembly; Layerfault never deserialized the stream. A resolved reference does not prove any loader reaches it.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-PY-CALL-DYNAMIC-CODE",
@@ -369,6 +399,7 @@
         limitations: "Layerfault reports the observed technical condition. Establishing intent or impact requires review beyond static analysis.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-PY-CALL-NETWORK",
@@ -381,6 +412,7 @@
         limitations: "Layerfault reports the observed technical condition. Establishing intent or impact requires review beyond static analysis.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-PY-CALL-PROCESS",
@@ -393,6 +425,7 @@
         limitations: "Layerfault reports the observed technical condition. Establishing intent or impact requires review beyond static analysis.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-PY-CREDENTIAL-ACCESS",
@@ -405,6 +438,7 @@
         limitations: "Layerfault reports the observed technical condition. Establishing intent or impact requires review beyond static analysis.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-PY-FILESYSTEM-MUTATION",
@@ -417,6 +451,7 @@
         limitations: "Layerfault reports the observed technical condition. Establishing intent or impact requires review beyond static analysis.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-PY-FLOW-CREDENTIAL-NETWORK",
@@ -429,6 +464,7 @@
         limitations: "Static flow analysis is bounded; complex dynamic aliasing or unsupported data structures may be reported as incomplete.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-PY-FLOW-FILE-NETWORK",
@@ -441,6 +477,7 @@
         limitations: "Static flow analysis is bounded; complex dynamic aliasing or unsupported data structures may be reported as incomplete.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-PY-FLOW-INPUT-EXEC",
@@ -453,6 +490,7 @@
         limitations: "Static flow analysis is bounded; complex dynamic aliasing or unsupported data structures may be reported as incomplete.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-PY-FLOW-NETWORK-EXEC",
@@ -465,6 +503,7 @@
         limitations: "Static flow analysis is bounded; complex dynamic aliasing or unsupported data structures may be reported as incomplete.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-PY-NATIVE-LOAD",
@@ -477,6 +516,7 @@
         limitations: "Layerfault reports the observed technical condition. Establishing intent or impact requires review beyond static analysis.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-PY-PACKAGE-INSTALL",
@@ -489,6 +529,7 @@
         limitations: "Layerfault reports the observed technical condition. Establishing intent or impact requires review beyond static analysis.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-PY-SEMANTIC-INCOMPLETE",
@@ -501,6 +542,7 @@
         limitations: "Layerfault reports the observed technical condition. Establishing intent or impact requires review beyond static analysis.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-PY-TAINT-INCOMPLETE",
@@ -513,6 +555,7 @@
         limitations: "Bounded analysis intentionally stops at configured budget thresholds to remain deterministic and safe.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-SHELL-SEMANTIC-PROCESS",
@@ -525,6 +568,7 @@
         limitations: "The shell tokenizer is bounded and not a full POSIX grammar (see shell_static::parser); confidence is capped lower than the equivalent Python finding.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-SHELL-SEMANTIC-DYNAMIC-CODE",
@@ -537,6 +581,7 @@
         limitations: "The shell tokenizer is bounded and not a full POSIX grammar (see shell_static::parser); confidence is capped lower than the equivalent Python finding.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-SHELL-SEMANTIC-CURL-PIPE-SH",
@@ -549,6 +594,7 @@
         limitations: "Layerfault reports the observed technical condition. Establishing intent or impact requires review beyond static analysis.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-SHELL-SEMANTIC-CREDENTIAL-ACCESS",
@@ -561,6 +607,7 @@
         limitations: "The shell tokenizer is bounded and not a full POSIX grammar (see shell_static::parser); confidence is capped lower than the equivalent Python finding.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-SHELL-SEMANTIC-PACKAGE-INSTALL",
@@ -573,6 +620,7 @@
         limitations: "The shell tokenizer is bounded and not a full POSIX grammar (see shell_static::parser); confidence is capped lower than the equivalent Python finding.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-SHELL-SEMANTIC-FILESYSTEM-WRITE",
@@ -585,6 +633,7 @@
         limitations: "The shell tokenizer is bounded and not a full POSIX grammar (see shell_static::parser); confidence is capped lower than the equivalent Python finding.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-SHELL-SEMANTIC-NATIVE-LOAD",
@@ -597,6 +646,7 @@
         limitations: "Shell has essentially no native-load concept beyond LD_PRELOAD-style env-var prefixing; this category is intentionally thin.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-SHELL-SEMANTIC-INCOMPLETE",
@@ -609,6 +659,7 @@
         limitations: "Layerfault reports the observed technical condition. Establishing intent or impact requires review beyond static analysis.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-PS-SEMANTIC-DYNAMIC-CODE",
@@ -621,6 +672,7 @@
         limitations: "The PowerShell tokenizer is bounded and not a full PowerShell grammar (see powershell_static::parser); confidence is capped lower than the equivalent Python finding.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-PS-SEMANTIC-DOWNLOAD-EXECUTE",
@@ -633,6 +685,7 @@
         limitations: "Layerfault reports the observed technical condition. Establishing intent or impact requires review beyond static analysis.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-PS-SEMANTIC-NETWORK",
@@ -645,6 +698,7 @@
         limitations: "The PowerShell tokenizer is bounded and not a full PowerShell grammar (see powershell_static::parser); confidence is capped lower than the equivalent Python finding.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-PS-SEMANTIC-PROCESS",
@@ -657,6 +711,7 @@
         limitations: "The PowerShell tokenizer is bounded and not a full PowerShell grammar (see powershell_static::parser); confidence is capped lower than the equivalent Python finding.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-PS-SEMANTIC-NATIVE-LOAD",
@@ -669,6 +724,7 @@
         limitations: "Add-Type is also classified as LF-PS-SEMANTIC-DYNAMIC-CODE from the same call site; both findings are expected to coexist by design.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-PS-SEMANTIC-CREDENTIAL-ACCESS",
@@ -681,6 +737,7 @@
         limitations: "The PowerShell tokenizer is bounded and not a full PowerShell grammar (see powershell_static::parser); confidence is capped lower than the equivalent Python finding.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-PS-SEMANTIC-PACKAGE-INSTALL",
@@ -693,6 +750,7 @@
         limitations: "The PowerShell tokenizer is bounded and not a full PowerShell grammar (see powershell_static::parser); confidence is capped lower than the equivalent Python finding.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-PS-SEMANTIC-INCOMPLETE",
@@ -705,6 +763,7 @@
         limitations: "Layerfault reports the observed technical condition. Establishing intent or impact requires review beyond static analysis.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-JS-SEMANTIC-PROCESS",
@@ -717,6 +776,7 @@
         limitations: "Layerfault reports the observed technical condition. Establishing intent or impact requires review beyond static analysis.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-JS-SEMANTIC-DYNAMIC-CODE",
@@ -729,6 +789,7 @@
         limitations: "Layerfault reports the observed technical condition. Establishing intent or impact requires review beyond static analysis.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-JS-SEMANTIC-FILESYSTEM-WRITE",
@@ -741,6 +802,7 @@
         limitations: "Layerfault reports the observed technical condition. Establishing intent or impact requires review beyond static analysis.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-JS-SEMANTIC-NETWORK",
@@ -753,6 +815,7 @@
         limitations: "axios matching is a best-effort `axios`/`axios.` prefix match on the resolved call target, not a full resolution of axios's actual export shape.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-JS-SEMANTIC-CREDENTIAL-ACCESS",
@@ -765,6 +828,7 @@
         limitations: "This is a heuristic on the accessed property name, not full taint tracking of where the value subsequently flows.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-JS-SEMANTIC-NATIVE-LOAD",
@@ -777,6 +841,7 @@
         limitations: "The native-binding-loader package list is a small, explicit allowlist; a native-loading package not on that list and not `.node`-suffixed will not be flagged.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-JS-SEMANTIC-PACKAGE-INSTALL",
@@ -789,6 +854,7 @@
         limitations: "Layerfault reports the observed technical condition. Establishing intent or impact requires review beyond static analysis.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-JS-SEMANTIC-INCOMPLETE",
@@ -801,6 +867,7 @@
         limitations: "Layerfault reports the observed technical condition. Establishing intent or impact requires review beyond static analysis.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-PY-NUMPY-ALLOW-PICKLE",
@@ -813,6 +880,7 @@
         limitations: "Static analysis detects the call site and keyword parameter without executing Python.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-SERIALIZATION-BIN",
@@ -825,6 +893,7 @@
         limitations: "The format's capability is the finding. This says nothing about the specific contents of this artifact beyond what other findings report.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-SERIALIZATION-UNSAFE",
@@ -837,4 +906,5 @@
         limitations: "The format's capability is the finding. This says nothing about the specific contents of this artifact beyond what other findings report.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },

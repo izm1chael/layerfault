@@ -66,6 +66,7 @@ pub fn lookup(rule: &str) -> Option<RuleExplanation> {
             limitations: "Pattern matching over text cannot distinguish an attack payload from documentation, test data or discussion of the same technique. Review the excerpt in context.",
             evidence_requirement: EvidenceRequirement::Required,
             requirement_reason: "",
+            severity: crate::scanner::Severity::Unspecified,
         });
     }
     None

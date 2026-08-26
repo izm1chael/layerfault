@@ -9,6 +9,7 @@
         limitations: "A parameter outside the configured threshold is a policy observation, not evidence of malicious intent.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-PARAM-NUM-CTX",
@@ -21,6 +22,7 @@
         limitations: "A parameter outside the configured threshold is a policy observation, not evidence of malicious intent.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-PARAM-NUM-PREDICT",
@@ -33,6 +35,7 @@
         limitations: "A parameter outside the configured threshold is a policy observation, not evidence of malicious intent.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-PARAM-REPEAT-PENALTY",
@@ -45,6 +48,7 @@
         limitations: "A parameter outside the configured threshold is a policy observation, not evidence of malicious intent.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-PARAM-SEED",
@@ -57,6 +61,7 @@
         limitations: "A parameter outside the configured threshold is a policy observation, not evidence of malicious intent.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-PARAM-STOP-DELIMITER",
@@ -69,6 +74,7 @@
         limitations: "A parameter outside the configured threshold is a policy observation, not evidence of malicious intent.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-PARAM-TEMPERATURE",
@@ -81,6 +87,7 @@
         limitations: "A parameter outside the configured threshold is a policy observation, not evidence of malicious intent.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-PARAM-TOP-K",
@@ -93,6 +100,7 @@
         limitations: "A parameter outside the configured threshold is a policy observation, not evidence of malicious intent.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-PARAM-TOP-P",
@@ -105,6 +113,7 @@
         limitations: "A parameter outside the configured threshold is a policy observation, not evidence of malicious intent.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-PYTORCH-MALFORMED",
@@ -117,6 +126,7 @@
         limitations: "Layerfault performs static ZIP validation without running PyTorch C++ or Python code.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-PYTORCH-CORRUPT-ENTRY",
@@ -129,6 +139,7 @@
         limitations: "Static analysis only.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-PYTORCH-ZIP-STRUCTURAL",
@@ -141,6 +152,7 @@
         limitations: "Static analysis without code execution.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-TORCHSCRIPT-CODE",
@@ -153,6 +165,7 @@
         limitations: "Static AST analysis of Python/TorchScript code.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-TORCHSCRIPT-STRUCTURAL",
@@ -165,6 +178,7 @@
         limitations: "Zero runtime execution.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-TORCHPACKAGE-EXEC",
@@ -177,6 +191,7 @@
         limitations: "Static AST analysis.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-TORCHPACKAGE-STRUCTURAL",
@@ -189,6 +204,7 @@
         limitations: "Zero runtime execution.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-OPENVINO-MALFORMED",
@@ -201,6 +217,7 @@
         limitations: "Static XML parsing.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-OPENVINO-XXE",
@@ -213,6 +230,7 @@
         limitations: "Static XML scanning.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-OPENVINO-SIDECAR-VALID",
@@ -225,6 +243,7 @@
         limitations: "Path and size verification.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-OPENVINO-SIDECAR-UNSAFE",
@@ -237,6 +256,7 @@
         limitations: "Safe IO inspection.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-OPENVINO-SIDECAR-MISSING",
@@ -249,6 +269,7 @@
         limitations: "Directory existence check.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-OPENVINO-STRUCTURAL",
@@ -261,6 +282,7 @@
         limitations: "Static XML parsing.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-TENSORRT-TRUNCATED",
@@ -273,6 +295,7 @@
         limitations: "Header length check.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-TENSORRT-INVALID-MAGIC",
@@ -285,6 +308,7 @@
         limitations: "Defensible header check.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-TENSORRT-OPAQUE",
@@ -297,6 +321,7 @@
         limitations: "Defensible checks only; graph logic opaque.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-COREML-PATH-TRAVERSAL",
@@ -309,6 +334,7 @@
         limitations: "Protobuf string field extraction.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-COREML-CUSTOM",
@@ -321,6 +347,7 @@
         limitations: "Static Protobuf parsing.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-COREML-STRUCTURAL",
@@ -333,6 +360,7 @@
         limitations: "Zero runtime execution.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-COREML-PACKAGE-VALID",
@@ -345,6 +373,7 @@
         limitations: "Package metadata inspection.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-COREML-PACKAGE-UNSAFE",
@@ -357,6 +386,7 @@
         limitations: "Safe IO inspection.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-COREML-PACKAGE-MISSING-MANIFEST",
@@ -369,6 +399,7 @@
         limitations: "Directory existence check.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-MLX-CUSTOM-CODE",
@@ -381,6 +412,7 @@
         limitations: "Static file discovery.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-MLX-PROFILE-VALID",
@@ -393,6 +425,7 @@
         limitations: "Package profile check.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-MLX-PROFILE-INCOMPLETE",
@@ -405,6 +438,7 @@
         limitations: "Package file check.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-TOKENIZER-EOS-BOS-CONFLICT",
@@ -417,6 +451,7 @@
         limitations: "This finding records bounded technical evidence and does not by itself establish malicious intent.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-TOKENIZER-HIDDEN-PROMPT",
@@ -429,6 +464,7 @@
         limitations: "This finding records bounded technical evidence and does not by itself establish malicious intent.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-TOKENIZER-ROLE-BOUNDARY-CONTROL",
@@ -441,6 +477,7 @@
         limitations: "This finding records bounded technical evidence and does not by itself establish malicious intent.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-TOKENIZER-ROLE-REMAP",
@@ -453,6 +490,7 @@
         limitations: "This finding records bounded technical evidence and does not by itself establish malicious intent.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-TOKENIZER-SECURITY-DELTA",
@@ -465,6 +503,7 @@
         limitations: "This finding records bounded technical evidence and does not by itself establish malicious intent.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-TOKENIZER-SPECIAL-TOKEN-CONFLICT",
@@ -477,6 +516,7 @@
         limitations: "This finding records bounded technical evidence and does not by itself establish malicious intent.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-TOKENIZER-SPECIAL-TOKEN-SPOOFABLE",
@@ -489,6 +529,7 @@
         limitations: "This is an exact literal-string match only; Unicode-confusable or homoglyph near-matches of the special token's string are not detected here.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-TOKENIZER-TOOL-TEMPLATE-RISK",
@@ -501,6 +542,7 @@
         limitations: "This finding records bounded technical evidence and does not by itself establish malicious intent.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },
     RuleMetadata {
         rule_id: "LF-TOKENIZER-UNICODE-CONTROL",
@@ -513,4 +555,5 @@
         limitations: "This finding records bounded technical evidence and does not by itself establish malicious intent.",
         evidence_requirement: EvidenceRequirement::Required,
         requirement_reason: "",
+        severity: crate::scanner::Severity::Unspecified,
     },

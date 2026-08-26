@@ -24,6 +24,10 @@ pub struct RuleMetadata {
     pub limitations: &'static str,
     pub evidence_requirement: EvidenceRequirement,
     pub requirement_reason: &'static str,
+    /// Evidence-based severity of this specific rule's indicator. Not derived
+    /// from the finding's status; `Unspecified` is legitimate where severity is
+    /// genuinely not established for this rule.
+    pub severity: crate::scanner::Severity,
 }
 
 pub type RuleExplanation = RuleMetadata;
