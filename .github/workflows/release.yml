@@ -111,7 +111,7 @@ jobs:
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
         with:
           subject-path: dist/layerfault-linux-${{ matrix.arch }}.*
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: linux-${{ matrix.arch }}
           path: dist/layerfault-linux-${{ matrix.arch }}*
@@ -140,7 +140,7 @@ jobs:
           subject-path: |
             dist/layerfault-macos-universal.tar.gz
             dist/layerfault-macos-universal.unsigned.pkg
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: macos-universal
           path: |
@@ -195,7 +195,7 @@ jobs:
       - uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
         with:
           subject-path: dist/layerfault-windows-${{ matrix.arch }}*
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: windows-${{ matrix.arch }}
           path: |
@@ -236,7 +236,7 @@ jobs:
           url="https://github.com/${GITHUB_REPOSITORY}/releases/download/v${RELEASE_VERSION}/layerfault-macos-universal.tar.gz"
           python3 scripts/release/generate-homebrew-formula.py --version "${RELEASE_VERSION}" --arm-url "$url" --arm-sha256 "$sha" --intel-url "$url" --intel-sha256 "$sha" --output release-assets/layerfault.rb
           sha256sum release-assets/layerfault.rb >> release-assets/SHA256SUMS
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: release-candidate-assets
           path: release-assets/
